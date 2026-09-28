@@ -1,0 +1,178 @@
+import { Link } from 'react-router-dom';
+import type { TaskSummary } from '@tm/shared';
+import { useTaskList, useTransitionTask } from './api';
+import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
+import { DueBadge, PriorityBadge, ProgressBar, StatusBadge } from '@/components/common/badges';
+import { todayIso } from '@/lib/utils';
+
+/**
+ * A member's working screen. Tasks are grouped by when they are due, because that
+ * is the order people actually work in, not by status or priority.
+ */
+
+interface Group {
+  key: string;
+  title: string;
+  tone?: 'danger' | 'warning';
+  match(task: TaskSummary, today: string, weekEnd: string): boolean;
+}
+
+const GROUPS: Group[] = [
+  {
+    key: 'review',
+    title: 'Waiting for your review',
+    match: () => false, // filled separately from the reviewer query
+  },
+  {
+    key: 'overdue',
+    title: 'Overdue',
+    tone: 'danger',
+    match: (task, today) => Boolean(task.dueDate && task.dueDate < today),
+  },
+  {
+    key: 'today',
+    title: 'Due today',
+    tone: 'warning',
+    match: (task, today) => task.dueDate === today,
+  },
+  {
+    key: 'week',
+    title: 'This week',
+    match: (task, today, weekEnd) =>
+      Boolean(task.dueDate && task.dueDate > today && task.dueDate <= weekEnd),
+  },
+  {
+    key: 'later',
+    title: 'Later',
+    match: (task, _today, weekEnd) => !task.dueDate || task.dueDate > weekEnd,
+  },
+];
+
+function endOfWeek(today: string): string {
+  const date = new Date(today + 'T00:00:00');
+  date.setDate(date.getDate() + (7 - ((date.getDay() + 6) % 7)));
+  return date.toISOString().slice(0, 10);
+}
+
+export function MyTasksPage() {
+  const today = todayIso();
+  const weekEnd = endOfWeek(today);
+
+  const mine = useTaskList({ assigneeId: 'me', open: true, sort: 'dueDate', order: 'asc', limit: 100 });
+  const toReview = useTaskList({
+    reviewerId: 'me',
+    status: ['READY_FOR_REVIEW', 'IN_REVIEW'],
+    limit: 50,
+  });
+
+  const tasks = mine.data?.pages.flatMap((page) => page.items) ?? [];
+  const reviews = toReview.data?.pages.flatMap((page) => page.items) ?? [];
+
+  if (mine.isLoading) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-3 px-4 py-6">
+        <Skeleton className="h-8 w-40" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  const assigned = new Set<string>();
+  const grouped = GROUPS.map((group) => {
+    if (group.key === 'review') return { group, tasks: reviews };
+    const matched = tasks.filter((task) => {
+      if (assigned.has(task.id)) return false;
+      if (!group.match(task, today, weekEnd)) return false;
+      assigned.add(task.id);
+      return true;
+    });
+    return { group, tasks: matched };
+  }).filter((entry) => entry.tasks.length > 0);
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6">
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight">My tasks</h1>
+        <p className="mt-1 text-sm text-ink-muted">
+          {tasks.length} open, {reviews.length} waiting on your review
+        </p>
+      </header>
+
+      {grouped.length === 0 ? (
+        <Card>
+          <EmptyState title="Nothing on your plate" description="No open tasks are assigned to you." />
+        </Card>
+      ) : (
+        grouped.map(({ group, tasks: groupTasks }) => (
+          <section key={group.key} aria-labelledby={'group-' + group.key}>
+            <h2
+              id={'group-' + group.key}
+              className={
+                'mb-2 text-sm font-semibold ' +
+                (group.tone === 'danger'
+                  ? 'text-danger'
+                  : group.tone === 'warning'
+                    ? 'text-warning'
+                    : '')
+              }
+            >
+              {group.title}
+              <span className="ml-2 font-normal text-ink-faint">{groupTasks.length}</span>
+            </h2>
+            <Card>
+              <ul className="divide-y divide-border-subtle">
+                {groupTasks.map((task) => (
+                  <TaskRow key={task.id} task={task} />
+                ))}
+              </ul>
+            </Card>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** Quick actions come from the workflow, so a member sees only what they may do. */
+function TaskRow({ task }: { task: TaskSummary }) {
+  const transition = useTransitionTask(task.id);
+
+  const quickAction =
+    task.status === 'ASSIGNED'
+      ? { label: 'Start', to: 'IN_PROGRESS' as const }
+      : task.status === 'IN_PROGRESS'
+        ? { label: 'Submit for review', to: 'READY_FOR_REVIEW' as const }
+        : task.status === 'CHANGES_REQUESTED'
+          ? { label: 'Resume', to: 'IN_PROGRESS' as const }
+          : null;
+
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+      <Link to={'/tasks/' + task.key} className="font-mono text-xs text-accent hover:underline">
+        {task.key}
+      </Link>
+
+      <Link to={'/tasks/' + task.key} className="min-w-40 flex-1 truncate text-sm hover:underline">
+        {task.title}
+      </Link>
+
+      <ProgressBar value={task.progress} className="w-24" showLabel />
+      <PriorityBadge priority={task.priority} />
+      <StatusBadge status={task.status} />
+      <DueBadge dueDate={task.dueDate} status={task.status} />
+
+      {quickAction ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={transition.isPending}
+          onClick={() => transition.mutate({ to: quickAction.to })}
+        >
+          {quickAction.label}
+        </Button>
+      ) : null}
+    </li>
+  );
+}

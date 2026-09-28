@@ -1,0 +1,59 @@
+{
+  "name": "task-manager",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @tm/api dev",
+    "dev:web": "pnpm --filter @tm/web dev",
+    "dev:worker": "pnpm --filter @tm/api dev:worker",
+    "build": "pnpm --filter @tm/shared build && pnpm --filter @tm/api build && pnpm --filter @tm/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @tm/web test:e2e",
+    "db:generate": "pnpm --filter @tm/api db:generate",
+    "db:migrate": "pnpm --filter @tm/api db:migrate",
+    "db:seed": "pnpm --filter @tm/api db:seed",
+    "db:reset": "pnpm --filter @tm/api db:reset",
+    "prepare": "husky || true"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,css,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^26.6.3",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.5.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "argon2",
+      "@parcel/watcher"
+    ]
+  }
+}

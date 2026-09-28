@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/**
+ * One palette, defined once. Every colour in the app comes from a token here,
+ * so dark mode is a single redefinition rather than a class on every element.
+ */
+@theme {
+  --color-canvas: oklch(98.4% 0.003 247);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-muted: oklch(96.8% 0.005 247);
+  --color-border-subtle: oklch(92.3% 0.006 247);
+  --color-ink: oklch(21% 0.02 260);
+  --color-ink-muted: oklch(52% 0.02 260);
+  --color-ink-faint: oklch(65% 0.015 260);
+
+  --color-accent: oklch(54% 0.19 262);
+  --color-accent-hover: oklch(48% 0.19 262);
+  --color-accent-soft: oklch(95% 0.03 262);
+
+  --color-danger: oklch(56% 0.21 25);
+  --color-danger-soft: oklch(95% 0.04 25);
+  --color-warning: oklch(70% 0.16 70);
+  --color-warning-soft: oklch(96% 0.05 80);
+  --color-success: oklch(60% 0.15 155);
+  --color-success-soft: oklch(95% 0.04 155);
+  --color-info: oklch(60% 0.12 230);
+  --color-info-soft: oklch(95% 0.03 230);
+  --color-neutral-soft: oklch(94% 0.005 247);
+
+  --radius-card: 0.75rem;
+}
+
+.dark {
+  --color-canvas: oklch(17% 0.015 260);
+  --color-surface: oklch(21% 0.018 260);
+  --color-surface-muted: oklch(25% 0.02 260);
+  --color-border-subtle: oklch(30% 0.02 260);
+  --color-ink: oklch(96% 0.005 247);
+  --color-ink-muted: oklch(72% 0.015 260);
+  --color-ink-faint: oklch(58% 0.015 260);
+
+  --color-accent: oklch(68% 0.16 262);
+  --color-accent-hover: oklch(74% 0.16 262);
+  --color-accent-soft: oklch(30% 0.06 262);
+
+  --color-danger: oklch(70% 0.17 25);
+  --color-danger-soft: oklch(31% 0.07 25);
+  --color-warning: oklch(78% 0.14 75);
+  --color-warning-soft: oklch(32% 0.06 75);
+  --color-success: oklch(72% 0.14 155);
+  --color-success-soft: oklch(30% 0.06 155);
+  --color-info: oklch(72% 0.11 230);
+  --color-info-soft: oklch(30% 0.05 230);
+  --color-neutral-soft: oklch(27% 0.012 260);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border-subtle);
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A visible focus ring everywhere, because this app is used with a keyboard all day. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-muted) 25%,
+      var(--color-border-subtle) 50%,
+      var(--color-surface-muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

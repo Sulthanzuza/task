@@ -1,32 +1,42 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+/** The monorepo root, where the single .env lives. */
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+export default defineConfig(({ mode }) => {
+  // An empty prefix loads every key, not just VITE_*, so the dev server can read
+  // WEB_PORT and API_URL from the same .env the API uses. Real environment
+  // variables still win, which is what CI and the e2e runner rely on.
+  const env = { ...loadEnv(mode, repoRoot, ''), ...process.env };
+
+  const port = Number(env.WEB_PORT ?? 5174);
+  const apiUrl = env.API_URL ?? 'http://localhost:4000';
+
+  return {
+    plugins: [react(), tailwindcss()],
+
+    resolve: {
+      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
-  },
-  server: {
-    port: 5173,
-    // The API sets an httpOnly cookie scoped to /api/v1/auth, so the browser must see
-    // the same origin in development. Proxying avoids third-party cookie rules entirely.
-    proxy: {
-      '/api': {
-        target: process.env.VITE_API_URL ?? 'http://localhost:4000',
-        changeOrigin: true,
-      },
-      '/socket.io': {
-        target: process.env.VITE_API_URL ?? 'http://localhost:4000',
-        ws: true,
+
+    server: {
+      port,
+      // Fail loudly rather than silently moving to another port: a moved port
+      // breaks the cookie origin and sends people to someone else's dev server.
+      strictPort: true,
+      // Dev is same-origin, exactly like production behind Nginx. The browser only
+      // ever talks to this port, so there is no CORS and no third-party cookie.
+      proxy: {
+        '/api': { target: apiUrl, changeOrigin: true },
+        '/socket.io': { target: apiUrl, changeOrigin: true, ws: true },
       },
     },
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-  },
+
+    preview: { port, strictPort: true },
+
+    build: { outDir: 'dist', sourcemap: true },
+  };
 });

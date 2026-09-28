@@ -3,7 +3,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
-import { env, isProduction, isTest } from './config/env';
+import { allowedOrigins, isProduction, isTest } from './config/env';
 import { logger } from './lib/logger';
 import { pingDatabase } from './db/client';
 import { errorHandler, notFoundHandler } from './middleware/error';
@@ -33,10 +33,26 @@ export function createApp(): Express {
 
   app.use(
     cors({
-      origin: env.WEB_ORIGIN,
+      /**
+       * Reflect the origin only when it is on the allow list. A credentialed
+       * request cannot use a wildcard, so an unknown origin gets no CORS headers
+       * at all and the browser blocks it.
+       *
+       * A missing Origin header (curl, server-to-server, same-origin navigation)
+       * is not a cross-origin request, so it is allowed through untouched.
+       */
+      origin(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
       credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
       exposedHeaders: ['RateLimit', 'RateLimit-Policy'],
+      maxAge: 600,
     }),
   );
 

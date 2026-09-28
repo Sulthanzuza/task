@@ -21,17 +21,46 @@ pnpm db:seed
 pnpm dev
 ```
 
-Then open the web app (Vite prints the port; **5173** unless something else has it).
+Then open **http://localhost:5174**.
 
-| Service        | Address                        |
-| -------------- | ------------------------------ |
-| Web            | http://localhost:5173          |
-| API            | http://localhost:4000/api/v1   |
-| Health check   | http://localhost:4000/api/v1/health |
-| Mailpit inbox  | http://localhost:8025          |
-| Postgres       | localhost:**5433**             |
+| Service        | Address                             |
+| -------------- | ----------------------------------- |
+| Web            | http://localhost:5174               |
+| API (direct)   | http://localhost:4000/api/v1        |
+| API (proxied)  | http://localhost:5174/api/v1        |
+| Health check   | http://localhost:5174/api/v1/health |
+| Mailpit inbox  | http://localhost:8025               |
+| Postgres       | localhost:**5433**                  |
 
 Postgres is on 5433 rather than 5432 so it does not clash with a local install.
+
+### Ports and origins
+
+Development is **same-origin**, like production. Vite proxies `/api` and `/socket.io`
+through to the API, so the browser only ever talks to port 5174. The web API client uses the
+relative base `/api/v1` and never hardcodes a host. That removes CORS and third-party cookie
+problems in development and matches production, where Nginx serves both from one origin.
+
+The web port is pinned: `strictPort` is on, so a clash **fails loudly** rather than moving to
+another port. A moved port would change the cookie origin and silently break the session.
+Change it with `WEB_PORT` in `.env` if 5174 is taken.
+
+There is one `.env`, at the repository root; both apps read it.
+
+| Variable       | What it does |
+| -------------- | ------------ |
+| `WEB_PORT`     | Vite dev server port (default 5174) |
+| `API_URL`      | Where the dev proxy forwards `/api` and `/socket.io` |
+| `WEB_ORIGIN`   | Canonical web address, used for links in emails |
+| `CORS_ORIGINS` | Extra credentialed origins, comma separated; empty for a normal setup |
+
+`WEB_ORIGIN` is always an allowed origin, so `CORS_ORIGINS` only matters for a deliberately
+cross-origin deployment. A wildcard is rejected at start-up: the browser will not accept one
+on a credentialed request anyway.
+
+The refresh cookie is `httpOnly`, `sameSite=lax`, scoped to `/api/v1/auth`, and `Secure` only
+when `NODE_ENV=production` — on plain `http://localhost` a Secure cookie would never be
+stored and every refresh would fail.
 
 ### Seeded sign-ins
 

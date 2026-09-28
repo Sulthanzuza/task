@@ -22,9 +22,13 @@ const COOKIE_PATH = '/api/v1/auth';
 
 function cookieOptions(): CookieOptions {
   return {
+    // Never readable from JavaScript, so a cross-site script cannot steal the session.
     httpOnly: true,
+    // Secure in production only. Development runs on plain http://localhost, where a
+    // Secure cookie would simply never be stored and every refresh would fail.
     secure: isProduction,
     sameSite: 'lax',
+    // Scoped to the auth routes, so it is not sent with every ordinary API call.
     path: COOKIE_PATH,
     maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86_400_000,
     ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),

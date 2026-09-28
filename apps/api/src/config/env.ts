@@ -17,7 +17,28 @@ const envSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
 
-  WEB_ORIGIN: z.string().url().default('http://localhost:5173'),
+  /** The canonical address of the web app, used to build links in emails. */
+  WEB_ORIGIN: z.string().url().default('http://localhost:5174'),
+
+  /**
+   * Origins allowed to call the API with credentials, as a comma-separated list.
+   * Never "*": the browser refuses a wildcard on a credentialed request anyway,
+   * and an explicit list is the only safe answer when cookies are involved.
+   *
+   * In development the web app is same-origin behind the Vite proxy, so this
+   * matters only for a deliberately cross-origin setup.
+   */
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim().replace(/\/$/, ''))
+        .filter((origin) => origin.length > 0),
+    )
+    .refine((origins) => !origins.includes('*'), 'CORS_ORIGINS must not contain "*"'),
+
   COOKIE_DOMAIN: z.string().optional(),
 
   SMTP_HOST: z.string().default('localhost'),
@@ -62,3 +83,11 @@ export const env: Env = load();
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * The origins CORS will accept. WEB_ORIGIN is always allowed, so a correct
+ * single-origin deployment needs no extra configuration.
+ */
+export const allowedOrigins: string[] = [
+  ...new Set([env.WEB_ORIGIN.replace(/\/$/, ''), ...env.CORS_ORIGINS]),
+];

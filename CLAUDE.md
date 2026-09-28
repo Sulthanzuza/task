@@ -13,6 +13,7 @@ Members update their own tasks. The system shows facts and evidence; it never co
 - Web: React, Vite, TypeScript strict, React Router, TanStack Query, TanStack Table,
   Tailwind, shadcn/ui, React Hook Form, dnd-kit, Recharts
 - Tests: Vitest, Supertest, Testcontainers (real Postgres), Playwright
+- Tooling: tsx (runs the API and scripts in dev), tsup (bundles the API for production)
 
 ## Rules
 1. Validate every body, param and query with Zod schemas from packages/shared. Web forms use the same schemas.

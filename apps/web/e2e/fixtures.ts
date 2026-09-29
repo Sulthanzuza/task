@@ -95,6 +95,16 @@ export async function signIn(page: Page, user: { email: string; password: string
   await page.waitForURL((url) => !url.pathname.startsWith('/login'));
 }
 
+/** The signed-in user's own id, for tests that need to name a person. */
+export async function userIdOf(
+  api: APIRequestContext,
+  user: { email: string; password: string },
+): Promise<string> {
+  const client = await apiAs(api, user);
+  const me = await client.get<{ id: string }>('/auth/me');
+  return me.id;
+}
+
 /**
  * Calls the API directly with the same credentials, so a test can compare what the
  * screen shows against what the server actually said.

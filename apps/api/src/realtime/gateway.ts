@@ -283,6 +283,14 @@ function registerEventForwarding(): void {
   });
 }
 
+/**
+ * Notifications go to the user's own room, which every tab of theirs joins.
+ * That is what makes a bell clear everywhere when it is read in one place.
+ */
+export function emitToUser(userId: string, event: string, payload: unknown): void {
+  io?.to(rooms.user(userId)).emit(event, payload);
+}
+
 export function getRealtimeServer(): SocketServer | null {
   return io;
 }

@@ -15,6 +15,7 @@ import { labelsRouter, projectsRouter } from './modules/projects/routes';
 import { projectTasksRouter, tasksRouter } from './modules/tasks/routes';
 import { commentsRouter } from './modules/comments/routes';
 import { dashboardRouter, membersRouter } from './modules/dashboard/routes';
+import { notificationsRouter } from './modules/notifications/routes';
 
 export function createApp(): Express {
   const app = express();
@@ -95,6 +96,7 @@ export function createApp(): Express {
   v1.use('/labels', labelsRouter);
   v1.use('/tasks', tasksRouter);
   v1.use('/comments', commentsRouter);
+  v1.use('/notifications', notificationsRouter);
   v1.use('/dashboard', dashboardRouter);
   v1.use('/members', membersRouter);
 

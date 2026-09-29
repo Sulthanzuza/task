@@ -62,8 +62,10 @@ test('another team’s task is refused and leaks nothing', async ({ page, api, p
 
   await page.goto('/tasks/' + (secret as TaskSummary).key);
 
+  // A task in another team is indistinguishable from one that never existed,
+  // which is the point: the refusal says nothing about what is behind it.
   await expect(
-    page.getByText(/do not have access|not found/i).first(),
+    page.getByText(/no longer available|do not have access|not found/i).first(),
     'expected a refusal',
   ).toBeVisible();
 

@@ -13,7 +13,9 @@ export const CLIENT_MUTATION_ID_HEADER = 'x-client-mutation-id';
 export const SOCKET_EVENTS = {
   taskChanged: 'task:changed',
   taskDeleted: 'task:deleted',
-  notification: 'notification:new',
+  notificationNew: 'notification:new',
+  /** Sent to every tab of one user, so a read in one clears the bell in all. */
+  notificationRead: 'notification:read',
   /** The server tells a client its session is gone before closing the socket. */
   sessionRevoked: 'session:revoked',
 } as const;
@@ -77,3 +79,21 @@ export function isAuthSocketError(message: string | undefined): boolean {
     message.includes(SOCKET_ERROR_CODES.forbidden)
   );
 }
+
+export const notificationEventSchema = z.object({
+  notificationId: uuidSchema,
+  type: z.string(),
+  title: z.string(),
+  body: z.string().nullable(),
+  taskKey: z.string().nullable(),
+  createdAt: z.string(),
+  unread: z.number().int(),
+});
+export type NotificationEvent = z.infer<typeof notificationEventSchema>;
+
+export const notificationReadEventSchema = z.object({
+  /** Null means every notification was marked read at once. */
+  notificationId: uuidSchema.nullable(),
+  unread: z.number().int(),
+});
+export type NotificationReadEvent = z.infer<typeof notificationReadEventSchema>;

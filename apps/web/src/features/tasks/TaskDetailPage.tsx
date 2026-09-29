@@ -50,16 +50,32 @@ export function TaskDetailPage() {
 
   if (task.isError) {
     const error = task.error as ApiError;
+    const gone = error.status === 404 || error.status === 403;
+
+    /*
+     * A notification or an old link can outlive the task it points at, or the
+     * person's access to it. That is an ordinary thing to happen, not a fault,
+     * so it reads as an explanation rather than an error page.
+     */
     return (
       <div className="mx-auto max-w-2xl px-4 py-16">
         <Card>
           <EmptyState
-            title={error.status === 403 ? 'You do not have access to this task' : 'Task not found'}
-            description={error.message}
+            title={gone ? 'This task is no longer available' : 'Could not open this task'}
+            description={
+              gone
+                ? 'It may have been deleted, or moved to a team you are not part of. Nothing is wrong with your account.'
+                : error.message
+            }
             action={
-              <Button variant="outline" asChild>
-                <Link to="/tasks">Back to the task list</Link>
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" asChild>
+                  <Link to="/tasks">Back to the task list</Link>
+                </Button>
+                <Button variant="ghost" asChild>
+                  <Link to="/notifications">Notifications</Link>
+                </Button>
+              </div>
             }
           />
         </Card>

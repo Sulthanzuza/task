@@ -162,6 +162,14 @@ echo. Events carry the task's `updated_at`, so one arriving late cannot undo a n
 a reconnect the client invalidates once rather than replaying what it missed. Logout, session
 revocation, reuse detection and deactivation all close that user's sockets immediately.
 
+**Notifications cannot be lost or leaked.** The in-app row and the email job are written
+inside the same transaction as the change that caused them, so a rollback takes them with it
+and a crash between commit and emit cannot drop one. The realtime push that follows is best
+effort. Before anyone is told, `can(recipient, 'task.view', task)` runs: mentioning someone who
+cannot see a task sends nothing and leaks no title. Bursts collapse through pg-boss's
+`sendDebounced`, keyed on person and task. Quiet hours use each person's own
+`users.timezone`, not the org's, so a held email arrives at 08:00 where *they* are.
+
 **Task numbers cannot collide.** A new task takes its number from
 `UPDATE projects SET task_counter = task_counter + 1 ... RETURNING` inside the creating
 transaction, so simultaneous creates queue instead of clashing. There is a test for ten at once.

@@ -101,6 +101,15 @@ export class EventBuffer {
     this.queued.push(() => events.emit(name, payload));
   }
 
+  /** Queue arbitrary work to run once the transaction has committed. */
+  after(run: () => void | Promise<void>): void {
+    this.queued.push(() => {
+      void Promise.resolve(run()).catch((error: unknown) => {
+        logger.error({ err: error }, 'Post-commit work failed.');
+      });
+    });
+  }
+
   flush(): void {
     for (const emit of this.queued) emit();
     this.queued.length = 0;

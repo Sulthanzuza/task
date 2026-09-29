@@ -10,10 +10,14 @@ const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
 export const E2E_API_PORT = Number(process.env.E2E_API_PORT ?? 4100);
 export const E2E_WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5199);
+export const E2E_WORKER_PORT = Number(process.env.E2E_WORKER_PORT ?? 4101);
 export const E2E_BASE_URL = 'http://localhost:' + E2E_WEB_PORT;
 export const E2E_API_URL = 'http://localhost:' + E2E_API_PORT;
 
 /** A separate database, dropped and rebuilt before every run. */
+/** Mailpit, started by docker compose, is where e2e email lands. */
+export const E2E_MAILPIT_URL = process.env.E2E_MAILPIT_URL ?? 'http://localhost:8025';
+
 export const E2E_DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
   'postgres://taskmanager:taskmanager@localhost:5433/taskmanager_e2e';
@@ -39,6 +43,13 @@ const apiEnv = {
   REFRESH_GRACE_SECONDS: '30',
   SEED_TIMEZONE: 'Asia/Kolkata',
   SEED_PASSWORD: 'Password123!',
+  // The suite checks that email really arrives, so the queue runs and the
+  // mailer points at mailpit. A one second debounce keeps the wait short.
+  JOB_QUEUE_ENABLED: 'true',
+  EMAIL_DEBOUNCE_SECONDS: '1',
+  SMTP_HOST: process.env.E2E_SMTP_HOST ?? 'localhost',
+  SMTP_PORT: process.env.E2E_SMTP_PORT ?? '1025',
+  MAIL_FROM: 'Task Manager <no-reply@taskmanager.local>',
 };
 
 export default defineConfig({
@@ -78,6 +89,19 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: apiEnv,
+    },
+    {
+      // The worker is what actually sends email; the API only enqueues.
+      command: 'pnpm --filter @tm/api dev:worker',
+      cwd: repoRoot,
+      // Its own health endpoint: waiting on the API's would let Playwright think
+      // the worker had started when only the API was up.
+      url: 'http://localhost:' + E2E_WORKER_PORT + '/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...apiEnv, WORKER_HEALTH_PORT: String(E2E_WORKER_PORT) },
     },
     {
       // Build and serve, rather than run the dev server: the suite tests the real

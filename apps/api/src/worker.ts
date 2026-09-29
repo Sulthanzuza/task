@@ -1,6 +1,11 @@
+import { createServer, type Server } from 'node:http';
+import { env } from './config/env';
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
 import { purgeExpired } from './modules/auth/service';
+import { purgeOldNotifications } from './modules/notifications/service';
+import { QUEUES, getQueue, stopQueue } from './jobs/queue';
+import { sendNotificationEmail, type NotificationEmailJob } from './jobs/notificationEmail';
 
 /**
  * The background worker. It runs the same code as the API, started from a different
@@ -18,10 +23,69 @@ async function housekeeping(): Promise<void> {
   if (removed.sessions > 0 || removed.resets > 0) {
     logger.info(removed, 'Purged expired sessions and reset tokens.');
   }
+  await purgeOldNotifications();
+}
+
+/**
+ * Email is sent here, never inside a request.
+ *
+ * The job was enqueued in the same transaction as the change, so by the time it
+ * runs the change is certainly committed. pg-boss debounces on the person and
+ * the task, so a burst of edits becomes one email rather than a stream.
+ */
+async function startJobWorkers(): Promise<void> {
+  const boss = await getQueue();
+
+  await boss.work<NotificationEmailJob>(
+    QUEUES.notificationEmail,
+    { batchSize: 10 },
+    async (jobs) => {
+      for (const job of jobs) {
+        try {
+          await sendNotificationEmail(job.data);
+        } catch (error) {
+          // Throwing would fail the whole batch; pg-boss retries this one job.
+          logger.error(
+            { err: error, notificationId: job.data.notificationId },
+            'Could not send a notification email.',
+          );
+          throw error;
+        }
+      }
+    },
+  );
+
+  logger.info({ queue: QUEUES.notificationEmail }, 'Job worker listening.');
+}
+
+/**
+ * A worker has no HTTP interface of its own, but something has to be able to ask
+ * whether it is running: a container health check, or a test runner waiting for
+ * it before it starts.
+ */
+function startHealthEndpoint(): Server | null {
+  if (!env.WORKER_HEALTH_PORT) return null;
+
+  const server = createServer((req, res) => {
+    if (req.url === '/health' || req.url === '/api/v1/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ worker: 'ok' }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+
+  server.listen(env.WORKER_HEALTH_PORT, () => {
+    logger.info({ port: env.WORKER_HEALTH_PORT }, 'Worker health endpoint listening.');
+  });
+
+  return server;
 }
 
 async function main(): Promise<void> {
   logger.info('Worker started.');
+  const health = startHealthEndpoint();
+  await startJobWorkers();
   await housekeeping();
   const timer = setInterval(() => {
     housekeeping().catch((error: unknown) => {
@@ -32,6 +96,8 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Worker shutting down.');
     clearInterval(timer);
+    health?.close();
+    await stopQueue();
     await closeDatabase();
     process.exit(0);
   };

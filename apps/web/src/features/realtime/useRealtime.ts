@@ -1,9 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { TaskChangedEvent, TaskDeletedEvent, TaskDetail } from '@tm/shared';
+import type {
+  NotificationEvent,
+  NotificationReadEvent,
+  TaskChangedEvent,
+  TaskDeletedEvent,
+  TaskDetail,
+} from '@tm/shared';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
 import { isOwnMutation } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
+import { notificationKeys } from '@/features/notifications/api';
 import { useAuth } from '@/features/auth/AuthContext';
 
 /**
@@ -70,11 +77,25 @@ export function useRealtime(): void {
         void client.invalidateQueries({ queryKey: queryKeys.dashboard.all });
       },
 
+      onNotification(event: NotificationEvent) {
+        // The count comes from the event, so the bell moves without a refetch.
+        client.setQueryData(notificationKeys.unread, { unread: event.unread });
+        void client.invalidateQueries({ queryKey: notificationKeys.all });
+      },
+
+      onNotificationRead(event: NotificationReadEvent) {
+        // Sent to every tab of this person's, which is what keeps them in step.
+        client.setQueryData(notificationKeys.unread, { unread: event.unread });
+        void client.invalidateQueries({ queryKey: notificationKeys.all });
+      },
+
       onReconnect() {
         // Whatever happened while we were away, one refetch settles it.
         seen.clear();
         void client.invalidateQueries({ queryKey: queryKeys.tasks.all });
         void client.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        // One call to catch up the bell, rather than replaying what was missed.
+        void client.invalidateQueries({ queryKey: notificationKeys.unread });
       },
 
       onSessionRevoked() {

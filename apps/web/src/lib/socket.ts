@@ -2,6 +2,8 @@ import { io, type Socket } from 'socket.io-client';
 import {
   SOCKET_EVENTS,
   isAuthSocketError,
+  type NotificationEvent,
+  type NotificationReadEvent,
   type TaskChangedEvent,
   type TaskDeletedEvent,
 } from '@tm/shared';
@@ -24,6 +26,9 @@ export interface SocketHandlers {
   onTaskDeleted(event: TaskDeletedEvent): void;
   /** Fired after a reconnect, so the caller can refetch what it missed. */
   onReconnect(): void;
+  onNotification(event: NotificationEvent): void;
+  /** Another tab of this person's read something; the bell must agree. */
+  onNotificationRead(event: NotificationReadEvent): void;
   /** The server closed us out: the session is gone. */
   onSessionRevoked(): void;
 }
@@ -66,6 +71,8 @@ export function connectSocket(handlers: SocketHandlers): Socket {
 
   socket.on(SOCKET_EVENTS.taskChanged, handlers.onTaskChanged);
   socket.on(SOCKET_EVENTS.taskDeleted, handlers.onTaskDeleted);
+  socket.on(SOCKET_EVENTS.notificationNew, handlers.onNotification);
+  socket.on(SOCKET_EVENTS.notificationRead, handlers.onNotificationRead);
   socket.on(SOCKET_EVENTS.sessionRevoked, handlers.onSessionRevoked);
 
   return socket;

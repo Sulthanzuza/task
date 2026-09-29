@@ -21,7 +21,7 @@ import {
   transitionEffects,
 } from '@tm/shared';
 import { sql } from 'drizzle-orm';
-import { db, withTransaction, type Db } from '../../db/client';
+import { db, withTransaction, type Db, type QueueConnection } from '../../db/client';
 import { taskActivity, taskComments, taskDependencies, tasks } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
 import {
@@ -36,8 +36,33 @@ import { aliased, buildPredicateContext, isActive, isOpen } from './predicates';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
+import { emitCreatedNotifications } from '../notifications/service';
+import {
+  notifyAssigned,
+  notifyDependencyCompleted,
+  notifyTransitioned,
+  type TaskContext,
+} from '../notifications/fromTaskEvents';
 import * as repo from './repo';
 import type { TaskRow } from './repo';
+
+/** What the notification rules need to describe and authorise a task. */
+function notificationContext(
+  tx: Db,
+  queue: QueueConnection,
+  row: TaskRow,
+  resource: TaskResource,
+  actor: Actor,
+  now: Date,
+): TaskContext {
+  return {
+    tx,
+    queue,
+    task: { ...resource, id: row.id, key: taskKeyOf(row), title: row.title },
+    actorId: actor.id,
+    now,
+  };
+}
 
 /**
  * The fields every task event carries. Built in one place so no emit site can
@@ -457,7 +482,7 @@ export async function transitionTask(
 ): Promise<TaskDetail> {
   const buffer = new EventBuffer();
 
-  await withTransaction(async (tx) => {
+  await withTransaction(async (tx, queue) => {
     const row = await repo.lockTask(tx, taskId);
     const resource = await toResource(tx, row);
 
@@ -536,6 +561,18 @@ export async function transitionTask(
 
     await repo.writeActivity(tx, activity, now);
 
+    // Written with the change, so a crash after commit cannot lose them.
+    const notified = await notifyTransitioned(
+      notificationContext(tx, queue, row, resource, actor, now),
+      {
+        from: row.status,
+        to: input.to,
+        assigneeId: row.assigneeId,
+        reviewerId: row.reviewerId,
+      },
+    );
+    buffer.after(() => emitCreatedNotifications(notified));
+
     buffer.add('task.transitioned', {
       ...eventBase(row, actor, now),
       from: row.status,
@@ -551,6 +588,24 @@ export async function transitionTask(
         .select({ taskId: taskDependencies.taskId })
         .from(taskDependencies)
         .where(eq(taskDependencies.dependsOnTaskId, taskId));
+
+      for (const dependent of dependents) {
+        const dependentRow = await repo.findTaskById(tx, dependent.taskId);
+        if (!dependentRow) continue;
+        const notifiedDependent = await notifyDependencyCompleted(
+          notificationContext(
+            tx,
+            queue,
+            dependentRow,
+            await toResource(tx, dependentRow),
+            actor,
+            now,
+          ),
+          dependentRow.assigneeId,
+          taskKeyOf(row),
+        );
+        buffer.after(() => emitCreatedNotifications(notifiedDependent));
+      }
 
       if (dependents.length > 0) {
         buffer.add('dependency.completed', {
@@ -577,7 +632,7 @@ export async function assignTask(
 ): Promise<TaskDetail> {
   const buffer = new EventBuffer();
 
-  await withTransaction(async (tx) => {
+  await withTransaction(async (tx, queue) => {
     const row = await repo.lockTask(tx, taskId);
     const resource = await toResource(tx, row);
     authorize(actor, 'task.assign', resource);
@@ -656,6 +711,14 @@ export async function assignTask(
     }
 
     await repo.writeActivity(tx, activity, now);
+
+    if (previousAssigneeId !== input.assigneeId) {
+      const notified = await notifyAssigned(
+        notificationContext(tx, queue, row, resource, actor, now),
+        input.assigneeId,
+      );
+      buffer.after(() => emitCreatedNotifications(notified));
+    }
 
     buffer.add('task.assigned', {
       ...eventBase(row, actor, now),

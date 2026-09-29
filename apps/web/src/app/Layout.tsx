@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
-  Bell,
   CalendarDays,
   ChartNoAxesColumn,
   CircleUser,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useRealtime } from '@/features/realtime/useRealtime';
+import { NotificationBell } from '@/features/notifications/NotificationBell';
 import { Button } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
 import { cn } from '@/lib/utils';
@@ -186,9 +186,7 @@ export function Layout() {
           </div>
 
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="icon" aria-label="Notifications" title="Notifications">
-              <Bell size={17} />
-            </Button>
+            <NotificationBell />
             <Button
               variant="ghost"
               size="icon"

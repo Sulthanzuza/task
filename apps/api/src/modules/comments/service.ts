@@ -10,6 +10,8 @@ import { toUserSummary } from '../tasks/mappers';
 import { loadTaskOr404, toResource } from '../tasks/service';
 import * as taskRepo from '../tasks/repo';
 import * as repo from './repo';
+import { notifyCommented } from '../notifications/fromTaskEvents';
+import { emitCreatedNotifications } from '../notifications/service';
 
 export async function addComment(
   actor: Actor,
@@ -19,7 +21,7 @@ export async function addComment(
 ): Promise<CommentEntry> {
   const buffer = new EventBuffer();
 
-  const commentId = await withTransaction(async (tx) => {
+  const commentId = await withTransaction(async (tx, queue) => {
     const row = await loadTaskOr404(tx, taskIdOrKey);
     const resource = await toResource(tx, row);
     authorize(actor, 'task.comment', resource);
@@ -40,6 +42,25 @@ export async function addComment(
       [{ taskId: row.id, actorId: actor.id, action: 'comment.created', newValue: { commentId: id } }],
       now,
     );
+
+    // Mentions and watchers are told here, on the same transaction, and anyone
+    // who cannot see the task is filtered out before a title reaches them.
+    const notified = await notifyCommented(
+      {
+        tx,
+        queue,
+        task: {
+          ...resource,
+          id: row.id,
+          key: row.projectKey + '-' + row.number,
+          title: row.title,
+        },
+        actorId: actor.id,
+        now,
+      },
+      { body, mentionedUserIds },
+    );
+    buffer.after(() => emitCreatedNotifications(notified));
 
     buffer.add('comment.created', {
       taskId: row.id,

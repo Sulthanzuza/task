@@ -11,6 +11,8 @@ import { MyTasksPage } from '@/features/tasks/MyTasksPage';
 import { MemberPage } from '@/features/team/MemberPage';
 import { BoardPage } from '@/features/board/BoardPage';
 import { CalendarPage } from '@/features/calendar/CalendarPage';
+import { NotificationsPage } from '@/features/notifications/NotificationsPage';
+import { NotificationPreferencesPage } from '@/features/notifications/PreferencesPage';
 import { TeamPage } from '@/features/team/TeamPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 
@@ -120,6 +122,8 @@ export function AppRoutes() {
           <Route path="/my-tasks" element={<MyTasksPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:key" element={<TaskDetailPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/team/:userId" element={<MemberPage />} />
 

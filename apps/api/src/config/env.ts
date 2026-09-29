@@ -8,6 +8,11 @@ loadEnvFiles();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  /**
+   * When set, the worker serves GET /health on this port. Container health
+   * checks and the e2e runner both need a way to tell that it is alive.
+   */
+  WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().url('DATABASE_URL must be a postgres connection string'),
@@ -29,6 +34,16 @@ const envSchema = z.object({
    * rather than theft, provided the chain has not moved on. Keep it short.
    */
   REFRESH_GRACE_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
+
+  /**
+   * Whether this process enqueues background jobs. Off by default under test so
+   * the suite does not need a queue, but a test that is specifically about
+   * queueing turns it on.
+   */
+  JOB_QUEUE_ENABLED: z.enum(['true', 'false']).optional(),
+
+  /** How long a burst of changes to one task collapses into one email. */
+  EMAIL_DEBOUNCE_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
 
   /** The canonical address of the web app, used to build links in emails. */
   WEB_ORIGIN: z.string().url().default('http://localhost:5174'),
@@ -105,6 +120,9 @@ export const env: Env = load();
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+export const jobQueueEnabled =
+  env.JOB_QUEUE_ENABLED !== undefined ? env.JOB_QUEUE_ENABLED === 'true' : !isTest;
 
 /**
  * The origins CORS will accept. WEB_ORIGIN is always allowed, so a correct

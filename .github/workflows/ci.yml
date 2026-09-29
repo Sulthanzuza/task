@@ -54,11 +54,26 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # The suite checks that a notification email really arrives, so it needs
+      # somewhere for the worker to send it.
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+        env:
+          MP_SMTP_AUTH_ACCEPT_ANY: 1
+          MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
     env:
       E2E_DATABASE_URL: postgres://taskmanager:taskmanager@localhost:5433/taskmanager_e2e
       # The suite sets its own ports; these only have to be free on the runner.
       E2E_API_PORT: 4100
       E2E_WEB_PORT: 5199
+      E2E_WORKER_PORT: 4101
+      E2E_MAILPIT_URL: http://localhost:8025
+      E2E_SMTP_HOST: localhost
+      E2E_SMTP_PORT: '1025'
 
     steps:
       - uses: actions/checkout@v4

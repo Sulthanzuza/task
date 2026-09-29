@@ -1,18 +1,24 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../db/client';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { db, withTransaction } from '../db/client';
 import { notifications, users } from '../db/schema';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { emailLayout, sendMail } from '../modules/notifications/mailer';
+
 export type { NotificationEmailJob } from './queue';
 import type { NotificationEmailJob } from './queue';
 
 /**
- * Turns a stored notification into an email.
+ * Sends one email covering everything that has happened to one task for one
+ * person since the last email.
  *
- * The email says what happened and links to the task; it never carries the
- * description or a whole comment. Anyone can forward an email, and the task
- * itself is behind an access check that the inbox is not.
+ * The job names a person and a task, not a notification, so whatever arrived
+ * during the collapse window is included. Marking the rows as emailed happens
+ * in the same transaction as reading them, so two workers cannot both send.
+ *
+ * The email says what changed and links to the task; it never carries the
+ * description or a whole comment. An inbox is not behind the access check that
+ * the task itself is.
  */
 
 function escapeHtml(value: string): string {
@@ -23,67 +29,113 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+interface PendingRow {
+  id: string;
+  title: string;
+  body: string | null;
+  data: unknown;
+  createdAt: Date;
+}
+
 export async function sendNotificationEmail(job: NotificationEmailJob): Promise<void> {
-  const [notification] = await db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, job.notificationId))
-    .limit(1);
-
-  if (!notification) {
-    logger.debug({ id: job.notificationId }, 'Notification is gone; nothing to email.');
-    return;
-  }
-
-  // Already seen in the app: sending now would only be noise.
-  if (notification.readAt) {
-    logger.debug({ id: job.notificationId }, 'Notification already read; skipping the email.');
-    return;
-  }
-
   const [recipient] = await db
     .select({ email: users.email, name: users.name, isActive: users.isActive })
     .from(users)
-    .where(eq(users.id, notification.userId))
+    .where(eq(users.id, job.userId))
     .limit(1);
 
   if (!recipient || !recipient.isActive) return;
 
-  const data = (notification.data ?? {}) as {
-    taskKey?: string;
-    actorName?: string;
-    summary?: string;
-    preview?: string | null;
-  };
+  /*
+   * Claim the pending notifications and stamp them in one transaction. If two
+   * workers pick the job up at once, the second finds nothing left to send.
+   */
+  const claimed = await withTransaction(async (tx) => {
+    const pending = (await tx
+      .select({
+        id: notifications.id,
+        title: notifications.title,
+        body: notifications.body,
+        data: notifications.data,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, job.userId),
+          job.taskId ? eq(notifications.taskId, job.taskId) : isNull(notifications.taskId),
+          isNull(notifications.emailedAt),
+        ),
+      )
+      .orderBy(asc(notifications.createdAt))
+      .for('update', { skipLocked: true })) as PendingRow[];
 
+    if (pending.length === 0) return [];
+
+    await tx
+      .update(notifications)
+      .set({ emailedAt: new Date() })
+      .where(
+        inArray(
+          notifications.id,
+          pending.map((row) => row.id),
+        ),
+      );
+
+    return pending;
+  });
+
+  if (claimed.length === 0) {
+    logger.debug({ userId: job.userId, taskId: job.taskId }, 'Nothing left to email.');
+    return;
+  }
+
+  const first = claimed[0] as PendingRow;
+  const data = (first.data ?? {}) as { taskKey?: string };
   const taskKey = data.taskKey ?? '';
   const link = env.WEB_ORIGIN + '/tasks/' + encodeURIComponent(taskKey);
   const preferencesLink = env.WEB_ORIGIN + '/settings/notifications';
-  const summary = data.summary ?? notification.body ?? 'Something changed.';
 
-  const subject = taskKey ? '[' + taskKey + '] ' + summary : summary;
+  const lines = claimed.map((row) => {
+    const rowData = (row.data ?? {}) as { summary?: string; preview?: string | null };
+    return { summary: rowData.summary ?? row.body ?? 'Something changed.', preview: rowData.preview ?? null };
+  });
 
-  const textLines = [
-    notification.title,
+  const subject =
+    claimed.length === 1
+      ? '[' + taskKey + '] ' + lines[0]?.summary
+      : '[' + taskKey + '] ' + claimed.length + ' updates';
+
+  const text = [
+    first.title,
     '',
-    summary,
-    ...(data.preview ? ['', '"' + data.preview + '"'] : []),
+    ...lines.flatMap((line) => [
+      '- ' + line.summary,
+      ...(line.preview ? ['  "' + line.preview + '"'] : []),
+    ]),
     '',
     link,
     '',
     'Change what you are emailed about: ' + preferencesLink,
-  ];
+  ].join('\n');
 
   const html = emailLayout(
-    escapeHtml(notification.title),
+    escapeHtml(first.title),
     [
-      '<p style="margin:0 0 12px">' + escapeHtml(summary) + '</p>',
-      data.preview
-        ? '<blockquote style="margin:0 0 16px;padding:8px 12px;border-left:3px solid #cbd5e1;' +
-          'color:#475569;font-size:14px">' +
-          escapeHtml(data.preview) +
-          '</blockquote>'
-        : '',
+      '<ul style="margin:0 0 16px;padding-left:18px">',
+      ...lines.map(
+        (line) =>
+          '<li style="margin-bottom:6px">' +
+          escapeHtml(line.summary) +
+          (line.preview
+            ? '<div style="margin-top:4px;padding:6px 10px;border-left:3px solid #cbd5e1;' +
+              'color:#475569;font-size:13px">' +
+              escapeHtml(line.preview) +
+              '</div>'
+            : '') +
+          '</li>',
+      ),
+      '</ul>',
       '<p style="margin:16px 0"><a href="' +
         link +
         '" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 18px;' +
@@ -97,10 +149,10 @@ export async function sendNotificationEmail(job: NotificationEmailJob): Promise<
     ].join(''),
   );
 
-  await sendMail({
-    to: recipient.email,
-    subject,
-    text: textLines.join('\n'),
-    html,
-  });
+  await sendMail({ to: recipient.email, subject, text, html });
+
+  logger.debug(
+    { userId: job.userId, taskId: job.taskId, included: claimed.length },
+    'Sent a collapsed notification email.',
+  );
 }

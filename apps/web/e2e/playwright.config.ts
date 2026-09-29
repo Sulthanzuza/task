@@ -24,12 +24,19 @@ export const E2E_DATABASE_URL =
 
 const apiEnv = {
   ...process.env,
-  NODE_ENV: 'development',
+  /*
+   * The suite drives the scheduled jobs through a route that only exists under
+   * NODE_ENV=test. The capabilities that would otherwise be switched off with
+   * it, the queue and the mailer, are turned back on explicitly below, so the
+   * run is as close to production behaviour as a test can be.
+   */
+  NODE_ENV: 'test',
   PORT: String(E2E_API_PORT),
   DATABASE_URL: E2E_DATABASE_URL,
   WEB_ORIGIN: E2E_BASE_URL,
   CORS_ORIGINS: '',
   LOG_LEVEL: 'warn',
+  AUTH_RATE_LIMIT_PER_MINUTE: '1000',
   // The suite signs in dozens of times in a couple of minutes, which the
   // production limit is designed to stop. The limiter itself is covered by the
   // API integration tests.
@@ -46,6 +53,7 @@ const apiEnv = {
   // The suite checks that email really arrives, so the queue runs and the
   // mailer points at mailpit. A one second debounce keeps the wait short.
   JOB_QUEUE_ENABLED: 'true',
+  MAIL_ENABLED: 'true',
   EMAIL_DEBOUNCE_SECONDS: '1',
   SMTP_HOST: process.env.E2E_SMTP_HOST ?? 'localhost',
   SMTP_PORT: process.env.E2E_SMTP_PORT ?? '1025',

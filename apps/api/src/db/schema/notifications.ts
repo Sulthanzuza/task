@@ -26,11 +26,21 @@ export const notifications = pgTable(
     body: text('body'),
     data: jsonb('data'),
     readAt: tz('read_at'),
+    /**
+     * When this notification was included in an email. Null means it is still
+     * waiting to be sent, which is how the email job finds what to include: one
+     * email per person per task, listing everything that has happened since.
+     */
+    emailedAt: tz('emailed_at'),
     createdAt: createdAt(),
   },
   (t) => [
     index('notifications_user_created_idx').on(t.userId, t.createdAt),
     index('notifications_unread_idx').on(t.userId).where(sql`read_at IS NULL`),
+    // The email job's lookup: everything still unsent for one person and task.
+    index('notifications_pending_email_idx')
+      .on(t.userId, t.taskId)
+      .where(sql`emailed_at IS NULL`),
   ],
 );
 
@@ -65,6 +75,25 @@ export const alertLog = pgTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.taskId, t.alertType, t.sentOn] })],
+);
+
+/**
+ * One row per person per day a digest was sent.
+ *
+ * The primary key is what makes "send the digest once" true even when two
+ * workers run, or a job is retried after a partial failure.
+ */
+export const digestLog = pgTable(
+  'digest_log',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The date in the org time zone, not UTC. */
+    sentOn: date('sent_on').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.sentOn] })],
 );
 
 export const savedViews = pgTable(

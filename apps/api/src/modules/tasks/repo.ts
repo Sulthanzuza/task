@@ -300,6 +300,7 @@ function sortExpression(sort: TaskSortField, order: 'asc' | 'desc'): SQL<string>
 /** The predicate columns, expressed against the Drizzle `tasks` table. */
 const columns: predicates.TaskColumns = {
   status: sql`${tasks.status}`,
+  blockedAt: sql`${tasks.blockedAt}`,
   dueDate: sql`${tasks.dueDate}`,
   completedAt: sql`${tasks.completedAt}`,
   lastActivityAt: sql`${tasks.lastActivityAt}`,

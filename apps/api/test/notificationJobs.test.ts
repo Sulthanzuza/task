@@ -1,30 +1,27 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as QueueModule from '../src/jobs/queue';
+import type * as DbModule from '../src/db/client';
+import type * as EmailModule from '../src/jobs/notificationEmail';
 
 /**
- * The queueing rules: a burst of changes becomes one email, and an email that
- * lands in someone's evening waits until their morning.
+ * The collapse rule: however many things happen to one task, one person gets
+ * one email, and it lists all of them.
  *
- * These run against a real pg-boss on a real Postgres, because the behaviour
- * being tested is pg-boss's scheduling, not ours.
- *
- * The window is a comfortable sixty seconds so that a burst reliably lands in
- * one slot even when the whole suite is loading the machine. The one test that
- * needs to cross a slot boundary asks for a one second window explicitly rather
- * than relying on the clock keeping up.
+ * This runs against a real pg-boss on a real Postgres, because the behaviour
+ * under test is the interaction between the singleton key, the pending rows and
+ * the transaction that claims them.
  */
 
 const DEBOUNCE_SECONDS = 60;
-const BOUNDARY_SECONDS = 1;
 
 let container: StartedPostgreSqlContainer;
-import type * as QueueModule from '../src/jobs/queue';
-import type * as DbModule from '../src/db/client';
-
-// Imported dynamically after the environment is set, so the modules read the
-// container's connection string rather than the developer's .env.
-let mod: typeof QueueModule;
+// Imported dynamically once the environment points at the container.
+let queue: typeof QueueModule;
 let dbMod: typeof DbModule;
+let email: typeof EmailModule;
+
+const sent: Array<{ to: string; subject: string; text: string }> = [];
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16-alpine')
@@ -37,28 +34,41 @@ beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   process.env.JWT_ACCESS_SECRET ||= 'test_secret_used_only_in_tests_0000000000';
   process.env.LOG_LEVEL = 'silent';
-  // The two knobs that make this testable at all.
   process.env.JOB_QUEUE_ENABLED = 'true';
   process.env.EMAIL_DEBOUNCE_SECONDS = String(DEBOUNCE_SECONDS);
 
   dbMod = await import('../src/db/client');
-  mod = await import('../src/jobs/queue');
-  await mod.getQueue();
-}, 180_000);
+  queue = await import('../src/jobs/queue');
+
+  // Capture what would be sent, rather than standing up an SMTP server.
+  const mailer = await import('../src/modules/notifications/mailer');
+  Object.defineProperty(mailer, 'sendMail', {
+    configurable: true,
+    value: async (mail: { to: string; subject: string; text: string }) => {
+      sent.push({ to: mail.to, subject: mail.subject, text: mail.text });
+    },
+  });
+
+  email = await import('../src/jobs/notificationEmail');
+
+  const { runMigrations } = await import('../src/db/migrate');
+  await runMigrations();
+  await queue.getQueue();
+}, 240_000);
 
 afterAll(async () => {
-  await mod?.stopQueue();
+  await queue?.stopQueue();
   await dbMod?.closeDatabase();
   await container?.stop();
 });
 
-/** Jobs pg-boss is currently holding for the email queue. */
+/** Jobs pg-boss is holding for the email queue. */
 async function queuedJobs(): Promise<Array<{ data: Record<string, unknown>; startAfter: Date }>> {
   const { sql } = await import('drizzle-orm');
   const result = await dbMod.db.execute(sql`
     SELECT data, start_after
     FROM pgboss.job
-    WHERE name = ${mod.QUEUES.notificationEmail}
+    WHERE name = ${queue.QUEUES.notificationEmail}
       AND state IN ('created', 'retry')
     ORDER BY start_after
   `);
@@ -67,11 +77,6 @@ async function queuedJobs(): Promise<Array<{ data: Record<string, unknown>; star
   );
 }
 
-beforeEach(async () => {
-  const { sql } = await import('drizzle-orm');
-  await dbMod.db.execute(sql`DELETE FROM pgboss.job WHERE name = ${mod.QUEUES.notificationEmail}`);
-});
-
 const conn = () => ({
   executeSql: async (text: string, values?: unknown[]) => {
     const result = await dbMod.pool.query(text, values as unknown[]);
@@ -79,107 +84,160 @@ const conn = () => ({
   },
 });
 
-describe('collapsing a burst', () => {
-  it('turns a flurry of changes into at most two emails', async () => {
-    const userId = '11111111-1111-4111-8111-111111111111';
-    const taskId = '22222222-2222-4222-8222-222222222222';
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_USER_ID = '44444444-4444-4444-8444-444444444444';
+const TASK_ID = '22222222-2222-4222-8222-222222222222';
+const OTHER_TASK_ID = '55555555-5555-4555-8555-555555555555';
 
-    for (let i = 0; i < 5; i += 1) {
-      await mod.enqueueNotificationEmail(conn(), {
-        notificationId: '3333333' + i + '-3333-4333-8333-333333333333',
-        userId,
-        taskId,
-      });
+/** A person, a project and a task, so notification rows satisfy their keys. */
+async function seedMinimal(): Promise<void> {
+  const { sql } = await import('drizzle-orm');
+  await dbMod.db.execute(sql`
+    INSERT INTO users (id, name, email, role, timezone, is_active)
+    VALUES
+      (${USER_ID}::uuid, 'Rahul', 'rahul@jobs.local', 'MEMBER', 'Asia/Kolkata', true),
+      (${OTHER_USER_ID}::uuid, 'Arun', 'arun@jobs.local', 'MEMBER', 'Asia/Kolkata', true)
+    ON CONFLICT (id) DO NOTHING
+  `);
+  await dbMod.db.execute(sql`
+    INSERT INTO teams (id, name) VALUES ('33333333-3333-4333-8333-333333333333'::uuid, 'Team')
+    ON CONFLICT (id) DO NOTHING
+  `);
+  await dbMod.db.execute(sql`
+    INSERT INTO projects (id, key, name, team_id, created_by)
+    VALUES ('66666666-6666-4666-8666-666666666666'::uuid, 'JOB', 'Jobs',
+            '33333333-3333-4333-8333-333333333333'::uuid, ${USER_ID}::uuid)
+    ON CONFLICT (id) DO NOTHING
+  `);
+  for (const [taskId, number] of [
+    [TASK_ID, 1],
+    [OTHER_TASK_ID, 2],
+  ] as const) {
+    await dbMod.db.execute(sql`
+      INSERT INTO tasks (id, project_id, number, title, created_by)
+      VALUES (${taskId}::uuid, '66666666-6666-4666-8666-666666666666'::uuid,
+              ${number}, ${'Task ' + number}, ${USER_ID}::uuid)
+      ON CONFLICT (id) DO NOTHING
+    `);
+  }
+}
+
+/** Write a notification exactly as the notification service would. */
+async function addNotification(userId: string, taskId: string, summary: string): Promise<void> {
+  const { sql } = await import('drizzle-orm');
+  await dbMod.db.execute(sql`
+    INSERT INTO notifications (user_id, task_id, type, title, body, data)
+    VALUES (${userId}::uuid, ${taskId}::uuid, 'TASK_STATUS_CHANGED',
+            ${'JOB-1 A task worth talking about'}, ${summary},
+            ${JSON.stringify({ taskKey: 'JOB-1', summary })}::jsonb)
+  `);
+}
+
+beforeEach(async () => {
+  const { sql } = await import('drizzle-orm');
+  await dbMod.db.execute(sql`DELETE FROM pgboss.job WHERE name = ${queue.QUEUES.notificationEmail}`);
+  await dbMod.db.execute(sql`DELETE FROM notifications`);
+  sent.length = 0;
+  await seedMinimal();
+});
+
+describe('one email per person per task', () => {
+  it('turns a burst of five changes into a single email listing all five', async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      await addNotification(USER_ID, TASK_ID, 'Change number ' + i);
+      await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: TASK_ID });
     }
 
-    /*
-     * pg-boss debounce is leading plus trailing: one email goes now, and the
-     * changes that followed collapse into one more in the next slot. Five
-     * changes therefore produce two emails, never five.
-     */
+    // One job, whatever the number of changes.
     const jobs = await queuedJobs();
-    expect(jobs, 'a burst must collapse').toHaveLength(2);
+    expect(jobs, 'five changes must leave one job queued').toHaveLength(1);
 
-    // The trailing one is scheduled into the next window, not sent at once.
-    const leading = jobs[0];
-    const trailing = jobs[1];
-    expect(trailing?.startAfter.getTime()).toBeGreaterThan(leading?.startAfter.getTime() ?? 0);
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+
+    expect(sent, 'exactly one email').toHaveLength(1);
+    const body = sent[0]?.text ?? '';
+    for (let i = 1; i <= 5; i += 1) {
+      expect(body, 'the email must mention change ' + i).toContain('Change number ' + i);
+    }
+    expect(sent[0]?.subject).toContain('5 updates');
   });
 
-  it('does not add a third email however many more changes arrive', async () => {
-    const userId = '11111111-1111-4111-8111-111111111111';
-    const taskId = '22222222-2222-4222-8222-222222222222';
+  it('marks what it sent, so a repeat run sends nothing', async () => {
+    await addNotification(USER_ID, TASK_ID, 'The only change');
+    await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: TASK_ID });
 
-    for (let i = 0; i < 20; i += 1) {
-      await mod.enqueueNotificationEmail(conn(), {
-        notificationId:
-          '9999' + String(i).padStart(4, '0') + '-9999-4999-8999-999999999999',
-        userId,
-        taskId,
-      });
-    }
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+    expect(sent).toHaveLength(1);
 
-    expect(await queuedJobs()).toHaveLength(2);
+    // A retry, or a second worker, must not send it again.
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+    expect(sent, 'a second run must send nothing').toHaveLength(1);
+  });
+
+  it('starts a fresh email for changes that arrive after the first was sent', async () => {
+    await addNotification(USER_ID, TASK_ID, 'Before the email');
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+    expect(sent).toHaveLength(1);
+
+    await addNotification(USER_ID, TASK_ID, 'After the email');
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.text).toContain('After the email');
+    expect(sent[1]?.text).not.toContain('Before the email');
   });
 
   it('keeps separate people separate', async () => {
-    const taskId = '22222222-2222-4222-8222-222222222222';
-
-    await mod.enqueueNotificationEmail(conn(), {
-      notificationId: '33333331-3333-4333-8333-333333333333',
-      userId: '11111111-1111-4111-8111-111111111111',
-      taskId,
-    });
-    await mod.enqueueNotificationEmail(conn(), {
-      notificationId: '33333332-3333-4333-8333-333333333333',
-      userId: '44444444-4444-4444-8444-444444444444',
-      taskId,
-    });
+    await addNotification(USER_ID, TASK_ID, 'For Rahul');
+    await addNotification(OTHER_USER_ID, TASK_ID, 'For Arun');
+    await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: TASK_ID });
+    await queue.enqueueNotificationEmail(conn(), { userId: OTHER_USER_ID, taskId: TASK_ID });
 
     expect(await queuedJobs()).toHaveLength(2);
+
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe('rahul@jobs.local');
+    expect(sent[0]?.text).not.toContain('For Arun');
   });
 
   it('keeps separate tasks separate', async () => {
-    const userId = '11111111-1111-4111-8111-111111111111';
-
-    await mod.enqueueNotificationEmail(conn(), {
-      notificationId: '33333331-3333-4333-8333-333333333333',
-      userId,
-      taskId: '22222222-2222-4222-8222-222222222222',
-    });
-    await mod.enqueueNotificationEmail(conn(), {
-      notificationId: '33333332-3333-4333-8333-333333333333',
-      userId,
-      taskId: '55555555-5555-4555-8555-555555555555',
-    });
+    await addNotification(USER_ID, TASK_ID, 'About the first task');
+    await addNotification(USER_ID, OTHER_TASK_ID, 'About the second task');
+    await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: TASK_ID });
+    await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: OTHER_TASK_ID });
 
     expect(await queuedJobs()).toHaveLength(2);
+
+    await email.sendNotificationEmail({ userId: USER_ID, taskId: TASK_ID });
+    expect(sent[0]?.text).toContain('About the first task');
+    expect(sent[0]?.text).not.toContain('About the second task');
   });
 
-  it('starts a new email once the window has passed', async () => {
-    // A one second window, asked for here rather than taken from config, so the
-    // boundary can be crossed quickly and without depending on machine load.
-    const boss = await mod.getQueue();
-    const key = 'boundary-key';
+  it('schedules the send at the end of the collapse window', async () => {
+    const before = Date.now();
+    await addNotification(USER_ID, TASK_ID, 'A change');
+    await queue.enqueueNotificationEmail(conn(), { userId: USER_ID, taskId: TASK_ID });
 
-    const send = () =>
-      boss.sendDebounced(
-        mod.QUEUES.notificationEmail,
-        { notificationId: '33333331-3333-4333-8333-333333333333' },
-        { db: conn() as never },
-        BOUNDARY_SECONDS,
-        key,
-      );
+    const [job] = await queuedJobs();
+    const delaySeconds = ((job?.startAfter.getTime() ?? 0) - before) / 1000;
+    expect(delaySeconds).toBeGreaterThan(DEBOUNCE_SECONDS - 10);
+    expect(delaySeconds).toBeLessThan(DEBOUNCE_SECONDS + 10);
+  });
 
-    await send();
-    expect(await queuedJobs()).toHaveLength(1);
+  it('honours a quiet-hours release that is later than the window', async () => {
+    const startAfter = new Date(Date.now() + 6 * 3_600_000);
+    await addNotification(USER_ID, TASK_ID, 'An evening change');
+    await queue.enqueueNotificationEmail(
+      conn(),
+      { userId: USER_ID, taskId: TASK_ID },
+      { startAfter },
+    );
 
-    await new Promise((resolve) => setTimeout(resolve, (BOUNDARY_SECONDS + 1) * 1000));
-
-    // A new slot, so this is a fresh email rather than part of the last burst.
-    await send();
-    expect(await queuedJobs()).toHaveLength(2);
-  }, 20_000);
+    const [job] = await queuedJobs();
+    // The later of the two wins: quiet hours are not shortened by the window.
+    expect(Math.abs((job?.startAfter.getTime() ?? 0) - startAfter.getTime())).toBeLessThan(2000);
+  });
 });
 
 describe('quiet hours', () => {
@@ -192,14 +250,12 @@ describe('quiet hours', () => {
       '../src/lib/date-utils'
     );
 
-    // 22:00 in Kolkata: night there, still afternoon in London.
     const now = zonedTimeToUtc('2026-09-28', { hour: 22 }, 'Asia/Kolkata');
 
     expect(isWithinQuietHours(now, 'Asia/Kolkata', 20, 8)).toBe(true);
     expect(isWithinQuietHours(now, 'Europe/London', 20, 8)).toBe(false);
 
-    const kolkataRelease = nextQuietHoursEnd(now, 'Asia/Kolkata', 8);
-    expect(kolkataRelease.toISOString()).toBe(
+    expect(nextQuietHoursEnd(now, 'Asia/Kolkata', 8).toISOString()).toBe(
       zonedTimeToUtc('2026-09-29', { hour: 8 }, 'Asia/Kolkata').toISOString(),
     );
   });
@@ -207,41 +263,33 @@ describe('quiet hours', () => {
   it('schedules two people in different zones for their own mornings', async () => {
     const { nextQuietHoursEnd, zonedTimeToUtc, zonedParts } = await import('../src/lib/date-utils');
 
-    // 03:00 UTC: the small hours in Kolkata (08:30) and in New York (23:00).
+    // 03:00 UTC: the small hours in Kolkata and late evening in New York.
     const now = new Date('2026-09-28T03:00:00.000Z');
 
-    const kolkataRelease = nextQuietHoursEnd(now, 'Asia/Kolkata', 8);
-    const newYorkRelease = nextQuietHoursEnd(now, 'America/New_York', 8);
+    const kolkata = nextQuietHoursEnd(now, 'Asia/Kolkata', 8);
+    const newYork = nextQuietHoursEnd(now, 'America/New_York', 8);
 
-    // Each lands at 08:00 local, not at one shared moment.
-    expect(zonedParts(kolkataRelease, 'Asia/Kolkata').hour).toBe(8);
-    expect(zonedParts(newYorkRelease, 'America/New_York').hour).toBe(8);
-    expect(kolkataRelease.toISOString()).not.toBe(newYorkRelease.toISOString());
+    expect(zonedParts(kolkata, 'Asia/Kolkata').hour).toBe(8);
+    expect(zonedParts(newYork, 'America/New_York').hour).toBe(8);
+    expect(kolkata.toISOString()).not.toBe(newYork.toISOString());
 
-    expect(newYorkRelease.toISOString()).toBe(
+    expect(newYork.toISOString()).toBe(
       zonedTimeToUtc('2026-09-28', { hour: 8 }, 'America/New_York').toISOString(),
     );
   });
 
-  it('queues a held email with a start time in the future', async () => {
-    const { nextQuietHoursEnd, zonedTimeToUtc } = await import('../src/lib/date-utils');
-    const now = zonedTimeToUtc('2026-09-28', { hour: 22 }, 'Asia/Kolkata');
-    const startAfter = nextQuietHoursEnd(now, 'Asia/Kolkata', 8);
+  it('still reaches 08:00 local across a British summer time change', async () => {
+    const { nextQuietHoursEnd, zonedParts } = await import('../src/lib/date-utils');
 
-    await mod.enqueueNotificationEmail(
-      conn(),
-      {
-        notificationId: '66666666-6666-4666-8666-666666666666',
-        userId: '77777777-7777-4777-8777-777777777777',
-        taskId: '88888888-8888-4888-8888-888888888888',
-      },
-      { startAfter },
-    );
+    // British summer time ends on 25 October 2026; the clocks go back overnight.
+    const beforeTheChange = new Date('2026-10-24T22:00:00.000Z');
+    const overTheChange = new Date('2026-10-25T00:30:00.000Z');
 
-    const jobs = await queuedJobs();
-    expect(jobs).toHaveLength(1);
-    // pg-boss stores it to the second; compare at that resolution.
-    expect(Math.abs((jobs[0] as { startAfter: Date }).startAfter.getTime() - startAfter.getTime())).
-      toBeLessThan(2000);
+    expect(
+      zonedParts(nextQuietHoursEnd(beforeTheChange, 'Europe/London', 8), 'Europe/London').hour,
+    ).toBe(8);
+    expect(
+      zonedParts(nextQuietHoursEnd(overTheChange, 'Europe/London', 8), 'Europe/London').hour,
+    ).toBe(8);
   });
 });

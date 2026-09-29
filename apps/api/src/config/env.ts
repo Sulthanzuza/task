@@ -42,6 +42,12 @@ const envSchema = z.object({
    */
   JOB_QUEUE_ENABLED: z.enum(['true', 'false']).optional(),
 
+  /**
+   * Whether this process actually sends email. Off by default under test, but
+   * an end-to-end run turns it on so the email can be checked for real.
+   */
+  MAIL_ENABLED: z.enum(['true', 'false']).optional(),
+
   /** How long a burst of changes to one task collapses into one email. */
   EMAIL_DEBOUNCE_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
 
@@ -123,6 +129,9 @@ export const isTest = env.NODE_ENV === 'test';
 
 export const jobQueueEnabled =
   env.JOB_QUEUE_ENABLED !== undefined ? env.JOB_QUEUE_ENABLED === 'true' : !isTest;
+
+export const mailEnabled =
+  env.MAIL_ENABLED !== undefined ? env.MAIL_ENABLED === 'true' : !isTest;
 
 /**
  * The origins CORS will accept. WEB_ORIGIN is always allowed, so a correct

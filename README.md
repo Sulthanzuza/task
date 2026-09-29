@@ -56,6 +56,10 @@ There is one `.env`, at the repository root; both apps read it.
 | `JWT_ACCESS_TTL_SECONDS` | Access token lifetime (default 900) |
 | `REFRESH_GRACE_SECONDS` | How long a rotated refresh token still works (default 30) |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | Sign-in attempts per IP and address (default 5) |
+| `EMAIL_DEBOUNCE_SECONDS` | How long changes to one task collect into one email (default 300) |
+| `JOB_QUEUE_ENABLED` | Whether this process enqueues jobs (default: off under test) |
+| `MAIL_ENABLED` | Whether this process really sends email (default: off under test) |
+| `WORKER_HEALTH_PORT` | Set to serve `GET /health` from the worker |
 
 Raising a rate limit or the grace window is allowed, but the API logs a warning at start-up if
 it finds one raised while `NODE_ENV=production`, so a relaxed test setting cannot reach
@@ -169,6 +173,28 @@ effort. Before anyone is told, `can(recipient, 'task.view', task)` runs: mention
 cannot see a task sends nothing and leaks no title. Bursts collapse through pg-boss's
 `sendDebounced`, keyed on person and task. Quiet hours use each person's own
 `users.timezone`, not the org's, so a held email arrives at 08:00 where *they* are.
+
+**Alerts and digests cannot double-send.** Every alert is claimed by inserting into
+`alert_log` with `ON CONFLICT DO NOTHING`, and only the insert that returns a row sends
+anything. The claim happens in the same transaction as the notification rows, so a claim
+without a notification is impossible. Digests use `digest_log` the same way. `sent_on` is the
+date in the **org** time zone. Both are therefore safe to run twice and safe to run in two
+workers at once, which is also how they recover: a missed 30-minute scan is simply picked up
+by the next one.
+
+**Thresholds are measured in working hours.** No-update, review-waiting and blocked all use
+`subtractWorkingHours`, so a task last touched on Friday evening is not reported as neglected
+on Monday morning. A weekend or a holiday is not time somebody ignored their work.
+
+**Nobody is chased while they are away.** No no-update or due-tomorrow alert reaches someone
+on leave. An overdue or blocked task still reaches the team lead, marked "assignee on leave",
+and the lead's digest lists who is off today.
+
+**One email per person per task.** The email job names a person and a task, never a
+notification. When it runs it collects everything for that pair with `emailed_at IS NULL`,
+sends one message listing all of it, and stamps the rows, in one transaction. The queue uses
+pg-boss's `short` policy, so a second change during the window adds no job and simply rides
+along with the one already waiting.
 
 **Task numbers cannot collide.** A new task takes its number from
 `UPDATE projects SET task_counter = task_counter + 1 ... RETURNING` inside the creating

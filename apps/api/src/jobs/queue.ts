@@ -37,7 +37,13 @@ export async function getQueue(): Promise<PgBoss> {
     });
 
     await instance.start();
-    await instance.createQueue(QUEUES.notificationEmail);
+    /*
+     * The "short" policy allows one queued job per singletonKey, with no limit
+     * on how many are running. That is precisely the collapse rule: while an
+     * email for a person and task is waiting, further changes add nothing to
+     * the queue, and their notification rows are picked up when it runs.
+     */
+    await instance.createQueue(QUEUES.notificationEmail, { policy: 'short' });
 
     boss = instance;
     return instance;
@@ -52,49 +58,54 @@ export async function stopQueue(): Promise<void> {
   starting = null;
 }
 
+/**
+ * The job says who and about what, never which notification.
+ *
+ * When it runs it collects every notification for that person and task that has
+ * not been emailed yet and sends one message covering all of them. Naming a
+ * single notification would mean one email each, which is the thing this exists
+ * to prevent.
+ */
 export interface NotificationEmailJob {
-  notificationId: string;
   userId: string;
   taskId: string | null;
 }
 
 /**
- * Queue an email for a notification, on the caller's transaction.
+ * Queue the email for a person and a task, on the caller's transaction.
  *
- * Debounced per person per task, so a flurry of edits does not become a flurry
- * of emails. That is what stops people turning notifications off entirely.
- *
- * Worth knowing what pg-boss means by debounce: it is singletonSeconds with
- * singletonNextSlot, which gives a leading email and, if more changes arrive
- * during the window, one trailing email in the next slot. So five changes in
- * five minutes produce at most two emails, not five and not one. Throttling
- * would give exactly one but would silently drop the later changes.
+ * singletonKey means a second change during the window finds a job already
+ * waiting and adds nothing: the notification row it wrote will simply be picked
+ * up when that job runs. So a burst of five changes is exactly one email
+ * listing all five, whatever order they arrived in.
  *
  * pg-boss owns the timing, so there is no timer of ours to lose on a restart.
  */
 export async function enqueueNotificationEmail(
   queue: QueueConnection,
   job: NotificationEmailJob,
-  options: { startAfter?: Date } = {},
+  options: { startAfter?: Date; now?: Date } = {},
 ): Promise<void> {
   // Most tests assert on rows and behaviour; running a queue would only add
   // noise. The ones that are about queueing turn it on.
   if (!jobQueueEnabled) return;
 
   const instance = await getQueue();
-  const key = job.userId + ':' + (job.taskId ?? 'none');
+  const now = options.now ?? new Date();
 
-  await instance.sendDebounced(
-    QUEUES.notificationEmail,
-    job as unknown as object,
-    {
-      db: queue as IDatabase,
-      retryLimit: 3,
-      retryDelay: 60,
-      retryBackoff: true,
-      ...(options.startAfter ? { startAfter: options.startAfter } : {}),
-    },
-    EMAIL_DEBOUNCE_SECONDS,
-    key,
-  );
+  // Quiet hours push the send later than the collapse window would.
+  const windowEnd = new Date(now.getTime() + EMAIL_DEBOUNCE_SECONDS * 1000);
+  const startAfter =
+    options.startAfter && options.startAfter > windowEnd ? options.startAfter : windowEnd;
+
+  await instance.send(QUEUES.notificationEmail, job as unknown as object, {
+    db: queue as IDatabase,
+    // One pending job per person per task. A later change in the same window is
+    // deduplicated away, and its notification rides along with the queued job.
+    singletonKey: job.userId + ':' + (job.taskId ?? 'none'),
+    startAfter,
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+  });
 }

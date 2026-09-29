@@ -15,6 +15,13 @@
       "when": 1790655792449,
       "tag": "0001_funny_roland_deschain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790670715974,
+      "tag": "0002_broken_korvac",
+      "breakpoints": true
     }
   ]
 }

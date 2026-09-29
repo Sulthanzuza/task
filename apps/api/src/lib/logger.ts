@@ -2,7 +2,8 @@ import pino from 'pino';
 import { env, isProduction, isTest } from '../config/env';
 
 export const logger = pino({
-  level: isTest ? 'silent' : env.LOG_LEVEL,
+  // Tests set LOG_LEVEL themselves; nothing here second-guesses it.
+  level: env.LOG_LEVEL,
   // Pretty output is a development convenience; production writes JSON for the log shipper.
   transport: isProduction || isTest ? undefined : { target: 'pino-pretty', options: { colorize: true, translateTime: 'HH:MM:ss' } },
   redact: {

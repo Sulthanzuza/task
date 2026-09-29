@@ -12,6 +12,7 @@ import {
   nextWorkingDays,
   startOfDayUtc,
   startOfWeek,
+  subtractWorkingHours,
   toDateOnly,
   workingDaysBetween,
   workingHoursBetween,
@@ -247,6 +248,58 @@ describe('workingHoursBetween', () => {
     const from = new Date('2026-09-28T10:00:00Z');
     const to = new Date('2026-09-28T09:00:00Z');
     expect(workingHoursBetween(from, to, kolkata)).toBe(0);
+  });
+});
+
+describe('subtractWorkingHours', () => {
+  it('stays inside one working day', () => {
+    const from = zonedTimeToUtc('2026-09-28', { hour: 17 }, kolkata.timezone);
+    const result = subtractWorkingHours(from, 5, kolkata);
+    expect(result.toISOString()).toBe(
+      zonedTimeToUtc('2026-09-28', { hour: 12 }, kolkata.timezone).toISOString(),
+    );
+  });
+
+  it('steps over a weekend', () => {
+    // 10:00 Monday, less 16 working hours: 10 hours of Monday, then 6 of Friday,
+    // because Saturday and Sunday do not count.
+    const from = zonedTimeToUtc('2026-09-28', { hour: 10 }, kolkata.timezone);
+    const result = subtractWorkingHours(from, 16, kolkata);
+    expect(result.toISOString()).toBe(
+      zonedTimeToUtc('2026-09-25', { hour: 18 }, kolkata.timezone).toISOString(),
+    );
+  });
+
+  it('steps over a holiday as well as the weekend', () => {
+    // 2 Oct is a holiday and 3 and 4 Oct are the weekend, so going back from
+    // Monday 5 Oct lands on Thursday 1 Oct.
+    const from = zonedTimeToUtc('2026-10-05', { hour: 9 }, kolkata.timezone);
+    const result = subtractWorkingHours(from, 12, kolkata);
+    expect(result.toISOString()).toBe(
+      zonedTimeToUtc('2026-10-01', { hour: 21 }, kolkata.timezone).toISOString(),
+    );
+  });
+
+  it('is the inverse of workingHoursBetween', () => {
+    const from = zonedTimeToUtc('2026-09-28', { hour: 14 }, kolkata.timezone);
+    for (const hours of [1, 8, 16, 30, 48]) {
+      const back = subtractWorkingHours(from, hours, kolkata);
+      expect(workingHoursBetween(back, from, kolkata)).toBeCloseTo(hours, 5);
+    }
+  });
+
+  it('returns the same instant for zero', () => {
+    const from = new Date('2026-09-28T10:00:00Z');
+    expect(subtractWorkingHours(from, 0, kolkata).toISOString()).toBe(from.toISOString());
+  });
+
+  it('handles a Friday and Saturday weekend', () => {
+    // Sunday is a working day in Dubai, so going back from Sunday lands on Thursday.
+    const from = zonedTimeToUtc('2026-09-27', { hour: 10 }, dubai.timezone);
+    const result = subtractWorkingHours(from, 16, dubai);
+    expect(result.toISOString()).toBe(
+      zonedTimeToUtc('2026-09-24', { hour: 18 }, dubai.timezone).toISOString(),
+    );
   });
 });
 

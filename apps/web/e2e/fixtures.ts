@@ -84,6 +84,7 @@ export const USERS = {
   lead: { email: 'sulthan@example.com', password: 'Password123!', name: 'Sulthan' },
   member: { email: 'rahul@example.com', password: 'Password123!', name: 'Rahul' },
   otherLead: { email: 'nisha@example.com', password: 'Password123!', name: 'Nisha' },
+  admin: { email: 'admin@example.com', password: 'Password123!', name: 'Admin' },
 } as const;
 
 /** Signs in through the real form, the way a person would. */

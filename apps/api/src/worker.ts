@@ -5,6 +5,9 @@ import { closeDatabase } from './db/client';
 import { purgeExpired } from './modules/auth/service';
 import { purgeOldNotifications } from './modules/notifications/service';
 import { QUEUES, getQueue, stopQueue } from './jobs/queue';
+import { SCHEDULES, registerSchedules, runHousekeeping } from './jobs/scheduler';
+import { runAlertScan } from './modules/alerts/service';
+import { runDigest } from './modules/alerts/digest';
 import { sendNotificationEmail, type NotificationEmailJob } from './jobs/notificationEmail';
 
 /**
@@ -46,7 +49,7 @@ async function startJobWorkers(): Promise<void> {
         } catch (error) {
           // Throwing would fail the whole batch; pg-boss retries this one job.
           logger.error(
-            { err: error, notificationId: job.data.notificationId },
+            { err: error, userId: job.data.userId, taskId: job.data.taskId },
             'Could not send a notification email.',
           );
           throw error;
@@ -54,6 +57,29 @@ async function startJobWorkers(): Promise<void> {
       }
     },
   );
+
+  /*
+   * The scheduled work. Each handler is safe to run twice and safe to run in
+   * two workers at once: alerts claim through alert_log, digests through
+   * digest_log, and both claims happen in the same transaction as the
+   * notifications they guard.
+   */
+  await boss.work(SCHEDULES.alertScan, async () => {
+    const sent = await runAlertScan();
+    if (sent.length > 0) logger.info({ sent: sent.length }, 'Alert scan finished.');
+  });
+
+  await boss.work(SCHEDULES.dailyDigest, async () => {
+    const results = await runDigest();
+    logger.info({ sent: results.filter((r) => r.sent).length }, 'Digest run finished.');
+  });
+
+  await boss.work(SCHEDULES.housekeeping, async () => {
+    await runHousekeeping();
+    await housekeeping();
+  });
+
+  await registerSchedules();
 
   logger.info({ queue: QUEUES.notificationEmail }, 'Job worker listening.');
 }

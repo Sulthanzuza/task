@@ -298,6 +298,45 @@ export function workingHoursBetween(from: Date, to: Date, calendar: WorkCalendar
   return Math.max(0, hours);
 }
 
+/**
+ * The instant that was `hours` working hours before `from`.
+ *
+ * The inverse of workingHoursBetween, and the reason thresholds can stay simple
+ * in SQL: "no update for 24 working hours" becomes a single timestamp to compare
+ * last_activity_at against, rather than a calculation per row.
+ *
+ * Walking day by day is fine here: the loop runs once per calendar day, and no
+ * threshold in this system is measured in months.
+ */
+export function subtractWorkingHours(from: Date, hours: number, calendar: WorkCalendar): Date {
+  if (hours <= 0) return from;
+
+  let remaining = hours;
+  let date = toDateOnly(from, calendar.timezone);
+  // The instant we are counting back from within the day being considered.
+  let segmentEnd = from;
+
+  for (let guard = 0; guard < 400; guard += 1) {
+    const dayStart = startOfDayUtc(date, calendar.timezone);
+
+    if (isWorkingDay(date, calendar)) {
+      const availableToday = (segmentEnd.getTime() - dayStart.getTime()) / 3_600_000;
+
+      if (availableToday >= remaining) {
+        return new Date(segmentEnd.getTime() - remaining * 3_600_000);
+      }
+      remaining -= availableToday;
+    }
+
+    // Move to the previous day. Its end is exactly this day's start, so nothing
+    // is lost at the boundary.
+    date = addDays(date, -1);
+    segmentEnd = dayStart;
+  }
+
+  throw new Error('Could not go back ' + hours + ' working hours within a year');
+}
+
 /** Plain elapsed hours, for ages that should not skip the weekend (e.g. how long blocked). */
 export function hoursBetween(from: Date, to: Date): number {
   return Math.max(0, (to.getTime() - from.getTime()) / 3_600_000);

@@ -6,7 +6,17 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', '**/drizzle/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      '**/drizzle/**',
+      // Playwright's generated report and trace assets.
+      '**/e2e/.report/**',
+      '**/e2e/.artifacts/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

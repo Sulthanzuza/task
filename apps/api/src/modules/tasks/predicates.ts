@@ -5,6 +5,7 @@ import {
   nextWorkingDay,
   startOfDayUtc,
   startOfWeek,
+  subtractWorkingHours,
   toDateOnly,
   type WorkCalendar,
 } from '../../lib/date-utils';
@@ -29,10 +30,19 @@ export interface PredicateContext {
   today: string;
   /** The instant the current week began, in the org time zone. */
   weekStart: Date;
-  /** Activity older than this counts as "no update". */
+  /**
+   * Activity older than this counts as "no update".
+   *
+   * Measured in working hours, so a task touched on Friday evening is not
+   * flagged first thing on Monday for having been ignored all weekend.
+   */
   noUpdateCutoff: Date;
-  /** A review untouched since this counts as waiting too long. */
+  /** A review untouched since this counts as waiting too long, in working hours. */
   reviewWaitingCutoff: Date;
+  /** Blocked longer than this escalates, also in working hours. */
+  blockedEscalationCutoff: Date;
+  /** Overdue by this many working days escalates. */
+  overdueEscalationDate: string;
   /** The next working day after today, for the due-tomorrow alert. */
   nextWorkingDay: string;
 }
@@ -49,9 +59,13 @@ export function buildPredicateContext(
     now,
     today,
     weekStart: startOfDayUtc(startOfWeek(today, calendar), calendar.timezone),
-    noUpdateCutoff: new Date(now.getTime() - settings.noUpdateThresholdHours * 3_600_000),
-    reviewWaitingCutoff: new Date(
-      now.getTime() - settings.reviewWaitingThresholdHours * 3_600_000,
+    // Working hours, not wall clock: a weekend is not time someone ignored a task.
+    noUpdateCutoff: subtractWorkingHours(now, settings.noUpdateThresholdHours, calendar),
+    reviewWaitingCutoff: subtractWorkingHours(now, settings.reviewWaitingThresholdHours, calendar),
+    blockedEscalationCutoff: subtractWorkingHours(now, settings.blockedEscalationHours, calendar),
+    overdueEscalationDate: addDays(
+      today,
+      -Math.max(1, settings.overdueEscalationWorkingDays),
     ),
     nextWorkingDay: nextWorkingDay(today, calendar),
   };
@@ -64,6 +78,7 @@ export function buildPredicateContext(
  */
 export interface TaskColumns {
   status: SQL | string;
+  blockedAt: SQL | string;
   dueDate: SQL | string;
   completedAt: SQL | string;
   lastActivityAt: SQL | string;
@@ -75,6 +90,7 @@ export interface TaskColumns {
 /** The plain aliased form, for raw SQL over `tasks t`. */
 export const aliased = (alias = 't'): TaskColumns => ({
   status: sql.raw(alias + '.status'),
+  blockedAt: sql.raw(alias + '.blocked_at'),
   dueDate: sql.raw(alias + '.due_date'),
   completedAt: sql.raw(alias + '.completed_at'),
   lastActivityAt: sql.raw(alias + '.last_activity_at'),
@@ -174,3 +190,13 @@ export const SUMMARY_PREDICATES = {
 export type SummaryKey = keyof typeof SUMMARY_PREDICATES;
 
 export { addDays };
+
+/** Blocked for longer than the escalation threshold, counted in working hours. */
+export function isBlockedTooLong(c: TaskColumns, ctx: PredicateContext): SQL {
+  return sql`(${col(c.status)} = 'BLOCKED' AND ${col(c.blockedAt)} < ${ctx.blockedEscalationCutoff})`;
+}
+
+/** Overdue by enough working days to be worth escalating. */
+export function isOverdueEnoughToEscalate(c: TaskColumns, ctx: PredicateContext): SQL {
+  return sql`(${isOpen(c)} AND ${col(c.dueDate)} <= ${ctx.overdueEscalationDate}::date)`;
+}

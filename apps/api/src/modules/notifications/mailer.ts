@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { env, isTest } from '../../config/env';
+import { env, mailEnabled } from '../../config/env';
 import { logger } from '../../lib/logger';
 
 /**
@@ -21,8 +21,9 @@ export interface Mail {
 }
 
 export async function sendMail(mail: Mail): Promise<void> {
-  // Tests assert on behaviour, not on SMTP; sending would only slow them down.
-  if (isTest) return;
+  // Most tests assert on behaviour, not on SMTP; sending would only slow them
+  // down. The end-to-end run turns it on and checks the inbox.
+  if (!mailEnabled) return;
 
   await transport.sendMail({
     from: env.MAIL_FROM,

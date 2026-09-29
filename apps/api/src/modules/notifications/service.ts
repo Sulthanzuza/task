@@ -2,7 +2,7 @@ import { and, count, desc, eq, inArray, isNotNull, isNull, lt } from 'drizzle-or
 import type { NotificationType } from '@tm/shared';
 import { NOTIFICATION_TYPES } from '@tm/shared';
 import { db, type Db, type QueueConnection } from '../../db/client';
-import { notificationPreferences, notifications } from '../../db/schema';
+import { notificationPreferences, notifications, users } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
 import { NotFoundError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
@@ -146,12 +146,95 @@ export async function notify(input: NotifyInput): Promise<CreatedNotification[]>
 
     await enqueueNotificationEmail(
       input.queue,
-      { notificationId: row.id, userId: recipient.userId, taskId: input.task.id },
-      startAfter ? { startAfter } : {},
+      { userId: recipient.userId, taskId: input.task.id },
+      { now: input.now, ...(startAfter ? { startAfter } : {}) },
     );
   }
 
   return created;
+}
+
+export interface NotifyUserInput {
+  tx: Db;
+  queue: QueueConnection;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  summary: string;
+  now: Date;
+}
+
+/**
+ * A notification addressed to a person rather than about a task: a digest, or a
+ * reminder to check in.
+ *
+ * There is no task to authorise against, because the recipient is the subject.
+ * Preferences and quiet hours still apply, so this is not a way to bypass what
+ * someone asked for.
+ */
+export async function notifyUser(input: NotifyUserInput): Promise<CreatedNotification[]> {
+  const [person] = await input.tx
+    .select({ timezone: users.timezone, isActive: users.isActive })
+    .from(users)
+    .where(eq(users.id, input.userId))
+    .limit(1);
+
+  if (!person?.isActive) return [];
+
+  const settings = await getOrgSettings(input.tx);
+  const preferences = await preferencesFor(input.tx, [input.userId]);
+  const preference = preferences.get(input.userId)?.get(input.type) ?? {
+    inApp: true,
+    email: true,
+    digestOnly: false,
+  };
+
+  if (!preference.inApp && !preference.email) return [];
+
+  const [row] = await input.tx
+    .insert(notifications)
+    .values({
+      userId: input.userId,
+      taskId: null,
+      type: input.type,
+      title: input.title,
+      body: input.summary,
+      data: { summary: input.summary },
+      createdAt: input.now,
+    })
+    .returning({ id: notifications.id });
+
+  if (!row) return [];
+
+  if (preference.email) {
+    const quiet = isWithinQuietHours(
+      input.now,
+      person.timezone,
+      settings.quietHoursStart,
+      settings.quietHoursEnd,
+    );
+    const startAfter = quiet
+      ? nextQuietHoursEnd(input.now, person.timezone, settings.quietHoursEnd)
+      : undefined;
+
+    await enqueueNotificationEmail(
+      input.queue,
+      { userId: input.userId, taskId: null },
+      { now: input.now, ...(startAfter ? { startAfter } : {}) },
+    );
+  }
+
+  return [
+    {
+      id: row.id,
+      userId: input.userId,
+      type: input.type,
+      title: input.title,
+      body: input.summary,
+      taskKey: '',
+      createdAt: input.now.toISOString(),
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------

@@ -53,6 +53,13 @@ There is one `.env`, at the repository root; both apps read it.
 | `API_URL`      | Where the dev proxy forwards `/api` and `/socket.io` |
 | `WEB_ORIGIN`   | Canonical web address, used for links in emails |
 | `CORS_ORIGINS` | Extra credentialed origins, comma separated; empty for a normal setup |
+| `JWT_ACCESS_TTL_SECONDS` | Access token lifetime (default 900) |
+| `REFRESH_GRACE_SECONDS` | How long a rotated refresh token still works (default 30) |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | Sign-in attempts per IP and address (default 5) |
+
+Raising a rate limit or the grace window is allowed, but the API logs a warning at start-up if
+it finds one raised while `NODE_ENV=production`, so a relaxed test setting cannot reach
+production unnoticed.
 
 `WEB_ORIGIN` is always an allowed origin, so `CORS_ORIGINS` only matters for a deliberately
 cross-origin deployment. A wildcard is rejected at start-up: the browser will not accept one
@@ -135,6 +142,19 @@ person would call a date — today, overdue, the next working day — goes throu
 `apps/api/src/lib/date-utils.ts`, which uses `org_settings.timezone`, the configured weekend
 days and the holiday table.
 
+**One definition per metric.** `modules/tasks/predicates.ts` holds the SQL for open,
+active, due today, due tomorrow, overdue, blocked, waiting review, completed this week and
+no update. The dashboard counts, the member rows, the attention list and the task-list filters
+all call it, so a KPI card and the list behind it cannot disagree. The alert jobs will use it
+too. Each predicate takes the org settings and an explicit `now`, so tests can fix the clock.
+
+**Sessions survive two tabs.** Refreshing rotates the refresh token, and presenting a rotated
+one is treated as theft. Two tabs waking together would otherwise sign the user out of
+everything. The browser serialises refreshes with a Web Lock, and the server allows a token
+rotated within `REFRESH_GRACE_SECONDS` to be presented again *provided its successor is still
+the live end of the chain*. Outside that window, or once the chain has moved on, reuse
+detection revokes every session as before.
+
 **Task numbers cannot collide.** A new task takes its number from
 `UPDATE projects SET task_counter = task_counter + 1 ... RETURNING` inside the creating
 transaction, so simultaneous creates queue instead of clashing. There is a test for ten at once.
@@ -211,6 +231,11 @@ Screenshots of every main screen, in light and dark at 1280px and 375px, are wri
 narrow captures also assert there is no horizontal page scroll.
 
 If Chromium is missing: `pnpm --filter @tm/web exec playwright install chromium`.
+
+The e2e API issues 8 second access tokens, so tokens genuinely expire during a run and the
+cross-tab test can wait one out. CI runs the suite on every pull request with a Postgres
+service container and a cached browser, and uploads the report, traces and screenshots when
+it fails.
 
 ---
 

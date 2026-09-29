@@ -1,3 +1,4 @@
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { boolean, index, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
 import { citext, createdAt, tz, updatedAt, userRoleEnum } from './columns';
 
@@ -31,7 +32,19 @@ export const sessions = pgTable(
     userAgent: text('user_agent'),
     ip: text('ip'),
     expiresAt: tz('expires_at').notNull(),
+    /** Set the moment this token is rotated away or the session is revoked. */
     revokedAt: tz('revoked_at'),
+    /**
+     * The session that replaced this one when it was rotated.
+     *
+     * Following this chain is what separates two tabs refreshing at the same
+     * instant from a genuinely stolen token: a concurrent refresh presents the
+     * token that was rotated a moment ago and whose successor is still live,
+     * while a replay presents one whose chain has already moved on.
+     */
+    replacedBySessionId: uuid('replaced_by_session_id').references((): AnyPgColumn => sessions.id, {
+      onDelete: 'set null',
+    }),
     createdAt: createdAt(),
   },
   (t) => [index('sessions_user_idx').on(t.userId), index('sessions_expiry_idx').on(t.expiresAt)],

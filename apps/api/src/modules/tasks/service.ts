@@ -26,7 +26,8 @@ import {
   ValidationError,
 } from '../../lib/errors';
 import { EventBuffer } from '../../lib/events';
-import { startOfDayUtc, startOfWeek, toDateOnly, workingHoursBetween } from '../../lib/date-utils';
+import { workingHoursBetween } from '../../lib/date-utils';
+import { buildPredicateContext } from './predicates';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
@@ -204,25 +205,19 @@ export async function createTask(
 export async function listTasksForActor(
   actor: Actor,
   query: ListTasksQuery,
+  now = new Date(),
 ): Promise<{ items: TaskSummary[]; nextCursor: string | null }> {
   const { settings, calendar } = await getOrgContext();
-  const now = new Date();
 
-  // The same date-utils the dashboard uses, so a list filtered from a KPI card
+  // The same context the dashboard builds, so a list reached from a KPI card
   // resolves "today" and "this week" exactly as the KPI did.
-  const todayInOrg = toDateOnly(now, calendar.timezone);
-  const weekStart = startOfWeek(todayInOrg, calendar);
-  const weekStartInstant = startOfDayUtc(weekStart, calendar.timezone);
-
-  const noUpdateBefore = new Date(now.getTime() - settings.noUpdateThresholdHours * 3_600_000);
+  const ctx = buildPredicateContext(settings, calendar, now);
 
   const { rows, nextCursor } = await repo.listTasks(db, {
     query,
     actorId: actor.id,
     visibleTeamIds: visibleTeamIds(actor),
-    today: todayInOrg,
-    weekStartInstant,
-    noUpdateBefore,
+    ctx,
   });
 
   const people = await repo.usersByIds(db, rows.flatMap((r) => [r.assigneeId, r.reviewerId]));

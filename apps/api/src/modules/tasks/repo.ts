@@ -20,6 +20,7 @@ import {
   users,
 } from '../../db/schema';
 import { NotFoundError } from '../../lib/errors';
+import * as predicates from './predicates';
 import { decodeCursor, encodeCursor } from '../../lib/cursor';
 
 /** The columns needed to describe a task in a list. */
@@ -296,7 +297,23 @@ function sortExpression(sort: TaskSortField, order: 'asc' | 'desc'): SQL<string>
   }
 }
 
-function buildFilters(query: ListTasksQuery, actorId: string, visibleTeamIds: string[] | null): SQL[] {
+/** The predicate columns, expressed against the Drizzle `tasks` table. */
+const columns: predicates.TaskColumns = {
+  status: sql`${tasks.status}`,
+  dueDate: sql`${tasks.dueDate}`,
+  completedAt: sql`${tasks.completedAt}`,
+  lastActivityAt: sql`${tasks.lastActivityAt}`,
+  updatedAt: sql`${tasks.updatedAt}`,
+  assigneeId: sql`${tasks.assigneeId}`,
+  progress: sql`${tasks.progress}`,
+};
+
+function buildFilters(
+  query: ListTasksQuery,
+  actorId: string,
+  visibleTeamIds: string[] | null,
+  ctx: predicates.PredicateContext,
+): SQL[] {
   const filters: SQL[] = [isNull(tasks.deletedAt)];
 
   // A member only ever sees tasks in their own teams, plus anything they are on.
@@ -351,14 +368,18 @@ function buildFilters(query: ListTasksQuery, actorId: string, visibleTeamIds: st
   if (query.dueFrom) filters.push(sql`${tasks.dueDate} >= ${query.dueFrom}::date`);
   if (query.dueTo) filters.push(sql`${tasks.dueDate} <= ${query.dueTo}::date`);
 
-  if (query.open === true) filters.push(sql`${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`);
-  if (query.open === false) filters.push(sql`${tasks.status} IN ('COMPLETED', 'CANCELLED')`);
-
-  // Active is open minus the backlog; see the metric definitions.
-  if (query.active === true) {
-    filters.push(sql`${tasks.status} NOT IN ('COMPLETED', 'CANCELLED', 'BACKLOG')`);
-  }
-  if (query.blocked) filters.push(eq(tasks.status, 'BLOCKED'));
+  // Every one of these comes from the shared predicates, so a list reached from a
+  // KPI card selects exactly the rows the card counted.
+  if (query.open === true) filters.push(predicates.isOpen(columns));
+  if (query.open === false) filters.push(predicates.isClosed(columns));
+  if (query.active === true) filters.push(predicates.isActive(columns));
+  if (query.blocked) filters.push(predicates.isBlocked(columns));
+  if (query.waitingReview) filters.push(predicates.isWaitingReview(columns));
+  if (query.overdue) filters.push(predicates.isOverdue(columns, ctx));
+  if (query.dueToday) filters.push(predicates.isDueToday(columns, ctx));
+  if (query.dueTomorrow) filters.push(predicates.isDueTomorrow(columns, ctx));
+  if (query.completedThisWeek) filters.push(predicates.isCompletedThisWeek(columns, ctx));
+  if (query.noUpdate) filters.push(predicates.isNoUpdate(columns, ctx));
 
   if (query.q) {
     // Prefix matching so the search box is useful before the word is finished.
@@ -376,45 +397,16 @@ export interface ListTasksOptions {
   actorId: string;
   /** Null means "no team restriction" (super admin). */
   visibleTeamIds: string[] | null;
-  /** Today in the org time zone, so overdue is computed against the right day. */
-  today: string;
-  /** The instant the current week began, in the org time zone. */
-  weekStartInstant: Date;
-  /** Cut-off for the no-update filter. */
-  noUpdateBefore?: Date;
+  /** The clock and calendar every date predicate is evaluated against. */
+  ctx: predicates.PredicateContext;
 }
 
 export async function listTasks(
   handle: Db,
   options: ListTasksOptions,
 ): Promise<{ rows: TaskRow[]; nextCursor: string | null }> {
-  const { query, today } = options;
-  const filters = buildFilters(query, options.actorId, options.visibleTeamIds);
-
-  if (query.overdue) {
-    filters.push(
-      sql`${tasks.dueDate} < ${today}::date AND ${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`,
-    );
-  }
-
-  if (query.dueToday) {
-    filters.push(
-      sql`${tasks.dueDate} = ${today}::date AND ${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`,
-    );
-  }
-
-  if (query.completedThisWeek) {
-    filters.push(sql`${tasks.completedAt} >= ${options.weekStartInstant}`);
-  }
-
-  if (query.noUpdate && options.noUpdateBefore) {
-    filters.push(
-      and(
-        eq(tasks.status, 'IN_PROGRESS'),
-        sql`${tasks.lastActivityAt} < ${options.noUpdateBefore}`,
-      ) as SQL,
-    );
-  }
+  const { query } = options;
+  const filters = buildFilters(query, options.actorId, options.visibleTeamIds, options.ctx);
 
   const expression = sortExpression(query.sort, query.order);
   const cursor = decodeCursor(query.cursor);

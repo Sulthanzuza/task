@@ -104,17 +104,59 @@ export async function login(
   return { response: await buildLoginResponse(row.id), refreshToken };
 }
 
+type SessionRow = typeof sessions.$inferSelect;
+
+async function assertUserActive(userId: string): Promise<void> {
+  const [user] = await db
+    .select({ isActive: users.isActive })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!user?.isActive) throw new UnauthenticatedError('This account is no longer active.');
+}
+
+/**
+ * Is this an already-rotated token coming back from a second tab that started its
+ * refresh before the first one finished?
+ *
+ * Three things must hold: the rotation was moments ago, we know which session
+ * replaced it, and that successor is still the live end of the chain. If the
+ * successor has itself been rotated or revoked, the chain has moved on and this is
+ * a replay of an old token, however recent the rotation looks.
+ */
+async function isConcurrentRefresh(session: SessionRow, now: Date): Promise<boolean> {
+  if (!session.revokedAt || !session.replacedBySessionId) return false;
+
+  const ageSeconds = (now.getTime() - session.revokedAt.getTime()) / 1000;
+  if (ageSeconds > env.REFRESH_GRACE_SECONDS) return false;
+
+  const [successor] = await db
+    .select({ revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .where(eq(sessions.id, session.replacedBySessionId))
+    .limit(1);
+
+  if (!successor) return false;
+  if (successor.revokedAt) return false;
+  return successor.expiresAt.getTime() > now.getTime();
+}
+
 /**
  * Rotates the refresh token.
  *
- * If a token that was already rotated away comes back, someone is replaying a stolen
- * cookie: every session for that user is revoked and they have to sign in again.
+ * A token that was rotated away a moment ago, whose successor is still live, is a
+ * concurrent refresh: the caller gets a fresh access token and keeps its cookie.
+ * Anything else that comes back after rotation is treated as a stolen cookie, and
+ * every session for that user is revoked.
+ *
+ * A null refreshToken in the result means "leave the cookie alone".
  */
 export async function refresh(
   presentedToken: string,
   context: SessionContext,
   now = new Date(),
-): Promise<{ response: LoginResponse; refreshToken: string }> {
+): Promise<{ response: LoginResponse; refreshToken: string | null }> {
   const presentedHash = hashToken(presentedToken);
 
   const [session] = await db
@@ -125,36 +167,69 @@ export async function refresh(
 
   if (!session) throw new UnauthenticatedError('Please sign in again.');
 
-  if (session.revokedAt || session.expiresAt.getTime() <= now.getTime()) {
-    if (session.revokedAt) {
-      logger.warn({ userId: session.userId }, 'A revoked refresh token was replayed; revoking all sessions.');
-      await db
-        .update(sessions)
-        .set({ revokedAt: now })
-        .where(and(eq(sessions.userId, session.userId), isNull(sessions.revokedAt)));
-    }
+  if (session.expiresAt.getTime() <= now.getTime()) {
     throw new UnauthenticatedError('Please sign in again.');
   }
 
-  const [user] = await db
-    .select({ isActive: users.isActive })
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
+  if (session.revokedAt) {
+    // Already rotated away. Either two tabs refreshed at the same moment, or the
+    // token was stolen. The difference is whether the chain has moved on.
+    if (await isConcurrentRefresh(session, now)) {
+      await assertUserActive(session.userId);
+      logger.debug({ userId: session.userId }, 'Concurrent refresh inside the grace window.');
+      // No new cookie: the tab that won the race already set the successor, and
+      // issuing another here would rotate that one away too.
+      return { response: await buildLoginResponse(session.userId), refreshToken: null };
+    }
 
-  if (!user?.isActive) throw new UnauthenticatedError('This account is no longer active.');
+    logger.warn(
+      { userId: session.userId, sessionId: session.id },
+      'A revoked refresh token was replayed outside the grace window; revoking all sessions.',
+    );
+    await db
+      .update(sessions)
+      .set({ revokedAt: now })
+      .where(and(eq(sessions.userId, session.userId), isNull(sessions.revokedAt)));
+    throw new UnauthenticatedError('Please sign in again.');
+  }
+
+  await assertUserActive(session.userId);
 
   const rotated = await withTransaction(async (tx) => {
-    await tx.update(sessions).set({ revokedAt: now }).where(eq(sessions.id, session.id));
+    // Lock the row first: two requests arriving together must not both rotate it,
+    // or each would create a successor and one of them would be orphaned.
+    const [locked] = await tx
+      .select({ revokedAt: sessions.revokedAt })
+      .from(sessions)
+      .where(eq(sessions.id, session.id))
+      .limit(1)
+      .for('update');
+
+    // The other request got here first; fall back to the concurrent-refresh path.
+    if (!locked || locked.revokedAt) return null;
+
     const refreshToken = generateToken();
-    await tx.insert(sessions).values({
-      userId: session.userId,
-      refreshTokenHash: hashToken(refreshToken),
-      userAgent: context.userAgent ?? null,
-      ip: context.ip ?? null,
-      expiresAt: new Date(now.getTime() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
-      createdAt: now,
-    });
+    const [successor] = await tx
+      .insert(sessions)
+      .values({
+        userId: session.userId,
+        refreshTokenHash: hashToken(refreshToken),
+        userAgent: context.userAgent ?? null,
+        ip: context.ip ?? null,
+        expiresAt: new Date(now.getTime() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
+        createdAt: now,
+      })
+      .returning({ id: sessions.id });
+
+    if (!successor) throw new Error('Session insert returned no row');
+
+    // Recording the successor is what lets a late arrival tell a concurrent
+    // refresh from a replay.
+    await tx
+      .update(sessions)
+      .set({ revokedAt: now, replacedBySessionId: successor.id })
+      .where(eq(sessions.id, session.id));
+
     return refreshToken;
   });
 

@@ -5,15 +5,27 @@ import { db } from '../../db/client';
 import type { Actor } from '../../middleware/authenticate';
 import { ForbiddenError, ValidationError } from '../../lib/errors';
 import {
-  addDays,
   endOfDayUtc,
   hoursBetween,
-  startOfWeek,
   toDateOnly,
   workingDaysBetween,
   workingHoursBetween,
   type WorkCalendar,
 } from '../../lib/date-utils';
+import {
+  aliased,
+  buildPredicateContext,
+  isActive,
+  isBlocked,
+  isCompletedThisWeek,
+  isDueToday,
+  isNoUpdate,
+  isOpen,
+  isOverdue,
+  isUnassignedOpen,
+  isWaitingReview,
+  needsAttention,
+} from '../tasks/predicates';
 import { getOrgContext } from '../org/service';
 import { authorize } from '../permissions/authorize';
 import { teamMemberIds, usersByIdList } from '../users/service';
@@ -45,32 +57,21 @@ export async function getSummary(
   const scopedTeamId = requireTeam(actor, teamId);
   const { settings, calendar } = await getOrgContext();
 
-  const today = toDateOnly(now, calendar.timezone);
-  const weekStart = startOfWeek(today, calendar);
-  const weekStartInstant = endOfDayUtc(addDays(weekStart, -1), calendar.timezone);
-  const noUpdateCutoff = new Date(now.getTime() - settings.noUpdateThresholdHours * 3_600_000);
+  const ctx = buildPredicateContext(settings, calendar, now);
+  const c = aliased('t');
 
-  // One pass over the team's tasks: every KPI is a filtered count.
+  // One pass over the team's tasks: every KPI is a filtered count, and every
+  // filter comes from the shared predicates so it matches the task list exactly.
   const result = await db.execute(sql`
     SELECT
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.status <> 'BACKLOG'
-      ) AS active,
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.due_date = ${today}::date
-      ) AS due_today,
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.due_date < ${today}::date
-      ) AS overdue,
-      count(*) FILTER (WHERE t.status = 'BLOCKED') AS blocked,
-      count(*) FILTER (WHERE t.status IN ('READY_FOR_REVIEW','IN_REVIEW')) AS waiting_review,
-      count(*) FILTER (WHERE t.completed_at >= ${weekStartInstant}) AS completed_this_week,
-      count(*) FILTER (
-        WHERE t.status = 'IN_PROGRESS' AND t.last_activity_at < ${noUpdateCutoff}
-      ) AS no_update,
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.assignee_id IS NULL
-      ) AS unassigned_open
+      count(*) FILTER (WHERE ${isActive(c)}) AS active,
+      count(*) FILTER (WHERE ${isDueToday(c, ctx)}) AS due_today,
+      count(*) FILTER (WHERE ${isOverdue(c, ctx)}) AS overdue,
+      count(*) FILTER (WHERE ${isBlocked(c)}) AS blocked,
+      count(*) FILTER (WHERE ${isWaitingReview(c)}) AS waiting_review,
+      count(*) FILTER (WHERE ${isCompletedThisWeek(c, ctx)}) AS completed_this_week,
+      count(*) FILTER (WHERE ${isNoUpdate(c, ctx)}) AS no_update,
+      count(*) FILTER (WHERE ${isUnassignedOpen(c)}) AS unassigned_open
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
     WHERE t.deleted_at IS NULL AND p.team_id = ${scopedTeamId}::uuid
@@ -88,7 +89,7 @@ export async function getSummary(
     completedThisWeek: count('completed_this_week'),
     noUpdate: count('no_update'),
     unassignedOpen: count('unassigned_open'),
-    asOfDate: today,
+    asOfDate: ctx.today,
     timezone: calendar.timezone,
   };
 }
@@ -99,11 +100,10 @@ export async function getMemberRows(
   now = new Date(),
 ): Promise<MemberRow[]> {
   const scopedTeamId = requireTeam(actor, teamId);
-  const { calendar } = await getOrgContext();
+  const { settings, calendar } = await getOrgContext();
 
-  const today = toDateOnly(now, calendar.timezone);
-  const weekStart = startOfWeek(today, calendar);
-  const weekStartInstant = endOfDayUtc(addDays(weekStart, -1), calendar.timezone);
+  const ctx = buildPredicateContext(settings, calendar, now);
+  const c = aliased('t');
 
   const memberIds = await teamMemberIds(scopedTeamId);
   if (memberIds.length === 0) return [];
@@ -111,15 +111,11 @@ export async function getMemberRows(
   const result = await db.execute(sql`
     SELECT
       t.assignee_id AS user_id,
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.status <> 'BACKLOG'
-      ) AS active,
-      count(*) FILTER (
-        WHERE t.status NOT IN ('COMPLETED','CANCELLED') AND t.due_date < ${today}::date
-      ) AS overdue,
-      count(*) FILTER (WHERE t.status = 'BLOCKED') AS blocked,
-      count(*) FILTER (WHERE t.status IN ('READY_FOR_REVIEW','IN_REVIEW')) AS waiting_review,
-      count(*) FILTER (WHERE t.completed_at >= ${weekStartInstant}) AS completed_this_week,
+      count(*) FILTER (WHERE ${isActive(c)}) AS active,
+      count(*) FILTER (WHERE ${isOverdue(c, ctx)}) AS overdue,
+      count(*) FILTER (WHERE ${isBlocked(c)}) AS blocked,
+      count(*) FILTER (WHERE ${isWaitingReview(c)}) AS waiting_review,
+      count(*) FILTER (WHERE ${isCompletedThisWeek(c, ctx)}) AS completed_this_week,
       max(t.last_activity_at) AS last_activity_at
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
@@ -166,9 +162,9 @@ export async function getAttention(
   const scopedTeamId = requireTeam(actor, teamId);
   const { settings, calendar } = await getOrgContext();
 
-  const today = toDateOnly(now, calendar.timezone);
-  const noUpdateCutoff = new Date(now.getTime() - settings.noUpdateThresholdHours * 3_600_000);
-  const reviewCutoff = new Date(now.getTime() - settings.reviewWaitingThresholdHours * 3_600_000);
+  const ctx = buildPredicateContext(settings, calendar, now);
+  const c = aliased('t');
+  const today = ctx.today;
 
   const result = await db.execute(sql`
     SELECT
@@ -179,14 +175,8 @@ export async function getAttention(
     JOIN projects p ON p.id = t.project_id
     WHERE t.deleted_at IS NULL
       AND p.team_id = ${scopedTeamId}::uuid
-      AND t.status NOT IN ('COMPLETED','CANCELLED')
-      AND (
-        t.due_date < ${today}::date
-        OR (t.due_date = ${today}::date AND t.progress < ${METRIC_DEFAULTS.dueTodayProgressThreshold})
-        OR t.status = 'BLOCKED'
-        OR (t.status = 'IN_PROGRESS' AND t.last_activity_at < ${noUpdateCutoff})
-        OR (t.status IN ('READY_FOR_REVIEW','IN_REVIEW') AND t.updated_at < ${reviewCutoff})
-      )
+      AND ${isOpen(c)}
+      AND ${needsAttention(c, ctx)}
   `);
 
   const rows = result.rows as Array<Record<string, unknown>>;

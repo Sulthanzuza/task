@@ -8,6 +8,13 @@
       "when": 1790611580382,
       "tag": "0000_big_sandman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790655792449,
+      "tag": "0001_funny_roland_deschain",
+      "breakpoints": true
     }
   ]
 }

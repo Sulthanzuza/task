@@ -127,7 +127,21 @@ describe('refresh', () => {
 
     const second = refreshCookie(refreshed);
 
-    // Replaying the rotated-away token looks like a stolen cookie.
+    // Age the rotation past the grace window. Inside the window a repeat is two
+    // tabs refreshing together, which is covered separately; outside it, a
+    // rotated-away token coming back is a stolen cookie.
+    const { db } = await import('../src/db/client');
+    const { sessions } = await import('../src/db/schema');
+    const { hashToken } = await import('../src/lib/crypto');
+    const { eq } = await import('drizzle-orm');
+    const { env } = await import('../src/config/env');
+
+    const presented = decodeURIComponent(first.split('=')[1] as string);
+    await db
+      .update(sessions)
+      .set({ revokedAt: new Date(Date.now() - (env.REFRESH_GRACE_SECONDS + 60) * 1000) })
+      .where(eq(sessions.refreshTokenHash, hashToken(presented)));
+
     await request(harness.app)
       .post('/api/v1/auth/refresh')
       .set('Cookie', first)
@@ -313,5 +327,106 @@ describe('the error contract', () => {
     expect(response.body.error.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: 'email' })]),
     );
+  });
+});
+
+describe('concurrent refresh across tabs', () => {
+  /**
+   * Two tabs waking together present the same refresh token. That must not look
+   * like theft. The grace window allows it, but only while the chain is intact.
+   */
+  async function loginAndGetCookie(): Promise<string> {
+    const login = await request(harness.app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'lead-a@test.local', password: PASSWORD })
+      .expect(200);
+    return refreshCookie(login);
+  }
+
+  const refreshWith = (cookie: string) =>
+    request(harness.app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie)
+      .set('X-Requested-With', 'XMLHttpRequest');
+
+  it('lets two simultaneous refreshes with one token both succeed', async () => {
+    const cookie = await loginAndGetCookie();
+
+    const [first, second] = await Promise.all([refreshWith(cookie), refreshWith(cookie)]);
+
+    expect(first.status, 'the first refresh should succeed').toBe(200);
+    expect(second.status, 'the second should be treated as concurrent, not theft').toBe(200);
+    expect(first.body.accessToken).toBeTruthy();
+    expect(second.body.accessToken).toBeTruthy();
+
+    // Exactly one of them rotated the cookie; the other left it alone.
+    const rotations = [first, second].filter((r) => {
+      const raw = r.headers['set-cookie'];
+      const cookies = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      return cookies.some((c) => c.startsWith('tm_refresh='));
+    });
+    expect(rotations, 'only one response may set a new refresh cookie').toHaveLength(1);
+
+    // And the session survives: the successor still works.
+    const successor = refreshCookie(rotations[0] as request.Response);
+    await refreshWith(successor).expect(200);
+  });
+
+  it('accepts a sequential replay inside the grace window', async () => {
+    const cookie = await loginAndGetCookie();
+
+    const rotated = await refreshWith(cookie).expect(200);
+    const successor = refreshCookie(rotated);
+
+    // The same old token again, moments later: still a concurrent refresh.
+    const late = await refreshWith(cookie).expect(200);
+    expect(late.body.accessToken).toBeTruthy();
+    expect(late.headers['set-cookie']).toBeUndefined();
+
+    // The live session is untouched.
+    await refreshWith(successor).expect(200);
+  });
+
+  it('revokes everything when the token is replayed after the grace window', async () => {
+    const cookie = await loginAndGetCookie();
+    const rotated = await refreshWith(cookie).expect(200);
+    const successor = refreshCookie(rotated);
+
+    // Age the rotation past the window.
+    const { db } = await import('../src/db/client');
+    const { sessions } = await import('../src/db/schema');
+    const { hashToken } = await import('../src/lib/crypto');
+    const { eq } = await import('drizzle-orm');
+    const { env } = await import('../src/config/env');
+
+    const presented = cookie.split('=')[1] as string;
+    const longAgo = new Date(Date.now() - (env.REFRESH_GRACE_SECONDS + 60) * 1000);
+    await db
+      .update(sessions)
+      .set({ revokedAt: longAgo })
+      .where(eq(sessions.refreshTokenHash, hashToken(decodeURIComponent(presented))));
+
+    await refreshWith(cookie).expect(401);
+
+    // The whole chain is dead, including the successor the honest tab holds.
+    await refreshWith(successor).expect(401);
+  });
+
+  it('revokes even inside the window when the token is two rotations old', async () => {
+    const cookie = await loginAndGetCookie();
+
+    const second = refreshCookie(await refreshWith(cookie).expect(200));
+    const third = refreshCookie(await refreshWith(second).expect(200));
+
+    // The original is now two rotations behind: its successor has itself been
+    // rotated, so the chain has moved on and this cannot be a concurrent refresh.
+    await refreshWith(cookie).expect(401);
+
+    // Reuse detection revoked the lot.
+    await refreshWith(third).expect(401);
+  });
+
+  it('still refuses a token that never existed', async () => {
+    await refreshWith('tm_refresh=' + 'z'.repeat(60)).expect(401);
   });
 });

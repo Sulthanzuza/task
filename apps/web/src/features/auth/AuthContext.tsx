@@ -8,7 +8,13 @@ import {
   type ReactNode,
 } from 'react';
 import type { AuthUser } from '@tm/shared';
-import { api, restoreSession, setAccessToken, setAuthLostHandler } from '@/lib/api';
+import {
+  api,
+  cancelScheduledRefresh,
+  restoreSession,
+  setAccessToken,
+  setAuthLostHandler,
+} from '@/lib/api';
 
 interface AuthState {
   user: AuthUser | null;
@@ -51,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const response = await api.login(email, password);
-    setAccessToken(response.accessToken);
+    setAccessToken(response.accessToken, response.expiresInSeconds);
     setUser(response.user);
   }, []);
 
@@ -59,6 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.post('/auth/logout');
     } finally {
+      // Nothing left to keep alive.
+      cancelScheduledRefresh();
       setAccessToken(null);
       setUser(null);
     }

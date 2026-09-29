@@ -28,6 +28,20 @@ async function applyTheme(page: Page, theme: 'light' | 'dark') {
   }, theme);
 }
 
+/** Everything that affects how a capture looks, without waiting on the network. */
+async function settle(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all(
+      Array.from(document.images)
+        .filter((img) => !img.complete)
+        .map((img) => new Promise((resolve) => img.addEventListener('load', resolve, { once: true }))),
+    );
+  });
+  // One frame for transitions to land.
+  await page.waitForTimeout(120);
+}
+
 /** The page must not scroll sideways: that is what breaks a phone layout. */
 async function expectNoHorizontalScroll(page: Page, label: string) {
   const overflow = await page.evaluate(() => ({
@@ -39,6 +53,8 @@ async function expectNoHorizontalScroll(page: Page, label: string) {
     label + ' scrolls sideways: ' + overflow.scrollWidth + 'px in a ' + overflow.clientWidth + 'px viewport',
   ).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
+
+test.describe.configure({ timeout: 120_000 });
 
 test('capture every screen in light and dark, at desktop and phone width', async ({
   page,
@@ -66,8 +82,9 @@ test('capture every screen in light and dark, at desktop and phone width', async
         await page.goto(screen.path);
         await applyTheme(page, theme);
         await expect(page.getByText(screen.ready).first()).toBeVisible();
-        // Let images, fonts and the query cache settle before capturing.
-        await page.waitForLoadState('networkidle');
+        // Wait for fonts rather than for the network to fall idle: the client
+        // refreshes its token on a timer, so the network is never truly quiet.
+        await settle(page);
 
         await page.screenshot({
           path: DIR + '/' + screen.name + '-' + theme + '-' + viewport.name + '.png',
@@ -91,6 +108,7 @@ test('the login screen is captured too', async ({ page, problems }) => {
       await page.goto('/login');
       await applyTheme(page, theme);
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+      await settle(page);
       await page.screenshot({
         path: DIR + '/login-' + theme + '-' + viewport.name + '.png',
         fullPage: true,

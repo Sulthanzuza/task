@@ -18,7 +18,7 @@ export function signAccessToken(claims: AccessTokenClaims): {
   token: string;
   expiresInSeconds: number;
 } {
-  const expiresInSeconds = env.JWT_ACCESS_TTL_MINUTES * 60;
+  const expiresInSeconds = env.JWT_ACCESS_TTL_SECONDS;
   const token = jwt.sign(claims, env.JWT_ACCESS_SECRET, {
     expiresIn: expiresInSeconds,
     issuer: ISSUER,

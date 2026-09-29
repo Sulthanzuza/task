@@ -169,7 +169,9 @@ export const listTasksQuerySchema = cursorPaginationSchema.extend({
    * must not compute either from its own clock.
    */
   dueToday: booleanQuerySchema,
+  dueTomorrow: booleanQuerySchema,
   completedThisWeek: booleanQuerySchema,
+  waitingReview: booleanQuerySchema,
   noUpdate: booleanQuerySchema,
   parentId: z.union([uuidSchema, z.literal('none')]).optional(),
   q: z.string().trim().min(1).max(200).optional(),

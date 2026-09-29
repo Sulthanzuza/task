@@ -13,9 +13,22 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url('DATABASE_URL must be a postgres connection string'),
 
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET needs at least 32 characters'),
-  JWT_ACCESS_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(15),
+  /**
+   * Access token lifetime, in seconds. Seconds rather than minutes so an
+   * end-to-end test can force an expiry without waiting a minute for it.
+   */
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(1).max(14_400).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
+
+  /**
+   * How long a just-rotated refresh token keeps working.
+   *
+   * Two tabs waking together can both present the same token before either sees
+   * the new one. Inside this window that is treated as one concurrent refresh
+   * rather than theft, provided the chain has not moved on. Keep it short.
+   */
+  REFRESH_GRACE_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
 
   /** The canonical address of the web app, used to build links in emails. */
   WEB_ORIGIN: z.string().url().default('http://localhost:5174'),
@@ -100,3 +113,48 @@ export const isTest = env.NODE_ENV === 'test';
 export const allowedOrigins: string[] = [
   ...new Set([env.WEB_ORIGIN.replace(/\/$/, ''), ...env.CORS_ORIGINS]),
 ];
+
+/**
+ * Settings that are safe to relax for a test run but dangerous to leave relaxed.
+ * Reported at start-up rather than enforced, because a deployment may have a
+ * genuine reason (a whole office behind one address, say) -- but it should be a
+ * decision someone made, not one that slipped through from a test environment.
+ */
+export function unsafeProductionSettings(): string[] {
+  if (!isProduction) return [];
+
+  const warnings: string[] = [];
+  const defaults = { auth: 5, api: 300, upload: 30 };
+
+  if (env.AUTH_RATE_LIMIT_PER_MINUTE > defaults.auth) {
+    warnings.push(
+      'AUTH_RATE_LIMIT_PER_MINUTE is ' +
+        env.AUTH_RATE_LIMIT_PER_MINUTE +
+        ', above the default of ' +
+        defaults.auth +
+        '; brute-force protection on sign-in is weakened',
+    );
+  }
+  if (env.API_RATE_LIMIT_PER_MINUTE > defaults.api) {
+    warnings.push(
+      'API_RATE_LIMIT_PER_MINUTE is ' + env.API_RATE_LIMIT_PER_MINUTE + ', above the default of ' + defaults.api,
+    );
+  }
+  if (env.UPLOAD_RATE_LIMIT_PER_MINUTE > defaults.upload) {
+    warnings.push(
+      'UPLOAD_RATE_LIMIT_PER_MINUTE is ' +
+        env.UPLOAD_RATE_LIMIT_PER_MINUTE +
+        ', above the default of ' +
+        defaults.upload,
+    );
+  }
+  if (env.REFRESH_GRACE_SECONDS > 60) {
+    warnings.push(
+      'REFRESH_GRACE_SECONDS is ' +
+        env.REFRESH_GRACE_SECONDS +
+        '; a long grace window widens the gap in refresh-token reuse detection',
+    );
+  }
+
+  return warnings;
+}

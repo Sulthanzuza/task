@@ -7,6 +7,7 @@ on:
 
 jobs:
   verify:
+    name: Typecheck, lint and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +29,98 @@ jobs:
 
       - run: pnpm lint
 
+      # The API integration tests start their own Postgres through Testcontainers,
+      # which needs the Docker daemon the runner already provides.
       - run: pnpm test
         env:
           NODE_ENV: test
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: taskmanager
+          POSTGRES_PASSWORD: taskmanager
+          POSTGRES_DB: taskmanager
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U taskmanager -d taskmanager"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      E2E_DATABASE_URL: postgres://taskmanager:taskmanager@localhost:5433/taskmanager_e2e
+      # The suite sets its own ports; these only have to be free on the runner.
+      E2E_API_PORT: 4100
+      E2E_WEB_PORT: 5199
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Chromium is ~150MB; cache it against the resolved Playwright version so a
+      # dependency bump invalidates the cache instead of using a stale browser.
+      - name: Resolve the Playwright version
+        id: playwright
+        run: |
+          VERSION=$(pnpm --filter @tm/web exec playwright --version | awk '{print $2}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the browser cache
+        id: browser-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @tm/web exec playwright install --with-deps chromium
+
+      # A cached browser still needs the system libraries it links against.
+      - name: Install browser system dependencies
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @tm/web exec playwright install-deps chromium
+
+      - run: pnpm e2e
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/e2e/.report
+          retention-days: 7
+
+      - name: Upload traces and failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: apps/web/e2e/.artifacts
+          retention-days: 7
+
+      # Committed screenshots: on failure these show what the run actually rendered.
+      - name: Upload the captured screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: apps/web/e2e/screenshots
+          retention-days: 7

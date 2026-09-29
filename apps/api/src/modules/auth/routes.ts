@@ -106,7 +106,9 @@ authRouter.post(
 
     try {
       const { response, refreshToken } = await service.refresh(presented, sessionContext(req));
-      setRefreshCookie(res, refreshToken);
+      // A null token means another tab already rotated this session. Setting a
+      // cookie here would overwrite the successor that tab is holding.
+      if (refreshToken !== null) setRefreshCookie(res, refreshToken);
       res.json(response);
     } catch (error) {
       clearRefreshCookie(res);

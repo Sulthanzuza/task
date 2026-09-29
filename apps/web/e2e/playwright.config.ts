@@ -31,6 +31,12 @@ const apiEnv = {
   // API integration tests.
   AUTH_RATE_LIMIT_PER_MINUTE: '1000',
   API_RATE_LIMIT_PER_MINUTE: '100000',
+  // Short enough that tokens genuinely expire during the suite and the cross-tab
+  // test can wait one out, long enough that a single interaction does not
+  // straddle an expiry. A 3 second token would be shorter than a form fill and
+  // would manufacture races that cannot happen in practice.
+  JWT_ACCESS_TTL_SECONDS: '8',
+  REFRESH_GRACE_SECONDS: '30',
   SEED_TIMEZONE: 'Asia/Kolkata',
   SEED_PASSWORD: 'Password123!',
 };

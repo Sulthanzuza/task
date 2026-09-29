@@ -16,6 +16,7 @@ import {
 import { authenticate, requireActor } from '../../middleware/authenticate';
 import { handler, validate } from '../../middleware/validate';
 import * as service from './service';
+import { mentionableUsers } from './mentions';
 import { addComment } from '../comments/service';
 
 export const tasksRouter: Router = Router();
@@ -80,6 +81,23 @@ tasksRouter.get(
   handler(async (req, res) => {
     const timeline = await service.getTimeline(requireActor(req), req.params.idOrKey as string);
     res.json({ items: timeline });
+  }),
+);
+
+/**
+ * Who can be mentioned here.
+ *
+ * The browser must not work this out for itself: offering somebody who cannot
+ * read the task would either notify nobody or reveal that they exist.
+ */
+tasksRouter.get(
+  '/:idOrKey/mentionable',
+  validate({ params: refParam, query: z.object({ q: z.string().trim().max(100).optional() }) }),
+  handler(async (req, res) => {
+    const { q } = req.query as { q?: string };
+    res.json({
+      items: await mentionableUsers(requireActor(req), req.params.idOrKey as string, q),
+    });
   }),
 );
 

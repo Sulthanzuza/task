@@ -51,6 +51,10 @@ export function NotificationPreferencesPage() {
                 <th className="px-4 py-2 font-medium">Tell me when</th>
                 <th className="w-20 px-2 py-2 text-center font-medium">In app</th>
                 <th className="w-20 px-2 py-2 text-center font-medium">Email</th>
+                <th className="w-28 px-2 py-2 text-center font-medium">
+                  Digest only
+                  <span className="block text-[11px] font-normal text-ink-faint">once a day</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -83,6 +87,27 @@ export function NotificationPreferencesPage() {
                         className="accent-[var(--color-accent)]"
                         onChange={(e) =>
                           setPreference.mutate({ type, email: e.currentTarget.checked })
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 text-center">
+                      {/*
+                        Only meaningful when email is on: it moves this kind of
+                        change out of its own message and into the daily digest.
+                      */}
+                      <input
+                        type="checkbox"
+                        aria-label={'Digest only: ' + (LABELS[type] ?? type)}
+                        checked={preference.digestOnly}
+                        disabled={!preference.email}
+                        title={
+                          preference.email
+                            ? 'Collect these into the daily digest instead of emailing each one'
+                            : 'Turn email on first'
+                        }
+                        className="accent-[var(--color-accent)] disabled:opacity-40"
+                        onChange={(e) =>
+                          setPreference.mutate({ type, digestOnly: e.currentTarget.checked })
                         }
                       />
                     </td>

@@ -285,6 +285,11 @@ function registerEventForwarding(): void {
   events.on('task.progress', changed('progress'));
   events.on('comment.created', changed('commented'));
 
+  // Attaching or removing a file changes what the task page shows, so the
+  // other tabs looking at it need to hear about it like any other change.
+  events.on('attachment.created', changed('attached'));
+  events.on('attachment.deleted', changed('attached'));
+
   events.on('task.deleted', (event) => {
     const payload: TaskDeletedEvent = {
       taskId: event.taskId,

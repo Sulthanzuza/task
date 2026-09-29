@@ -1,6 +1,16 @@
 import type { APIRequestContext } from '@playwright/test';
 import type { DashboardSummary } from '@tm/shared';
-import { apiAs, expect, signIn, test, USERS } from '../fixtures';
+import {
+  apiAs,
+  clearMailbox,
+  expect,
+  findMail,
+  mailBody,
+  signIn,
+  test,
+  USERS,
+  type MailpitMessage,
+} from '../fixtures';
 import { E2E_MAILPIT_URL } from '../playwright.config';
 
 /**
@@ -10,34 +20,6 @@ import { E2E_MAILPIT_URL } from '../playwright.config';
  * dashboard all say the same thing. A digest whose numbers disagree with the
  * screen is worse than no digest.
  */
-
-interface MailpitMessage {
-  ID: string;
-  Subject: string;
-  To: Array<{ Address: string }>;
-}
-
-async function clearMailbox(api: APIRequestContext): Promise<void> {
-  await api.delete(E2E_MAILPIT_URL + '/api/v1/messages');
-}
-
-async function findMail(
-  api: APIRequestContext,
-  predicate: (message: MailpitMessage) => boolean,
-  timeoutMs = 25_000,
-): Promise<MailpitMessage> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const response = await api.get(E2E_MAILPIT_URL + '/api/v1/messages?limit=50');
-    if (response.ok()) {
-      const body = (await response.json()) as { messages?: MailpitMessage[] };
-      const found = (body.messages ?? []).find(predicate);
-      if (found) return found;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error('No matching email arrived within ' + timeoutMs + 'ms');
-}
 
 /** Drives a scheduled job through the test-only route. */
 async function runJob(api: APIRequestContext, name: string, now?: string): Promise<unknown> {
@@ -56,21 +38,27 @@ test('the digest email and the bell match the dashboard', async ({ page, api }) 
   const lead = await apiAs(api, USERS.lead);
   const dashboard = await lead.get<DashboardSummary>('/dashboard/summary');
 
-  // Morning in the org time zone, so the digest is not considered too late.
-  const now = new Date();
-  now.setUTCHours(3, 30, 0, 0);
+  /*
+   * Nine in the morning on the organisation's today, taken from the server
+   * rather than from this machine's UTC date: just after midnight in Kolkata
+   * the two are different days, and the digest would be built for yesterday
+   * while the dashboard above reports today.
+   *
+   * If that hour has not arrived yet, the present is used instead. The email
+   * is queued relative to the instant the job is given, so a time in the
+   * future would park it there for hours; what matters is only that the
+   * digest and the dashboard are built for the same day.
+   */
+  const today = (await lead.get<{ date: string }>('/org/digest-preview')).date;
+  const nineAm = new Date(today + 'T03:30:00.000Z');
+  const at = nineAm.getTime() <= Date.now() ? nineAm : new Date();
 
-  await runJob(api, 'daily-digest', now.toISOString());
+  await runJob(api, 'daily-digest', at.toISOString());
 
   // The email arrives, addressed to the lead.
-  const message = await findMail(api, (m) =>
-    m.To.some((to) => to.Address === USERS.lead.email),
-  );
+  const message = await findMail(api, (m) => m.To.some((to) => to.Address === USERS.lead.email));
 
-  const source = await api.get(E2E_MAILPIT_URL + '/api/v1/message/' + message.ID);
-  expect(source.ok()).toBe(true);
-  const body = (await source.json()) as { HTML?: string; Text?: string };
-  const content = (body.HTML ?? '') + (body.Text ?? '');
+  const content = await mailBody(api, message.ID);
 
   // The same figures the dashboard reports, not a second opinion.
   expect(content, 'the digest must report the active count').toContain(

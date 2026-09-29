@@ -18,8 +18,9 @@ import { authenticate, requireActor } from '../../middleware/authenticate';
 import { uploadLimiter } from '../../middleware/rateLimit';
 import { handler, validate } from '../../middleware/validate';
 import { authorize } from '../permissions/authorize';
-import { loadTaskOr404, toResource } from '../tasks/service';
+import { eventBase, loadTaskOr404, toResource } from '../tasks/service';
 import * as taskRepo from '../tasks/repo';
+import { EventBuffer } from '../../lib/events';
 
 /**
  * Two routers, because the routes live under two prefixes.
@@ -78,6 +79,9 @@ taskAttachmentsRouter.post(
       fileName: file.originalname,
     });
 
+    const uploadedAt = new Date();
+    const buffer = new EventBuffer();
+
     const created = await withTransaction(async (tx) => {
       const [row] = await tx
         .insert(taskAttachments)
@@ -104,11 +108,23 @@ taskAttachmentsRouter.post(
             newValue: { fileName: file.originalname, mimeType: verdict.mime },
           },
         ],
-        new Date(),
+        uploadedAt,
       );
+
+      /*
+       * Announced only once the transaction has committed, so a tab cannot be
+       * told about a file that a rollback then took away.
+       */
+      buffer.add('attachment.created', {
+        ...eventBase(task, actor, uploadedAt),
+        attachmentId: row.id,
+        fileName: file.originalname,
+      });
 
       return row.id;
     });
+
+    buffer.flush();
 
     res.status(201).json({
       id: created,
@@ -134,7 +150,10 @@ taskAttachmentsRouter.get(
       .where(eq(taskAttachments.taskId, task.id))
       .orderBy(desc(taskAttachments.createdAt));
 
-    const people = await taskRepo.usersByIds(db, rows.map((r) => r.uploadedBy));
+    const people = await taskRepo.usersByIds(
+      db,
+      rows.map((r) => r.uploadedBy),
+    );
 
     res.json({
       items: rows.map((row) => ({
@@ -208,11 +227,15 @@ attachmentsRouter.delete(
 
     const resource = await toResource(db, task);
     // Deleting someone else's upload is a lead's decision, like a comment.
-    authorize(
-      actor,
-      'comment.delete',
-      { kind: 'comment', authorId: row.uploadedBy, createdAt: row.createdAt, task: resource },
-    );
+    authorize(actor, 'comment.delete', {
+      kind: 'comment',
+      authorId: row.uploadedBy,
+      createdAt: row.createdAt,
+      task: resource,
+    });
+
+    const removedAt = new Date();
+    const buffer = new EventBuffer();
 
     await withTransaction(async (tx) => {
       await tx
@@ -229,9 +252,17 @@ attachmentsRouter.delete(
             oldValue: { fileName: row.fileName },
           },
         ],
-        new Date(),
+        removedAt,
       );
+
+      buffer.add('attachment.deleted', {
+        ...eventBase(task, actor, removedAt),
+        attachmentId: row.id,
+        fileName: row.fileName,
+      });
     });
+
+    buffer.flush();
 
     // Only after the row is gone: an orphaned object is tidier than a row
     // pointing at nothing.

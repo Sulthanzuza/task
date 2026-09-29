@@ -88,10 +88,10 @@ export const createTaskSchema = z
     parentTaskId: uuidSchema.nullable().optional(),
     dependsOnTaskIds: z.array(uuidSchema).default([]),
   })
-  .refine(
-    (v) => !v.startDate || !v.dueDate || v.startDate <= v.dueDate,
-    { message: 'Start date must be on or before the due date', path: ['dueDate'] },
-  );
+  .refine((v) => !v.startDate || !v.dueDate || v.startDate <= v.dueDate, {
+    message: 'Start date must be on or before the due date',
+    path: ['dueDate'],
+  });
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 
 /** Status and assignee are deliberately absent: they move through their own endpoints. */
@@ -107,10 +107,10 @@ export const updateTaskSchema = z
     parentTaskId: uuidSchema.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update')
-  .refine(
-    (v) => !v.startDate || !v.dueDate || v.startDate <= v.dueDate,
-    { message: 'Start date must be on or before the due date', path: ['dueDate'] },
-  );
+  .refine((v) => !v.startDate || !v.dueDate || v.startDate <= v.dueDate, {
+    message: 'Start date must be on or before the due date',
+    path: ['dueDate'],
+  });
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 
 export const transitionTaskSchema = z
@@ -264,3 +264,19 @@ export const boardQuerySchema = z.object({
   teamId: uuidSchema.optional(),
 });
 export type BoardQuery = z.infer<typeof boardQuerySchema>;
+
+/**
+ * A person's own recent activity, for their member page.
+ *
+ * It carries the task it happened on, because "changed the status" means
+ * nothing without saying of what.
+ */
+export const memberActivityEntrySchema = activityEntrySchema.extend({
+  task: z.object({
+    id: uuidSchema,
+    key: z.string(),
+    title: z.string(),
+    status: taskStatusSchema,
+  }),
+});
+export type MemberActivityEntry = z.infer<typeof memberActivityEntrySchema>;

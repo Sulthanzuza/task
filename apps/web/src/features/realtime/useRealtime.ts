@@ -47,9 +47,7 @@ export function useRealtime(): void {
 
       // Also compare against what the cache already holds, which may be newer
       // than anything this tab has seen over the wire.
-      const cached =
-        client.getQueryData<TaskDetail>(queryKeys.tasks.detail(taskId)) ??
-        undefined;
+      const cached = client.getQueryData<TaskDetail>(queryKeys.tasks.detail(taskId)) ?? undefined;
       if (cached && Date.parse(cached.updatedAt) > stamp) return true;
 
       seen.set(taskId, stamp);
@@ -68,6 +66,12 @@ export function useRealtime(): void {
         void client.invalidateQueries({ queryKey: ['tasks', 'list'] });
         void client.invalidateQueries({ queryKey: queryKeys.tasks.timeline(event.taskKey) });
         void client.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+
+        // The file list is its own query, so a change to it has to be named.
+        if (event.reason === 'attached') {
+          void client.invalidateQueries({ queryKey: queryKeys.tasks.attachments(event.taskKey) });
+          void client.invalidateQueries({ queryKey: queryKeys.tasks.attachments(event.taskId) });
+        }
       },
 
       onTaskDeleted(event: TaskDeletedEvent) {

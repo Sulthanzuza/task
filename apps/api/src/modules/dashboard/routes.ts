@@ -44,6 +44,21 @@ dashboardRouter.get(
 export const membersRouter: Router = Router();
 membersRouter.use(authenticate);
 
+/** The last things this person did, for their member page. */
+membersRouter.get(
+  '/:id/activity',
+  validate({
+    params: idParamSchema,
+    query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional() }),
+  }),
+  handler(async (req, res) => {
+    const { limit } = req.query as unknown as { limit?: number };
+    res.json({
+      items: await service.getMemberActivity(requireActor(req), req.params.id as string, limit),
+    });
+  }),
+);
+
 membersRouter.get(
   '/:id/stats',
   validate({ params: idParamSchema }),

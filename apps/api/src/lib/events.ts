@@ -48,6 +48,7 @@ export interface DomainEvents {
     watcherIds: string[];
   };
   'attachment.created': TaskEventBase & { attachmentId: string; fileName: string };
+  'attachment.deleted': TaskEventBase & { attachmentId: string; fileName: string };
   'dependency.completed': TaskEventBase & { dependentTaskIds: string[] };
 }
 

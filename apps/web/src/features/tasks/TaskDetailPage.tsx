@@ -1,16 +1,23 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Plus, X } from 'lucide-react';
 import type { TaskDetail, TaskStatus, TimelineEntry, TransitionRequirement } from '@tm/shared';
-import { STATUS_LABELS, stripMentionMarkup } from '@tm/shared';
+import { STATUS_LABELS } from '@tm/shared';
 import {
+  isPendingComment,
   useAddComment,
+  useAssignTask,
+  useSetLabels,
   useTask,
   useTaskTimeline,
   useTransitionTask,
   useUpdateProgress,
   useWatchToggle,
 } from './api';
+import { useLabels, useUsers } from '@/features/team/api';
+import { Markdown } from '@/components/common/Markdown';
+import { Attachments } from './Attachments';
+import { CommentBody, MentionBox } from './MentionBox';
 import { useAuth } from '@/features/auth/AuthContext';
 import { ApiError } from '@/lib/api';
 import {
@@ -18,9 +25,9 @@ import {
   Card,
   EmptyState,
   Label,
+  Select,
   Skeleton,
   Spinner,
-  Textarea,
 } from '@/components/ui/primitives';
 import {
   BlockerBadge,
@@ -92,6 +99,7 @@ export function TaskDetailPage() {
           <TaskHeader task={task.data} />
           <TransitionBar task={task.data} />
           <DescriptionCard task={task.data} />
+          <AttachmentsSection task={task.data} />
           <TimelineCard taskKey={key} entries={timeline.data?.items} loading={timeline.isLoading} />
         </div>
 
@@ -101,6 +109,29 @@ export function TaskDetailPage() {
       </div>
     </div>
   );
+}
+
+/**
+ * Attachments, with the same rules the API applies.
+ *
+ * Anyone who can comment can attach; a lead may remove anybody's file, while
+ * everyone else may remove only their own. Getting this wrong in the browser
+ * would only offer a button that fails, but an offered button that fails is
+ * still a lie about what somebody may do.
+ */
+function AttachmentsSection({ task }: { task: TaskDetail }) {
+  const { user, isAdmin } = useAuth();
+
+  const involved =
+    user !== null &&
+    (task.assignee?.id === user.id ||
+      task.reviewer?.id === user.id ||
+      task.createdBy.id === user.id ||
+      task.watcherIds.includes(user.id));
+
+  const lead = user?.role === 'TEAM_LEAD' || isAdmin;
+
+  return <Attachments taskIdOrKey={task.key} canAttach={lead || involved} canDeleteAny={lead} />;
 }
 
 function TaskHeader({ task }: { task: TaskDetail }) {
@@ -161,9 +192,10 @@ function TaskHeader({ task }: { task: TaskDetail }) {
  */
 function TransitionBar({ task }: { task: TaskDetail }) {
   const transition = useTransitionTask(task.id);
-  const [pending, setPending] = useState<{ to: TaskStatus; requires: TransitionRequirement[] } | null>(
-    null,
-  );
+  const [pending, setPending] = useState<{
+    to: TaskStatus;
+    requires: TransitionRequirement[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (task.availableTransitions.length === 0) {
@@ -176,13 +208,10 @@ function TransitionBar({ task }: { task: TaskDetail }) {
 
   const run = (to: TaskStatus, extra: Record<string, unknown> = {}) => {
     setError(null);
-    transition.mutate(
-      { to, ...extra } as Parameters<typeof transition.mutate>[0],
-      {
-        onSuccess: () => setPending(null),
-        onError: (err) => setError(err instanceof ApiError ? err.message : 'That change failed.'),
-      },
-    );
+    transition.mutate({ to, ...extra } as Parameters<typeof transition.mutate>[0], {
+      onSuccess: () => setPending(null),
+      onError: (err) => setError(err instanceof ApiError ? err.message : 'That change failed.'),
+    });
   };
 
   return (
@@ -233,11 +262,158 @@ function DescriptionCard({ task }: { task: TaskDetail }) {
     <Card className="p-4">
       <h2 className="mb-2 text-xs font-semibold text-ink-muted">Description</h2>
       {task.description ? (
-        <p className="text-sm whitespace-pre-wrap text-ink">{task.description}</p>
+        <Markdown text={task.description} className="text-sm text-ink" />
       ) : (
         <p className="text-sm text-ink-faint">No description yet.</p>
       )}
     </Card>
+  );
+}
+
+/**
+ * Changing who is on a task, from the task itself.
+ *
+ * A lead may reassign; everybody else sees the name. The change shows at once
+ * and goes back if the server refuses, which it will for anyone who is not a
+ * lead of this team.
+ */
+function AssigneeField({ task }: { task: TaskDetail }) {
+  const { isLead } = useAuth();
+  const people = useUsers();
+  const assign = useAssignTask(task.id, people.data?.items ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isLead) {
+    return (
+      <Field label="Assignee">
+        <UserAvatar user={task.assignee} showName size="sm" />
+      </Field>
+    );
+  }
+
+  return (
+    <div>
+      <Field label="Assignee">
+        <Select
+          aria-label="Assignee"
+          className="h-8 w-44 text-xs"
+          value={task.assignee?.id ?? ''}
+          disabled={assign.isPending}
+          onChange={(event) => {
+            const chosen = event.target.value;
+            setError(null);
+            assign.mutate(
+              { assigneeId: chosen === '' ? null : chosen },
+              {
+                onError: (cause) =>
+                  setError(cause instanceof Error ? cause.message : 'That did not work.'),
+              },
+            );
+          }}
+        >
+          <option value="">Nobody</option>
+          {people.data?.items.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {error ? (
+        <p role="alert" className="mt-1 text-right text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Labels, added and removed in place.
+ *
+ * The chips update the moment they are clicked and go back if the server says
+ * no, because nobody wants to wait on a round trip to see a tag appear.
+ */
+function LabelsField({ task }: { task: TaskDetail }) {
+  const { isLead } = useAuth();
+  const labels = useLabels(task.projectId);
+  const setLabels = useSetLabels(task.id, labels.data?.items ?? []);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const chosen = task.labels.map((label) => label.id);
+  const available = (labels.data?.items ?? []).filter((label) => !chosen.includes(label.id));
+
+  const change = (next: string[]) => {
+    setError(null);
+    setLabels.mutate(next, {
+      onError: (cause) => setError(cause instanceof Error ? cause.message : 'That did not work.'),
+    });
+  };
+
+  return (
+    <div>
+      <p className="mb-1.5 text-xs text-ink-muted">Labels</p>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {task.labels.map((label) => (
+          <span key={label.id} className="inline-flex items-center gap-1">
+            <LabelChip name={label.name} color={label.color} />
+            {isLead ? (
+              <button
+                type="button"
+                aria-label={'Remove ' + label.name}
+                className="text-ink-faint hover:text-danger"
+                onClick={() => change(chosen.filter((id) => id !== label.id))}
+              >
+                <X size={11} />
+              </button>
+            ) : null}
+          </span>
+        ))}
+
+        {task.labels.length === 0 && !isLead ? (
+          <span className="text-xs text-ink-faint">None</span>
+        ) : null}
+
+        {isLead ? (
+          adding ? (
+            <Select
+              aria-label="Add a label"
+              className="h-7 w-32 text-xs"
+              value=""
+              onChange={(event) => {
+                const chosenId = event.target.value;
+                setAdding(false);
+                if (chosenId) change([...chosen, chosenId]);
+              }}
+            >
+              <option value="">Choose…</option>
+              {available.map((label) => (
+                <option key={label.id} value={label.id}>
+                  {label.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5"
+              onClick={() => setAdding(true)}
+            >
+              <Plus size={12} aria-hidden /> Label
+            </Button>
+          )
+        ) : null}
+      </div>
+
+      {error ? (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -271,9 +447,7 @@ function FieldsCard({ task }: { task: TaskDetail }) {
         <ProgressBar value={shown} showLabel />
       </div>
 
-      <Field label="Assignee">
-        <UserAvatar user={task.assignee} showName size="sm" />
-      </Field>
+      <AssigneeField task={task} />
       <Field label="Reviewer">
         <UserAvatar user={task.reviewer} showName size="sm" />
       </Field>
@@ -286,7 +460,9 @@ function FieldsCard({ task }: { task: TaskDetail }) {
       </Field>
       <Field label="Estimate">{formatHours(task.estimatedMinutes)}</Field>
       <Field label="Last update">{relativeTime(task.lastActivityAt)}</Field>
-      {task.completedAt ? <Field label="Completed">{formatDateTime(task.completedAt)}</Field> : null}
+      {task.completedAt ? (
+        <Field label="Completed">{formatDateTime(task.completedAt)}</Field>
+      ) : null}
 
       {task.dependsOn.length > 0 ? (
         <Field label="Waiting on">
@@ -303,6 +479,8 @@ function FieldsCard({ task }: { task: TaskDetail }) {
           </span>
         </Field>
       ) : null}
+
+      <LabelsField task={task} />
 
       {task.subtaskCount.total > 0 ? (
         <Field label="Subtasks">
@@ -377,7 +555,8 @@ function TimelineCard({
   entries: TimelineEntry[] | undefined;
   loading: boolean;
 }) {
-  const addComment = useAddComment(taskKey);
+  const { user } = useAuth();
+  const addComment = useAddComment(taskKey, user ? { ...user, isActive: true } : null);
   const [body, setBody] = useState('');
 
   // The comment.created activity row would duplicate the comment itself.
@@ -401,13 +580,21 @@ function TimelineCard({
             entry.kind === 'comment' ? (
               <li key={'c' + entry.id} className="flex gap-2.5">
                 <UserAvatar user={entry.author} size="sm" />
-                <div className="min-w-0 flex-1 rounded-lg bg-surface-muted px-3 py-2">
+                <div
+                  className={
+                    'min-w-0 flex-1 rounded-lg bg-surface-muted px-3 py-2' +
+                    // Still on its way: shown, but visibly not yet landed.
+                    (isPendingComment(entry.id) ? ' opacity-60' : '')
+                  }
+                >
                   <p className="text-xs text-ink-muted">
                     <span className="font-medium text-ink">{entry.author.name}</span>{' '}
-                    {relativeTime(entry.createdAt)}
+                    {isPendingComment(entry.id) ? 'sending…' : relativeTime(entry.createdAt)}
                     {entry.editedAt ? ' · edited' : ''}
                   </p>
-                  <p className="mt-1 text-sm whitespace-pre-wrap">{stripMentionMarkup(entry.body)}</p>
+                  <div className="mt-1">
+                    <CommentBody body={entry.body} meId={user?.id} />
+                  </div>
                 </div>
               </li>
             ) : (
@@ -431,11 +618,15 @@ function TimelineCard({
           addComment.mutate(body.trim(), { onSuccess: () => setBody('') });
         }}
       >
-        <Textarea
+        <MentionBox
+          taskIdOrKey={taskKey ?? ''}
+          aria-label="Add a comment"
           value={body}
-          onChange={(e) => setBody(e.currentTarget.value)}
-          placeholder="Add a comment…"
-          className="min-h-16"
+          onChange={setBody}
+          placeholder="Add a comment… type @ to mention somebody"
+          onSubmit={() => {
+            if (body.trim()) addComment.mutate(body.trim(), { onSuccess: () => setBody('') });
+          }}
         />
         <div className="mt-2 flex justify-end">
           <Button type="submit" size="sm" disabled={!body.trim() || addComment.isPending}>

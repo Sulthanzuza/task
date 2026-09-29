@@ -103,14 +103,15 @@ function transitionContext(actor: Actor, resource: TaskResource) {
     role: actor.role,
     isAssignee: resource.assigneeId === actor.id,
     isReviewer: resource.reviewerId === actor.id,
-    isTeamLeadOfProject:
-      actor.role === 'TEAM_LEAD' && actor.ledTeamIds.includes(resource.teamId),
+    isTeamLeadOfProject: actor.role === 'TEAM_LEAD' && actor.ledTeamIds.includes(resource.teamId),
   };
 }
 
 /** Super admins see everything; everyone else is scoped to their teams. */
 function visibleTeamIds(actor: Actor): string[] | null {
-  return actor.role === 'SUPER_ADMIN' ? null : [...new Set([...actor.teamIds, ...actor.ledTeamIds])];
+  return actor.role === 'SUPER_ADMIN'
+    ? null
+    : [...new Set([...actor.teamIds, ...actor.ledTeamIds])];
 }
 
 async function loadTaskOr404(handle: Db, idOrKey: string): Promise<TaskRow> {
@@ -264,8 +265,14 @@ export async function listTasksForActor(
     ctx,
   });
 
-  const people = await repo.usersByIds(db, rows.flatMap((r) => [r.assigneeId, r.reviewerId]));
-  const labelMap = await repo.labelsForTasks(db, rows.map((r) => r.id));
+  const people = await repo.usersByIds(
+    db,
+    rows.flatMap((r) => [r.assigneeId, r.reviewerId]),
+  );
+  const labelMap = await repo.labelsForTasks(
+    db,
+    rows.map((r) => r.id),
+  );
 
   return {
     items: rows.map((row) => toTaskSummary(row, people, labelMap.get(row.id) ?? [])),
@@ -326,7 +333,10 @@ export async function getTimeline(actor: Actor, idOrKey: string): Promise<Timeli
   ]);
 
   const { mentionsForComments } = await import('../comments/repo');
-  const mentions = await mentionsForComments(db, commentRows.map((c) => c.id));
+  const mentions = await mentionsForComments(
+    db,
+    commentRows.map((c) => c.id),
+  );
 
   const entries: TimelineEntry[] = [
     ...activityRows.map((a): TimelineEntry => ({
@@ -451,7 +461,10 @@ export async function updateTask(
     }
 
     if (Object.keys(changes).length > 0) {
-      await tx.update(tasks).set({ ...changes, updatedAt: now }).where(eq(tasks.id, taskId));
+      await tx
+        .update(tasks)
+        .set({ ...changes, updatedAt: now })
+        .where(eq(tasks.id, taskId));
     }
 
     // The activity rows and the change itself land in the same transaction.
@@ -639,7 +652,9 @@ export async function assignTask(
 
     const previousAssigneeId = row.assigneeId;
     const isReassignment =
-      previousAssigneeId !== null && input.assigneeId !== null && previousAssigneeId !== input.assigneeId;
+      previousAssigneeId !== null &&
+      input.assigneeId !== null &&
+      previousAssigneeId !== input.assigneeId;
 
     // Handing work over without context is how things get dropped.
     if (isReassignment && !input.handoverNote?.trim()) {
@@ -781,7 +796,11 @@ export async function updateProgress(
   return getTaskDetail(actor, taskId);
 }
 
-export async function softDeleteTask(actor: Actor, taskId: string, now = new Date()): Promise<void> {
+export async function softDeleteTask(
+  actor: Actor,
+  taskId: string,
+  now = new Date(),
+): Promise<void> {
   const buffer = new EventBuffer();
 
   await withTransaction(async (tx) => {
@@ -790,11 +809,7 @@ export async function softDeleteTask(actor: Actor, taskId: string, now = new Dat
     authorize(actor, 'task.delete', resource);
 
     await tx.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, taskId));
-    await repo.writeActivity(
-      tx,
-      [{ taskId, actorId: actor.id, action: 'task.deleted' }],
-      now,
-    );
+    await repo.writeActivity(tx, [{ taskId, actorId: actor.id, action: 'task.deleted' }], now);
 
     buffer.add('task.deleted', {
       ...eventBase(row, actor, now),
@@ -904,7 +919,7 @@ export async function removeDependency(
   });
 }
 
-export { loadTaskOr404, toResource, visibleTeamIds, workingHoursBetween };
+export { eventBase, loadTaskOr404, toResource, visibleTeamIds, workingHoursBetween };
 
 /**
  * Board column counts.
@@ -928,7 +943,10 @@ export async function getBoardSummary(
   if (scope !== null) {
     conditions.push(
       scope.length > 0
-        ? sql`(p.team_id IN (${sql.join(scope.map((id) => sql`${id}::uuid`), sql`, `)})
+        ? sql`(p.team_id IN (${sql.join(
+            scope.map((id) => sql`${id}::uuid`),
+            sql`, `,
+          )})
                OR t.assignee_id = ${actor.id}::uuid
                OR t.reviewer_id = ${actor.id}::uuid
                OR t.created_by = ${actor.id}::uuid)`

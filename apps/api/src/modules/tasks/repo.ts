@@ -252,7 +252,10 @@ export interface UserRow {
 }
 
 /** Everyone referenced by a page of tasks, fetched once. */
-export async function usersByIds(handle: Db, ids: Array<string | null>): Promise<Map<string, UserRow>> {
+export async function usersByIds(
+  handle: Db,
+  ids: Array<string | null>,
+): Promise<Map<string, UserRow>> {
   const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
   const map = new Map<string, UserRow>();
   if (unique.length === 0) return map;
@@ -359,7 +362,10 @@ function buildFilters(
     filters.push(
       sql`EXISTS (SELECT 1 FROM ${taskLabels} tl
                   WHERE tl.task_id = ${tasks.id}
-                    AND tl.label_id IN (${sql.join(query.labelId.map((id) => sql`${id}::uuid`), sql`, `)}))`,
+                    AND tl.label_id IN (${sql.join(
+                      query.labelId.map((id) => sql`${id}::uuid`),
+                      sql`, `,
+                    )}))`,
     );
   }
 
@@ -383,10 +389,25 @@ function buildFilters(
   if (query.noUpdate) filters.push(predicates.isNoUpdate(columns, ctx));
 
   if (query.q) {
-    // Prefix matching so the search box is useful before the word is finished.
+    /*
+     * Prefix matching so the search box is useful before the word is finished,
+     * plus the task key itself: people refer to work as ERP-125 far more often
+     * than by its title, and the key is not in the search vector because it is
+     * spread across two tables.
+     */
+    const terms =
+      query.q
+        .replace(/[^\w\s]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word + ':*')
+        .join(' & ') || 'x';
+
     filters.push(
-      sql`(${tasks.search} @@ to_tsquery('simple', ${query.q.replace(/[^\w\s]/g, ' ').trim().split(/\s+/).filter(Boolean).map((w) => w + ':*').join(' & ') || 'x'})
-           OR ${tasks.title} ILIKE ${'%' + query.q + '%'})`,
+      sql`(${tasks.search} @@ to_tsquery('simple', ${terms})
+           OR ${tasks.title} ILIKE ${'%' + query.q + '%'}
+           OR (${projects.key} || '-' || ${tasks.number}) ILIKE ${'%' + query.q.trim() + '%'})`,
     );
   }
 
@@ -487,9 +508,7 @@ export async function dependenciesFor(
       type: taskDependencies.type,
     })
     .from(taskDependencies)
-    .where(
-      or(eq(taskDependencies.taskId, taskId), eq(taskDependencies.dependsOnTaskId, taskId)),
-    );
+    .where(or(eq(taskDependencies.taskId, taskId), eq(taskDependencies.dependsOnTaskId, taskId)));
 
   const otherIds = rows.map((r) => r.otherId);
   if (otherIds.length === 0) return { dependsOn: [], blocks: [] };

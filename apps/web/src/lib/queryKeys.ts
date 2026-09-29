@@ -12,6 +12,8 @@ export const queryKeys = {
     list: (filters: Partial<ListTasksQuery>) => ['tasks', 'list', filters] as const,
     detail: (idOrKey: string) => ['tasks', 'detail', idOrKey] as const,
     timeline: (idOrKey: string) => ['tasks', 'timeline', idOrKey] as const,
+    attachments: (idOrKey: string) => ['tasks', 'attachments', idOrKey] as const,
+    mentionable: (idOrKey: string) => ['tasks', 'mentionable', idOrKey] as const,
   },
 
   projects: {
@@ -41,6 +43,7 @@ export const queryKeys = {
 
   member: {
     stats: (userId: string) => ['member', 'stats', userId] as const,
+    activity: (userId: string) => ['member', 'activity', userId] as const,
   },
 
   admin: {

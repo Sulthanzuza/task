@@ -107,10 +107,14 @@ export async function buildDigest(userId: string, now: Date): Promise<Digest> {
 
   const leadsTeam = actor.ledTeamIds[0];
 
-  if (leadsTeam || actor.role === 'SUPER_ADMIN') {
-    const teamId = leadsTeam ?? actor.teamIds[0];
-    if (!teamId) throw new Error('No team to report on for ' + userId);
+  const teamId = leadsTeam ?? actor.teamIds[0];
 
+  /*
+   * A super admin who is on no team has no team view to report on. That is an
+   * ordinary state, not a failure, so they get the member digest about their
+   * own work rather than an error in the nightly log.
+   */
+  if (teamId && (leadsTeam || actor.role === 'SUPER_ADMIN')) {
     // The same calls the dashboard makes, with the same clock.
     const summary = await getSummary(actor, teamId, now);
     const attention = await getAttention(actor, teamId, now, 10);

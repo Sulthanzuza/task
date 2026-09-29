@@ -1,5 +1,11 @@
 import { sql } from 'drizzle-orm';
-import type { AttentionItem, DashboardSummary, MemberRow, MemberStats } from '@tm/shared';
+import type {
+  AttentionItem,
+  DashboardSummary,
+  MemberActivityEntry,
+  MemberRow,
+  MemberStats,
+} from '@tm/shared';
 import { METRIC_DEFAULTS, median, rate } from '@tm/shared';
 import { db } from '../../db/client';
 import type { Actor } from '../../middleware/authenticate';
@@ -180,9 +186,9 @@ export async function getAttention(
   `);
 
   const rows = result.rows as Array<Record<string, unknown>>;
-  const people = await usersByIdList(
-    [...new Set(rows.map((r) => r.assignee_id).filter((id): id is string => typeof id === 'string'))],
-  );
+  const people = await usersByIdList([
+    ...new Set(rows.map((r) => r.assignee_id).filter((id): id is string => typeof id === 'string')),
+  ]);
   const peopleById = new Map(people.map((p) => [p.id, p]));
 
   const items: AttentionItem[] = rows.map((row) => {
@@ -212,7 +218,8 @@ export async function getAttention(
       priority: row.priority as AttentionItem['priority'],
       progress,
       dueDate,
-      assignee: typeof row.assignee_id === 'string' ? peopleById.get(row.assignee_id) ?? null : null,
+      assignee:
+        typeof row.assignee_id === 'string' ? (peopleById.get(row.assignee_id) ?? null) : null,
       reason: classified.reason,
       magnitude: classified.magnitude,
       detail: classified.detail,
@@ -273,11 +280,13 @@ function classify(input: ClassifyInput): {
   }
 
   if (input.status === 'IN_PROGRESS') {
-    const hours = Math.round(
-      workingHoursBetween(input.lastActivityAt, input.now, input.calendar),
-    );
+    const hours = Math.round(workingHoursBetween(input.lastActivityAt, input.now, input.calendar));
     if (hours >= input.noUpdateThresholdHours) {
-      return { reason: 'NO_UPDATE', magnitude: hours, detail: 'No update for ' + hours + ' working hours' };
+      return {
+        reason: 'NO_UPDATE',
+        magnitude: hours,
+        detail: 'No update for ' + hours + ' working hours',
+      };
     }
   }
 
@@ -390,4 +399,88 @@ export async function getMemberStats(
       ? new Date(row.last_activity_at as string).toISOString()
       : null,
   };
+}
+
+/**
+ * What this person has been doing lately.
+ *
+ * Read from task_activity, which is written in the same transaction as every
+ * task change, so it cannot show work that did not happen or miss work that
+ * did. Only activity on tasks the reader may see is returned: a member page is
+ * not a way around the team boundary.
+ */
+export async function getMemberActivity(
+  actor: Actor,
+  userId: string,
+  limit = 20,
+): Promise<MemberActivityEntry[]> {
+  const memberTeams = await db.execute(sql`
+    SELECT team_id FROM team_members WHERE user_id = ${userId}::uuid
+  `);
+  const teamIds = memberTeams.rows.map((r) => String((r as Record<string, unknown>).team_id));
+
+  authorize(actor, 'member.view', { kind: 'user', userId, teamIds });
+
+  // Super admins see every team; everybody else only their own.
+  const visible =
+    actor.role === 'SUPER_ADMIN' ? null : [...new Set([...actor.teamIds, ...actor.ledTeamIds])];
+
+  const rows = await db.execute(sql`
+    SELECT
+      a.id, a.action, a.field, a.old_value, a.new_value, a.meta, a.created_at,
+      t.id AS task_id, t.number, t.status AS task_status, t.title AS task_title,
+      p.key AS project_key,
+      u.id AS actor_id, u.name AS actor_name, u.email AS actor_email,
+      u.role AS actor_role, u.avatar_url AS actor_avatar, u.is_active AS actor_active
+    FROM task_activity a
+    JOIN tasks t ON t.id = a.task_id AND t.deleted_at IS NULL
+    JOIN projects p ON p.id = t.project_id
+    LEFT JOIN users u ON u.id = a.actor_id
+    WHERE a.actor_id = ${userId}::uuid
+      ${
+        /*
+         * The team ids go in as one JSON parameter and are unpacked by
+         * Postgres. A plain array parameter is not converted to an array
+         * literal here, and concatenating the ids into the text would be
+         * building SQL by hand, which this codebase does not do.
+         */
+        visible === null
+          ? sql``
+          : sql`AND p.team_id IN (
+                  SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(visible)}::jsonb)
+                )`
+      }
+    ORDER BY a.created_at DESC, a.id DESC
+    LIMIT ${Math.min(limit, 100)}
+  `);
+
+  return rows.rows.map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      kind: 'activity' as const,
+      id: String(row.id),
+      actor: row.actor_id
+        ? {
+            id: String(row.actor_id),
+            name: String(row.actor_name),
+            email: String(row.actor_email),
+            role: row.actor_role as MemberStats['user']['role'],
+            avatarUrl: row.actor_avatar === null ? null : String(row.actor_avatar),
+            isActive: Boolean(row.actor_active),
+          }
+        : null,
+      action: String(row.action),
+      field: row.field === null ? null : String(row.field),
+      oldValue: row.old_value ?? null,
+      newValue: row.new_value ?? null,
+      meta: (row.meta ?? null) as Record<string, unknown> | null,
+      createdAt: new Date(row.created_at as string).toISOString(),
+      task: {
+        id: String(row.task_id),
+        key: String(row.project_key) + '-' + String(row.number),
+        title: String(row.task_title),
+        status: row.task_status as MemberActivityEntry['task']['status'],
+      },
+    };
+  });
 }

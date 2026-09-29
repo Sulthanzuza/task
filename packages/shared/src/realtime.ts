@@ -45,7 +45,15 @@ export const taskChangedEventSchema = z.object({
   actorId: uuidSchema.nullable(),
   clientMutationId: z.string().nullable(),
   /** What happened, for logging and for deciding which caches to touch. */
-  reason: z.enum(['created', 'updated', 'transitioned', 'assigned', 'progress', 'commented']),
+  reason: z.enum([
+    'created',
+    'updated',
+    'transitioned',
+    'assigned',
+    'progress',
+    'commented',
+    'attached',
+  ]),
 });
 export type TaskChangedEvent = z.infer<typeof taskChangedEventSchema>;
 

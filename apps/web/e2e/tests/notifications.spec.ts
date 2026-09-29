@@ -1,7 +1,16 @@
 import type { APIRequestContext } from '@playwright/test';
 import type { TaskSummary } from '@tm/shared';
-import { apiAs, expect, signIn, test, USERS, userIdOf } from '../fixtures';
-import { E2E_MAILPIT_URL } from '../playwright.config';
+import {
+  apiAs,
+  clearMailbox,
+  expect,
+  findMail,
+  mailBody,
+  signIn,
+  test,
+  USERS,
+  userIdOf,
+} from '../fixtures';
 
 /**
  * Notifications, end to end: the bell moves live, every tab of one person
@@ -23,51 +32,13 @@ async function createUnassignedTask(api: APIRequestContext, title: string): Prom
   return (await created.json()) as TaskSummary;
 }
 
-async function assignTo(
-  api: APIRequestContext,
-  taskId: string,
-  assigneeId: string,
-): Promise<void> {
+async function assignTo(api: APIRequestContext, taskId: string, assigneeId: string): Promise<void> {
   const lead = await apiAs(api, USERS.lead);
   const response = await api.post('/api/v1/tasks/' + taskId + '/assign', {
     headers: { Authorization: 'Bearer ' + lead.token, 'X-Requested-With': 'XMLHttpRequest' },
     data: { assigneeId },
   });
   expect(response.status(), 'could not assign the task').toBe(200);
-}
-
-// ---------------------------------------------------------------------------
-// Mailpit
-// ---------------------------------------------------------------------------
-
-interface MailpitMessage {
-  ID: string;
-  Subject: string;
-  To: Array<{ Address: string }>;
-}
-
-async function clearMailbox(api: APIRequestContext): Promise<void> {
-  await api.delete(E2E_MAILPIT_URL + '/api/v1/messages');
-}
-
-async function findMail(
-  api: APIRequestContext,
-  predicate: (message: MailpitMessage) => boolean,
-  timeoutMs = 20_000,
-): Promise<MailpitMessage> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const response = await api.get(E2E_MAILPIT_URL + '/api/v1/messages?limit=50');
-    if (response.ok()) {
-      const body = (await response.json()) as { messages?: MailpitMessage[] };
-      const found = (body.messages ?? []).find(predicate);
-      if (found) return found;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  throw new Error('No matching email arrived within ' + timeoutMs + 'ms');
 }
 
 // ---------------------------------------------------------------------------
@@ -156,10 +127,7 @@ test('an email arrives with a link to the task', async ({ api }) => {
   );
 
   // The body must carry a working link, and no more of the task than it should.
-  const source = await api.get(E2E_MAILPIT_URL + '/api/v1/message/' + message.ID);
-  expect(source.ok()).toBe(true);
-  const body = (await source.json()) as { HTML?: string; Text?: string };
-  const content = (body.HTML ?? '') + (body.Text ?? '');
+  const content = await mailBody(api, message.ID);
 
   expect(content, 'the email must link to the task').toContain('/tasks/' + task.key);
   expect(content, 'the email must offer a way to change preferences').toContain(

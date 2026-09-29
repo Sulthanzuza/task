@@ -45,7 +45,11 @@ let onAuthLost: (() => void) | null = null;
 export function setAccessToken(token: string | null, expiresInSeconds?: number): void {
   accessToken = token;
   accessTokenExpiresAt =
-    token && expiresInSeconds ? Date.now() + expiresInSeconds * 1000 : token ? Number.MAX_SAFE_INTEGER : 0;
+    token && expiresInSeconds
+      ? Date.now() + expiresInSeconds * 1000
+      : token
+        ? Number.MAX_SAFE_INTEGER
+        : 0;
 }
 
 /**
@@ -241,8 +245,15 @@ async function send(path: string, options: RequestOptions, isRetry: boolean): Pr
     await performRefresh();
   }
 
+  /*
+   * A FormData body goes as it is. Setting Content-Type by hand would drop the
+   * multipart boundary the browser generates, and the server would then see one
+   * unparseable blob instead of a file.
+   */
+  const isMultipart = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
   const headers: Record<string, string> = { 'X-Requested-With': 'XMLHttpRequest' };
-  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (options.body !== undefined && !isMultipart) headers['Content-Type'] = 'application/json';
   if (accessToken && !options.skipAuth) headers.Authorization = 'Bearer ' + accessToken;
 
   // Writes are stamped so their realtime echo can be recognised and ignored here.
@@ -255,7 +266,9 @@ async function send(path: string, options: RequestOptions, isRetry: boolean): Pr
     method: options.method ?? 'GET',
     credentials: 'include',
     headers,
-    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+    ...(options.body !== undefined
+      ? { body: isMultipart ? (options.body as FormData) : JSON.stringify(options.body) }
+      : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   });
 

@@ -42,4 +42,16 @@ export const queryKeys = {
   member: {
     stats: (userId: string) => ['member', 'stats', userId] as const,
   },
+
+  admin: {
+    all: ['admin'] as const,
+    settings: () => ['admin', 'settings'] as const,
+    /** The prefix, for invalidating every year at once after a change. */
+    holidaysAll: ['admin', 'holidays'] as const,
+    holidays: (year?: number) => ['admin', 'holidays', year ?? 'all'] as const,
+    audit: (filters: Record<string, unknown> = {}) => ['admin', 'audit', filters] as const,
+    digestPreview: (userId?: string, date?: string) =>
+      ['admin', 'digest-preview', userId ?? 'me', date ?? 'today'] as const,
+    importColumns: () => ['admin', 'import-columns'] as const,
+  },
 } as const;

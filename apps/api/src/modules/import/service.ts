@@ -8,9 +8,8 @@ import {
 } from '@tm/shared';
 import { db, withTransaction } from '../../db/client';
 import { projects, taskWatchers, tasks, users } from '../../db/schema';
-import { ConflictError, ValidationError } from '../../lib/errors';
+import { ConflictError, ForbiddenError, ValidationError } from '../../lib/errors';
 import type { Actor } from '../../middleware/authenticate';
-import { authorize } from '../permissions/authorize';
 import { recordAudit } from '../audit/service';
 import * as taskRepo from '../tasks/repo';
 
@@ -351,8 +350,6 @@ export async function commitImport(
   preview: ImportPreview,
   now = new Date(),
 ): Promise<ImportResult> {
-  authorize(actor, 'org.manage', { kind: 'org' });
-
   if (preview.problems.length > 0) {
     const rows = [...new Set(preview.problems.map((problem) => problem.rowNumber))].sort(
       (a, b) => a - b,
@@ -373,8 +370,23 @@ export async function commitImport(
   const created = await withTransaction(async (tx) => {
     const results: Array<{ rowNumber: number; taskKey: string }> = [];
 
-    const projectRows = await tx.select({ id: projects.id, key: projects.key }).from(projects);
+    const projectRows = await tx
+      .select({ id: projects.id, key: projects.key, teamId: projects.teamId })
+      .from(projects);
     const projectsByKey = new Map(projectRows.map((p) => [p.key.toUpperCase(), p]));
+
+    /*
+     * Check the authority again here, against the rows about to be written.
+     * validateRows has already refused any project the actor may not use, but
+     * this function takes a preview as an argument: it must not depend on its
+     * caller having produced that preview honestly.
+     */
+    for (const row of preview.ready) {
+      const project = projectsByKey.get(row.projectKey);
+      if (!project || !can(actor, project.teamId)) {
+        throw new ForbiddenError('You cannot create tasks in ' + row.projectKey + '.');
+      }
+    }
 
     const emails = [...new Set(preview.ready.map((r) => r.assigneeEmail).filter(Boolean))];
     const userRows = emails.length

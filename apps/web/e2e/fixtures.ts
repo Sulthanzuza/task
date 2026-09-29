@@ -1,5 +1,5 @@
 import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { E2E_API_URL } from './playwright.config';
+import { E2E_API_URL, E2E_MAILPIT_URL } from './playwright.config';
 
 /**
  * Every test gets a page that fails if the browser logged an error or a request
@@ -130,4 +130,49 @@ export async function apiAs(
       return (await response.json()) as T;
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Mailpit
+//
+// The suite points the API at mailpit, so "did an email go out" is a question
+// with a real answer rather than a mocked one.
+// ---------------------------------------------------------------------------
+
+export interface MailpitMessage {
+  ID: string;
+  Subject: string;
+  To: Array<{ Address: string }>;
+}
+
+export async function clearMailbox(api: APIRequestContext): Promise<void> {
+  await api.delete(E2E_MAILPIT_URL + '/api/v1/messages');
+}
+
+export async function findMail(
+  api: APIRequestContext,
+  predicate: (message: MailpitMessage) => boolean,
+  timeoutMs = 20_000,
+): Promise<MailpitMessage> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await api.get(E2E_MAILPIT_URL + '/api/v1/messages?limit=50');
+    if (response.ok()) {
+      const body = (await response.json()) as { messages?: MailpitMessage[] };
+      const found = (body.messages ?? []).find(predicate);
+      if (found) return found;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error('No matching email arrived within ' + timeoutMs + 'ms');
+}
+
+/** The whole message, HTML and text together, for asserting on links. */
+export async function mailBody(api: APIRequestContext, id: string): Promise<string> {
+  const source = await api.get(E2E_MAILPIT_URL + '/api/v1/message/' + id);
+  expect(source.ok(), 'could not read the message').toBeTruthy();
+  const body = (await source.json()) as { HTML?: string; Text?: string };
+  return (body.HTML ?? '') + (body.Text ?? '');
 }

@@ -15,6 +15,14 @@ import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { DigestPage } from '@/features/digest/DigestPage';
 import { NotificationPreferencesPage } from '@/features/notifications/PreferencesPage';
 import { TeamPage } from '@/features/team/TeamPage';
+import { PeoplePage } from '@/features/admin/PeoplePage';
+import { TeamsPage } from '@/features/admin/TeamsPage';
+import { ProjectsPage } from '@/features/admin/ProjectsPage';
+import { OrganisationPage } from '@/features/admin/OrganisationPage';
+import { HolidaysPage } from '@/features/admin/HolidaysPage';
+import { EmailPage } from '@/features/admin/EmailPage';
+import { ImportPage } from '@/features/admin/ImportPage';
+import { AuditPage } from '@/features/admin/AuditPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -44,6 +52,29 @@ function RequireLead({ children }: { children: ReactNode }) {
           <EmptyState
             title="This screen is for team leads"
             description="Your own tasks and figures are on My tasks and your member page."
+          />
+        </Card>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+/**
+ * The administrator's screens.
+ *
+ * The server refuses these routes to anyone else, so this is only about not
+ * showing a person a screen that would fail; it is not the access control.
+ */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAdmin } = useAuth();
+  if (!isAdmin) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16">
+        <Card>
+          <EmptyState
+            title="This screen is for administrators"
+            description="Ask a super admin if you need somebody invited, or a setting changed."
           />
         </Card>
       </div>
@@ -151,13 +182,72 @@ export function AppRoutes() {
               </RequireLead>
             }
           />
+          <Route path="/settings" element={<Navigate to="/settings/notifications" replace />} />
+
+          <Route path="/admin" element={<Navigate to="/admin/people" replace />} />
           <Route
-            path="/settings"
+            path="/admin/people"
             element={
-              <Placeholder
-                title="Settings"
-                note="Notification preferences and org settings arrive with the notifications work."
-              />
+              <RequireAdmin>
+                <PeoplePage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/teams"
+            element={
+              <RequireAdmin>
+                <TeamsPage />
+              </RequireAdmin>
+            }
+          />
+          {/* A lead runs their own team's projects, so these two are not admin-only. */}
+          <Route
+            path="/admin/projects"
+            element={
+              <RequireLead>
+                <ProjectsPage />
+              </RequireLead>
+            }
+          />
+          <Route
+            path="/admin/import"
+            element={
+              <RequireLead>
+                <ImportPage />
+              </RequireLead>
+            }
+          />
+          <Route
+            path="/admin/audit"
+            element={
+              <RequireAdmin>
+                <AuditPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/settings/organisation"
+            element={
+              <RequireAdmin>
+                <OrganisationPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/settings/holidays"
+            element={
+              <RequireAdmin>
+                <HolidaysPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/settings/email"
+            element={
+              <RequireAdmin>
+                <EmailPage />
+              </RequireAdmin>
             }
           />
         </Route>

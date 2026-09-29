@@ -57,6 +57,15 @@ usersRouter.post(
 );
 
 usersRouter.post(
+  '/:id/resend-invite',
+  requireRole('SUPER_ADMIN'),
+  validate({ params: idParamSchema }),
+  handler(async (req, res) => {
+    res.json(await service.resendInvite(requireActor(req), req.params.id as string));
+  }),
+);
+
+usersRouter.post(
   '/:id/activate',
   requireRole('SUPER_ADMIN'),
   validate({ params: idParamSchema }),

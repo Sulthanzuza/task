@@ -1,5 +1,11 @@
-import { and, asc, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
-import type { CreateUserInput, ListUsersQuery, UpdateUserInput, UserDetail, UserSummary } from '@tm/shared';
+import { and, asc, eq, gt, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
+import type {
+  CreateUserInput,
+  ListUsersQuery,
+  UpdateUserInput,
+  UserDetail,
+  UserSummary,
+} from '@tm/shared';
 import { db, withTransaction } from '../../db/client';
 import { teamMembers, teams, users } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
@@ -46,7 +52,10 @@ export async function listUsers(
           eq(users.id, actor.id),
           sql`EXISTS (SELECT 1 FROM ${teamMembers} tm
                       WHERE tm.user_id = ${users.id}
-                        AND tm.team_id IN (${sql.join(scope.map((id) => sql`${id}::uuid`), sql`, `)}))`,
+                        AND tm.team_id IN (${sql.join(
+                          scope.map((id) => sql`${id}::uuid`),
+                          sql`, `,
+                        )}))`,
         )!,
       );
     }
@@ -61,7 +70,9 @@ export async function listUsers(
   if (query.active !== undefined) filters.push(eq(users.isActive, query.active));
   if (query.role) filters.push(eq(users.role, query.role));
   if (query.q) {
-    filters.push(or(ilike(users.name, '%' + query.q + '%'), ilike(users.email, '%' + query.q + '%'))!);
+    filters.push(
+      or(ilike(users.name, '%' + query.q + '%'), ilike(users.email, '%' + query.q + '%'))!,
+    );
   }
 
   const cursor = decodeCursor(query.cursor);
@@ -118,7 +129,11 @@ export async function createUser(
 ): Promise<UserDetail> {
   authorize(actor, 'user.manage', { kind: 'user', userId: 'new', teamIds: input.teamIds });
 
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, input.email)).limit(1);
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, input.email))
+    .limit(1);
   if (existing.length > 0) throw new ConflictError('Someone already uses that email address.');
 
   const userId = await withTransaction(async (tx) => {
@@ -196,7 +211,11 @@ export async function updateUser(
     .where(eq(users.id, userId))
     .limit(1);
 
-  const updated = await db.update(users).set(changes).where(eq(users.id, userId)).returning({ id: users.id });
+  const updated = await db
+    .update(users)
+    .set(changes)
+    .where(eq(users.id, userId))
+    .returning({ id: users.id });
   if (updated.length === 0) throw new NotFoundError('That user');
 
   // A role change is the one that matters most: it is a grant of access.
@@ -223,7 +242,11 @@ export async function updateUser(
   return getUser(actor, userId);
 }
 
-export async function deactivateUser(actor: Actor, userId: string, now = new Date()): Promise<void> {
+export async function deactivateUser(
+  actor: Actor,
+  userId: string,
+  now = new Date(),
+): Promise<void> {
   authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
 
   const updated = await db
@@ -245,7 +268,76 @@ export async function deactivateUser(actor: Actor, userId: string, now = new Dat
   });
 }
 
-export async function reactivateUser(actor: Actor, userId: string, now = new Date()): Promise<void> {
+/**
+ * Sends the welcome link again.
+ *
+ * Invitations expire, land in spam and get deleted, and an account that has
+ * never had a password cannot use "forgot password" to rescue itself. Any
+ * outstanding link is revoked first, so only the newest one works.
+ */
+export async function resendInvite(
+  actor: Actor,
+  userId: string,
+  now = new Date(),
+): Promise<{ email: string }> {
+  authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
+
+  const [person] = await db
+    .select({
+      email: users.email,
+      name: users.name,
+      isActive: users.isActive,
+      passwordHash: users.passwordHash,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!person) throw new NotFoundError('That user');
+  if (!person.isActive) {
+    throw new ConflictError('That account is deactivated. Reactivate it before inviting again.');
+  }
+  if (person.passwordHash !== null) {
+    throw new ConflictError(
+      'They have already set a password. Send them the forgotten-password link instead.',
+    );
+  }
+
+  const token = generateToken(32);
+
+  await withTransaction(async (tx) => {
+    // Only the newest link should work, so earlier ones are spent.
+    await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: now })
+      .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.usedAt)));
+
+    await tx.insert(passwordResetTokens).values({
+      userId,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(now.getTime() + 7 * 86_400_000),
+      createdAt: now,
+    });
+  });
+
+  await sendSetPasswordEmail(person.email, person.name, token);
+
+  await recordAudit({
+    actor,
+    action: 'user.invite_resent',
+    subjectType: 'user',
+    subjectId: userId,
+    after: { email: person.email },
+  });
+
+  return { email: person.email };
+}
+
+export async function reactivateUser(
+  actor: Actor,
+  userId: string,
+  now = new Date(),
+): Promise<void> {
   authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
   await db.update(users).set({ isActive: true, updatedAt: now }).where(eq(users.id, userId));
 
@@ -259,7 +351,11 @@ export async function teamMemberIds(teamId: string): Promise<string[]> {
     .from(teamMembers)
     .where(eq(teamMembers.teamId, teamId));
 
-  const [team] = await db.select({ leadId: teams.leadId }).from(teams).where(eq(teams.id, teamId)).limit(1);
+  const [team] = await db
+    .select({ leadId: teams.leadId })
+    .from(teams)
+    .where(eq(teams.id, teamId))
+    .limit(1);
 
   const ids = rows.map((r) => r.userId);
   if (team?.leadId && !ids.includes(team.leadId)) ids.push(team.leadId);

@@ -40,7 +40,7 @@ interface MemberDigest {
   awaitingMyReview: DigestLine[];
 }
 
-type Digest = LeadDigest | MemberDigest;
+export type Digest = LeadDigest | MemberDigest;
 
 function useDigest(date: string | undefined) {
   return useQuery({
@@ -87,8 +87,22 @@ export function DigestPage() {
         <p className="mt-1 text-sm text-ink-muted">{formatDate(data.date)}</p>
       </header>
 
-      {data.kind === 'lead' ? <LeadContent digest={data} /> : <MemberContent digest={data} />}
+      <DigestContent digest={data} />
     </div>
+  );
+}
+
+/**
+ * The body of a digest, without the page around it.
+ *
+ * Shared with the admin email preview, so what an administrator checks before
+ * a send is the very thing the recipient will open.
+ */
+export function DigestContent({ digest }: { digest: Digest }) {
+  return digest.kind === 'lead' ? (
+    <LeadContent digest={digest} />
+  ) : (
+    <MemberContent digest={digest} />
   );
 }
 

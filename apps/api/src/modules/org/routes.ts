@@ -1,7 +1,18 @@
 import { Router } from 'express';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { dateOnlySchema, uuidSchema } from '@tm/shared';
+import {
+  bulkHolidaysSchema,
+  createHolidaySchema,
+  dateOnlySchema,
+  listAuditQuerySchema,
+  updateOrgSettingsSchema,
+  uuidSchema,
+  type BulkHolidaysInput,
+  type CreateHolidayInput,
+  type ListAuditQuery,
+  type UpdateOrgSettingsInput,
+} from '@tm/shared';
 import { isTest } from '../../config/env';
 import { db } from '../../db/client';
 import { users } from '../../db/schema';
@@ -14,6 +25,7 @@ import { authorize } from '../permissions/authorize';
 import { buildDigest } from '../alerts/digest';
 import { clearOrgCache, getOrgSettings } from './service';
 import { listAudit, recordAudit } from '../audit/service';
+import { addHolidays, listHolidays, removeHoliday } from './holidays';
 import { isRunnableJob, rescheduleAfterSettingsChange, runJob } from '../../jobs/scheduler';
 
 export const orgRouter: Router = Router();
@@ -28,28 +40,12 @@ orgRouter.get(
   }),
 );
 
-const updateSettingsSchema = z
-  .object({
-    timezone: z.string().min(1).max(64).optional(),
-    weekendDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
-    weekStartsOn: z.number().int().min(0).max(6).optional(),
-    workHoursPerDay: z.number().min(1).max(24).optional(),
-    noUpdateThresholdHours: z.number().int().min(1).max(336).optional(),
-    blockedEscalationHours: z.number().int().min(1).max(336).optional(),
-    reviewWaitingThresholdHours: z.number().int().min(1).max(336).optional(),
-    overdueEscalationWorkingDays: z.number().int().min(1).max(30).optional(),
-    digestTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
-    quietHoursStart: z.number().int().min(0).max(23).optional(),
-    quietHoursEnd: z.number().int().min(0).max(23).optional(),
-  })
-  .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
-
 orgRouter.patch(
   '/settings',
   requireRole('SUPER_ADMIN'),
-  validate({ body: updateSettingsSchema }),
+  validate({ body: updateOrgSettingsSchema }),
   handler(async (req, res) => {
-    const input = req.body as z.infer<typeof updateSettingsSchema>;
+    const input = req.body as UpdateOrgSettingsInput;
     const before = await getOrgSettings();
 
     const changes: Record<string, unknown> = { updatedAt: new Date() };
@@ -215,19 +211,64 @@ orgRouter.post(
 orgRouter.get(
   '/audit',
   requireRole('SUPER_ADMIN'),
-  validate({
-    query: z.object({
-      limit: z.coerce.number().int().min(1).max(500).optional(),
-      action: z.string().max(60).optional(),
-    }),
-  }),
+  validate({ query: listAuditQuerySchema }),
   handler(async (req, res) => {
-    const { limit, action } = req.query as unknown as { limit?: number; action?: string };
+    const query = req.query as unknown as ListAuditQuery;
     res.json(
       await listAudit(requireActor(req), {
-        ...(limit ? { limit } : {}),
-        ...(action ? { action } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+        ...(query.action ? { action: query.action } : {}),
+        ...(query.actorId ? { actorId: query.actorId } : {}),
+        ...(query.from ? { from: query.from } : {}),
+        ...(query.to ? { to: query.to } : {}),
       }),
     );
+  }),
+);
+
+/*
+ * Holidays.
+ *
+ * Reading is open to anyone signed in, because the calendar and the due-date
+ * pickers show which days are not working days. Changing them is the admin's,
+ * since every working-day calculation in the system moves with them.
+ */
+orgRouter.get(
+  '/holidays',
+  validate({ query: z.object({ year: z.coerce.number().int().min(1970).max(2200).optional() }) }),
+  handler(async (req, res) => {
+    const { year } = req.query as unknown as { year?: number };
+    res.json({ items: await listHolidays(year) });
+  }),
+);
+
+orgRouter.post(
+  '/holidays',
+  requireRole('SUPER_ADMIN'),
+  validate({ body: createHolidaySchema }),
+  handler(async (req, res) => {
+    const result = await addHolidays(requireActor(req), [req.body as CreateHolidayInput]);
+    res.status(201).json(result);
+  }),
+);
+
+/** A whole year at a time, pasted or from a CSV. */
+orgRouter.post(
+  '/holidays/bulk',
+  requireRole('SUPER_ADMIN'),
+  validate({ body: bulkHolidaysSchema }),
+  handler(async (req, res) => {
+    const { items } = req.body as BulkHolidaysInput;
+    res.status(201).json(await addHolidays(requireActor(req), items));
+  }),
+);
+
+orgRouter.delete(
+  '/holidays/:date',
+  requireRole('SUPER_ADMIN'),
+  validate({ params: z.object({ date: dateOnlySchema }) }),
+  handler(async (req, res) => {
+    await removeHoliday(requireActor(req), req.params.date as string);
+    res.status(204).send();
   }),
 );

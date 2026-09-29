@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ChartNoAxesColumn,
   CircleUser,
+  FolderKanban,
   Gauge,
   KanbanSquare,
   ListTodo,
@@ -13,6 +14,7 @@ import {
   Search,
   Settings,
   Sun,
+  UserCog,
   Users,
   X,
 } from 'lucide-react';
@@ -28,6 +30,7 @@ interface NavItem {
   label: string;
   icon: typeof Gauge;
   leadOnly?: boolean;
+  adminOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -39,6 +42,8 @@ const NAV: NavItem[] = [
   { to: '/team', label: 'Team', icon: Users },
   { to: '/workload', label: 'Workload', icon: ChartNoAxesColumn, leadOnly: true },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesColumn, leadOnly: true },
+  { to: '/admin/projects', label: 'Projects', icon: FolderKanban, leadOnly: true },
+  { to: '/admin/people', label: 'People', icon: UserCog, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -66,7 +71,7 @@ function useTheme() {
 }
 
 export function Layout() {
-  const { user, signOut, isLead } = useAuth();
+  const { user, signOut, isLead, isAdmin } = useAuth();
 
   // One socket for the whole signed-in session, opened here rather than per
   // screen so navigating does not reconnect.
@@ -76,7 +81,7 @@ export function Layout() {
   const [dark, setDark] = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const items = NAV.filter((item) => !item.leadOnly || isLead);
+  const items = NAV.filter((item) => (!item.leadOnly || isLead) && (!item.adminOnly || isAdmin));
 
   return (
     <div className="flex h-full">

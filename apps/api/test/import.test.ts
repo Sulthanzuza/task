@@ -152,6 +152,70 @@ describe('committing', () => {
     expect(created.body.estimatedMinutes).toBe(480);
   });
 
+  it('lets a lead import into their own team, which the route promises', async () => {
+    const response = await as(harness.app, fx.lead)
+      .post('/api/v1/import/commit')
+      .attach('file', csv('Work the lead is planning,ERP,,MEDIUM,BACKLOG,,'), {
+        filename: 'tasks.csv',
+        contentType: 'text/csv',
+      })
+      .expect(201);
+
+    expect(response.body.created, 'a lead may import into a team they lead').toHaveLength(1);
+
+    const created = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + response.body.created[0].taskKey)
+      .expect(200);
+    expect(created.body.title).toBe('Work the lead is planning');
+  });
+
+  it('refuses a lead a project belonging to another team', async () => {
+    const response = await as(harness.app, fx.lead)
+      .post('/api/v1/import/commit')
+      .attach('file', csv('Something for the other team,CRM,,LOW,BACKLOG,,'), {
+        filename: 'tasks.csv',
+        contentType: 'text/csv',
+      })
+      .expect(409);
+
+    // Refused as a bad row rather than a bare 403, so the operator is told
+    // which row to remove.
+    expect(response.body.error.message).toContain('Nothing was imported');
+  });
+
+  it('refuses a preview somebody else built for a project they may not touch', async () => {
+    const { commitImport } = await import('../src/modules/import/service');
+    const { ForbiddenError } = await import('../src/lib/errors');
+
+    // A hand-made preview with no problems in it, naming another team's
+    // project: the commit must not take the caller's word for it.
+    const forged = {
+      ready: [
+        {
+          rowNumber: 2,
+          title: 'Slipped past validation',
+          projectKey: 'CRM',
+          assigneeEmail: null,
+          priority: 'MEDIUM' as const,
+          status: 'BACKLOG' as const,
+          dueDate: null,
+          estimateHours: null,
+        },
+      ],
+      problems: [],
+      totalRows: 1,
+    };
+
+    const actor = {
+      id: fx.lead.id,
+      role: fx.lead.role,
+      teamIds: [fx.team.id],
+      ledTeamIds: [fx.team.id],
+    };
+
+    await expect(commitImport(actor, forged)).rejects.toThrow(ForbiddenError);
+  });
+
   it('marks every imported task as imported in its history', async () => {
     const response = await as(harness.app, fx.admin)
       .post('/api/v1/import/commit')

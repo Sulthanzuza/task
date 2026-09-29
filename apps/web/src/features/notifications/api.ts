@@ -8,8 +8,16 @@ export interface NotificationView {
   body: string | null;
   taskId: string | null;
   taskKey: string | null;
+  /** Where this notification goes. Taskless ones carry their own destination. */
+  link: string | null;
   readAt: string | null;
   createdAt: string;
+}
+
+/** A notification's destination: its task, its own link, or the bell page. */
+export function notificationHref(notification: NotificationView): string {
+  if (notification.taskKey) return '/tasks/' + notification.taskKey;
+  return notification.link ?? '/notifications';
 }
 
 export interface NotificationPreference {

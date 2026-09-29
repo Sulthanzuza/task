@@ -44,10 +44,30 @@ async function createDatabaseIfMissing(): Promise<string> {
   return databaseName;
 }
 
+/**
+ * Turns quiet hours off for the run.
+ *
+ * Quiet hours hold an email until the morning, which is correct behaviour and
+ * has its own integration tests. In the e2e suite it would mean "an email
+ * arrives" passes by day and fails after 20:00, which tells us about the clock
+ * rather than about the code. Equal start and end hours disable the window.
+ */
+async function disableQuietHours(): Promise<void> {
+  const { db } = await import('./client');
+  const { orgSettings } = await import('./schema');
+  const { eq } = await import('drizzle-orm');
+
+  await db
+    .update(orgSettings)
+    .set({ quietHoursStart: 0, quietHoursEnd: 0 })
+    .where(eq(orgSettings.id, 1));
+}
+
 async function main(): Promise<void> {
   const database = await createDatabaseIfMissing();
   const { reset } = await import('./reset');
   await reset();
+  await disableQuietHours();
   const { closeDatabase } = await import('./client');
   await closeDatabase();
   logger.info({ database }, 'End-to-end database ready.');

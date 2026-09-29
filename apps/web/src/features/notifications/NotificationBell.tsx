@@ -4,6 +4,7 @@ import { Bell } from 'lucide-react';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 import { relativeTime } from '@/lib/utils';
 import {
+  notificationHref,
   useMarkAllRead,
   useMarkRead,
   useNotifications,
@@ -50,8 +51,7 @@ export function NotificationBell() {
   function openNotification(notification: NotificationView) {
     if (!notification.readAt) markRead.mutate(notification.id);
     setOpen(false);
-    if (notification.taskKey) navigate('/tasks/' + notification.taskKey);
-    else navigate('/notifications');
+    navigate(notificationHref(notification));
   }
 
   return (

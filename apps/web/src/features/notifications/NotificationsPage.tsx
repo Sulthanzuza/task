@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
 import { relativeTime } from '@/lib/utils';
-import { useMarkAllRead, useMarkRead, useNotifications } from './api';
+import { notificationHref, useMarkAllRead, useMarkRead, useNotifications } from './api';
 
 export function NotificationsPage() {
   const list = useNotifications(false);
@@ -44,23 +44,22 @@ export function NotificationsPage() {
                 }
               >
                 {!notification.readAt ? (
-                  <span aria-label="Unread" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                  <span
+                    aria-label="Unread"
+                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                  />
                 ) : (
                   <span className="mt-2 h-1.5 w-1.5 shrink-0" />
                 )}
 
                 <div className="min-w-0 flex-1">
-                  {notification.taskKey ? (
-                    <Link
-                      to={'/tasks/' + notification.taskKey}
-                      onClick={() => !notification.readAt && markRead.mutate(notification.id)}
-                      className="block truncate text-sm font-medium hover:underline"
-                    >
-                      {notification.title}
-                    </Link>
-                  ) : (
-                    <span className="block truncate text-sm font-medium">{notification.title}</span>
-                  )}
+                  <Link
+                    to={notificationHref(notification)}
+                    onClick={() => !notification.readAt && markRead.mutate(notification.id)}
+                    className="block truncate text-sm font-medium hover:underline"
+                  >
+                    {notification.title}
+                  </Link>
                   {notification.body ? (
                     <p className="truncate text-xs text-ink-muted">{notification.body}</p>
                   ) : null}
@@ -70,7 +69,11 @@ export function NotificationsPage() {
                 </div>
 
                 {!notification.readAt ? (
-                  <Button variant="ghost" size="sm" onClick={() => markRead.mutate(notification.id)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => markRead.mutate(notification.id)}
+                  >
                     Mark read
                   </Button>
                 ) : null}
@@ -78,7 +81,10 @@ export function NotificationsPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState title="Nothing here yet" description="Notifications about your work appear here." />
+          <EmptyState
+            title="Nothing here yet"
+            description="Notifications about your work appear here."
+          />
         )}
       </Card>
     </div>

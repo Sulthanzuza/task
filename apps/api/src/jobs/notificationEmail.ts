@@ -7,6 +7,7 @@ import { emailLayout, sendMail } from '../modules/notifications/mailer';
 
 export type { NotificationEmailJob } from './queue';
 import type { NotificationEmailJob } from './queue';
+import type { Digest } from '../modules/alerts/digest';
 
 /**
  * Sends one email covering everything that has happened to one task for one
@@ -91,20 +92,52 @@ export async function sendNotificationEmail(job: NotificationEmailJob): Promise<
   }
 
   const first = claimed[0] as PendingRow;
-  const data = (first.data ?? {}) as { taskKey?: string };
-  const taskKey = data.taskKey ?? '';
-  const link = env.WEB_ORIGIN + '/tasks/' + encodeURIComponent(taskKey);
+  const firstData = (first.data ?? {}) as {
+    taskKey?: string;
+    link?: string;
+    kind?: string;
+    digest?: unknown;
+  };
+
+  /*
+   * A digest is not an update about a task, so it gets its own template and
+   * carries the whole thing it was built from. Rendering it here rather than
+   * when it was queued keeps the figures as of the moment it was decided.
+   */
+  if (firstData.kind === 'digest' && firstData.digest) {
+    const { renderDigestEmail } = await import('../modules/alerts/digestEmail');
+    const rendered = renderDigestEmail(firstData.digest as Digest, first.title);
+    await sendMail({ to: recipient.email, ...rendered });
+
+    logger.debug({ userId: job.userId }, 'Sent a digest email.');
+    return;
+  }
+
+  const taskKey = firstData.taskKey ?? '';
   const preferencesLink = env.WEB_ORIGIN + '/settings/notifications';
+
+  /*
+   * Taskless notifications have no key and no task page. Falling back to
+   * "[] something happened" with a link to /tasks/ was worse than useless: the
+   * subject said nothing and the link went nowhere.
+   */
+  const link = taskKey
+    ? env.WEB_ORIGIN + '/tasks/' + encodeURIComponent(taskKey)
+    : env.WEB_ORIGIN + (firstData.link ?? '/dashboard');
 
   const lines = claimed.map((row) => {
     const rowData = (row.data ?? {}) as { summary?: string; preview?: string | null };
-    return { summary: rowData.summary ?? row.body ?? 'Something changed.', preview: rowData.preview ?? null };
+    return {
+      summary: rowData.summary ?? row.body ?? 'Something changed.',
+      preview: rowData.preview ?? null,
+    };
   });
 
-  const subject =
-    claimed.length === 1
+  const subject = taskKey
+    ? claimed.length === 1
       ? '[' + taskKey + '] ' + lines[0]?.summary
-      : '[' + taskKey + '] ' + claimed.length + ' updates';
+      : '[' + taskKey + '] ' + claimed.length + ' updates'
+    : first.title;
 
   const text = [
     first.title,
@@ -139,8 +172,8 @@ export async function sendNotificationEmail(job: NotificationEmailJob): Promise<
       '<p style="margin:16px 0"><a href="' +
         link +
         '" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 18px;' +
-        'border-radius:8px;text-decoration:none">Open ' +
-        escapeHtml(taskKey || 'the task') +
+        'border-radius:8px;text-decoration:none">' +
+        escapeHtml(taskKey ? 'Open ' + taskKey : 'Open the dashboard') +
         '</a></p>',
       '<p style="margin-top:24px;font-size:12px;color:#64748b">' +
         '<a href="' +

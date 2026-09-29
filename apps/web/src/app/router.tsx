@@ -12,6 +12,7 @@ import { MemberPage } from '@/features/team/MemberPage';
 import { BoardPage } from '@/features/board/BoardPage';
 import { CalendarPage } from '@/features/calendar/CalendarPage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
+import { DigestPage } from '@/features/digest/DigestPage';
 import { NotificationPreferencesPage } from '@/features/notifications/PreferencesPage';
 import { TeamPage } from '@/features/team/TeamPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
@@ -67,9 +68,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
             <EmptyState
               title="Something broke on this screen"
               description={this.state.error.message}
-              action={
-                <Button onClick={() => window.location.reload()}>Reload the page</Button>
-              }
+              action={<Button onClick={() => window.location.reload()}>Reload the page</Button>}
             />
           </Card>
         </div>
@@ -123,6 +122,7 @@ export function AppRoutes() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:key" element={<TaskDetailPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/digest/:date" element={<DigestPage />} />
           <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/team/:userId" element={<MemberPage />} />
@@ -133,7 +133,10 @@ export function AppRoutes() {
             path="/workload"
             element={
               <RequireLead>
-                <Placeholder title="Workload" note="Capacity-aware workload arrives with the leave and holidays work." />
+                <Placeholder
+                  title="Workload"
+                  note="Capacity-aware workload arrives with the leave and holidays work."
+                />
               </RequireLead>
             }
           />
@@ -141,19 +144,29 @@ export function AppRoutes() {
             path="/reports"
             element={
               <RequireLead>
-                <Placeholder title="Reports" note="Reports arrive with the search and reporting work." />
+                <Placeholder
+                  title="Reports"
+                  note="Reports arrive with the search and reporting work."
+                />
               </RequireLead>
             }
           />
           <Route
             path="/settings"
-            element={<Placeholder title="Settings" note="Notification preferences and org settings arrive with the notifications work." />}
+            element={
+              <Placeholder
+                title="Settings"
+                note="Notification preferences and org settings arrive with the notifications work."
+              />
+            }
           />
         </Route>
 
         <Route
           path="*"
-          element={<Placeholder title="Page not found" note="That address does not match a screen." />}
+          element={
+            <Placeholder title="Page not found" note="That address does not match a screen." />
+          }
         />
       </Routes>
     </ErrorBoundary>

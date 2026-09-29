@@ -44,6 +44,9 @@ importRouter.post(
 /**
  * The real thing. Re-reads and re-validates the file rather than trusting a
  * preview the client sends back: the preview is advice, not authorisation.
+ *
+ * Refuses the whole file if any row is wrong, so the operator never has to
+ * work out which half of their spreadsheet arrived.
  */
 importRouter.post(
   '/commit',

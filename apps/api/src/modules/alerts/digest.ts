@@ -3,7 +3,14 @@ import type { AttentionItem, DashboardSummary, UserSummary } from '@tm/shared';
 import { db, withTransaction } from '../../db/client';
 import { digestLog, teams, users } from '../../db/schema';
 import { logger } from '../../lib/logger';
-import { toDateOnly, zonedParts, type DateOnly } from '../../lib/date-utils';
+import {
+  addDays,
+  endOfDayUtc,
+  startOfDayUtc,
+  toDateOnly,
+  zonedParts,
+  type DateOnly,
+} from '../../lib/date-utils';
 import type { Actor } from '../../middleware/authenticate';
 import { getOrgContext } from '../org/service';
 import { getAttention, getSummary } from '../dashboard/service';
@@ -75,11 +82,7 @@ async function actorFor(userId: string): Promise<Actor & { name: string; email: 
   };
 }
 
-async function tasksFor(
-  actor: Actor,
-  query: string,
-  now: Date,
-): Promise<DigestLine[]> {
+async function tasksFor(actor: Actor, query: string, now: Date): Promise<DigestLine[]> {
   const { listTasksForActor } = await import('../tasks/service');
   const { listTasksQuerySchema } = await import('@tm/shared');
 
@@ -112,13 +115,23 @@ export async function buildDigest(userId: string, now: Date): Promise<Digest> {
     const summary = await getSummary(actor, teamId, now);
     const attention = await getAttention(actor, teamId, now, 10);
 
+    /*
+     * The previous calendar day in the org time zone, not "the last 24 hours".
+     * A digest sent at 09:00 would otherwise miss anything finished before
+     * 09:00 the day before, which is most of a morning's work.
+     */
+    const previousDay = addDays(date, -1);
+    const yesterdayStart = startOfDayUtc(previousDay, calendar.timezone);
+    const yesterdayEnd = endOfDayUtc(previousDay, calendar.timezone);
+
     const yesterday = await db.execute(sql`
       SELECT p.key || '-' || t.number AS key, t.title, t.completed_at
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
       WHERE t.deleted_at IS NULL
         AND p.team_id = ${teamId}::uuid
-        AND t.completed_at >= ${new Date(now.getTime() - 24 * 3_600_000)}
+        AND t.completed_at >= ${yesterdayStart}
+        AND t.completed_at < ${yesterdayEnd}
       ORDER BY t.completed_at DESC
       LIMIT 20
     `);
@@ -135,7 +148,12 @@ export async function buildDigest(userId: string, now: Date): Promise<Digest> {
             isActive: users.isActive,
           })
           .from(users)
-          .where(sql`${users.id} IN (${sql.join([...away].map((id) => sql`${id}::uuid`), sql`, `)})`)
+          .where(
+            sql`${users.id} IN (${sql.join(
+              [...away].map((id) => sql`${id}::uuid`),
+              sql`, `,
+            )})`,
+          )
       : [];
 
     return {
@@ -177,6 +195,18 @@ export function digestIsEmpty(digest: Digest): boolean {
     digest.attention.length === 0 &&
     digest.completedYesterday.length === 0
   );
+}
+
+/** "Team status — Tue 29 Sep", rather than a bare date. */
+export function digestTitle(digest: Digest): string {
+  const readable = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(digest.date + 'T00:00:00Z'));
+
+  return (digest.kind === 'lead' ? 'Team status' : 'Your day') + ' — ' + readable;
 }
 
 export function digestSummaryLine(digest: Digest): string {
@@ -293,19 +323,20 @@ async function sendDigest(digest: Digest, date: DateOnly, now: Date): Promise<bo
      * Delivered through the notification service like everything else, so it
      * honours preferences and quiet hours and lights the bell. A digest is not
      * special enough to bypass what people asked for.
-     */
-    /*
-     * Delivered through the notification service like everything else, so it
-     * honours preferences and quiet hours and lights the bell. A digest is not
-     * special enough to bypass what people asked for.
+     *
+     * The whole digest is stored with the notification. The email is sent
+     * later, by a different process, and rebuilding it then would report a
+     * different day's figures.
      */
     const created = await notifyUser({
       tx,
       queue,
       userId: digest.user.id,
       type: 'DAILY_DIGEST',
-      title: 'Your summary for ' + date,
+      title: digestTitle(digest),
       summary: digestSummaryLine(digest),
+      data: { kind: 'digest', digest: digest as unknown as Record<string, unknown> },
+      link: '/digest/' + date,
       now,
     });
 

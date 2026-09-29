@@ -8,7 +8,7 @@ import {
 } from '@tm/shared';
 import { db, withTransaction } from '../../db/client';
 import { projects, taskWatchers, tasks, users } from '../../db/schema';
-import { ValidationError } from '../../lib/errors';
+import { ConflictError, ValidationError } from '../../lib/errors';
 import type { Actor } from '../../middleware/authenticate';
 import { authorize } from '../permissions/authorize';
 import { recordAudit } from '../audit/service';
@@ -205,23 +205,19 @@ export async function readRows(options: ParseOptions): Promise<string[][]> {
 /**
  * Turn a sheet into rows we could write, plus everything wrong with it.
  *
- * A row with any problem is not importable, but the others still are: a single
- * bad assignee should not send the operator back to their spreadsheet with
- * nothing to show for it.
+ * Every problem is reported, not just the first, so one pass over the file
+ * tells the operator everything they have to fix. Committing then refuses the
+ * whole file while any problem remains: half an import is worse than none.
  */
-export async function validateRows(
-  actor: Actor,
-  grid: string[][],
-): Promise<ImportPreview> {
+export async function validateRows(actor: Actor, grid: string[][]): Promise<ImportPreview> {
   if (grid.length === 0) throw new ValidationError('That file has no rows.');
 
   const header = (grid[0] as string[]).map((cell) => HEADER_ALIASES[normaliseHeader(cell)] ?? '');
   const missing = ['title', 'project key'].filter((needed) => !header.includes(needed));
   if (missing.length > 0) {
-    throw new ValidationError(
-      'The sheet needs a column for ' + missing.join(' and ') + '.',
-      { expected: IMPORT_COLUMNS },
-    );
+    throw new ValidationError('The sheet needs a column for ' + missing.join(' and ') + '.', {
+      expected: IMPORT_COLUMNS,
+    });
   }
 
   const index = (name: string) => header.indexOf(name);
@@ -290,7 +286,9 @@ export async function validateRows(
       add('priority', 'Priority must be one of ' + TASK_PRIORITIES.join(', ') + '.');
     }
 
-    const statusRaw = cell('status').toUpperCase().replace(/[\s-]+/g, '_');
+    const statusRaw = cell('status')
+      .toUpperCase()
+      .replace(/[\s-]+/g, '_');
     const status = (statusRaw || (assigneeEmail ? 'ASSIGNED' : 'BACKLOG')) as TaskStatus;
     if (!TASK_STATUSES.includes(status)) {
       add('status', 'Status must be one of ' + TASK_STATUSES.join(', ') + '.');
@@ -341,10 +339,12 @@ function can(actor: Actor, teamId: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Write the rows that passed validation.
+ * Write the import.
  *
- * One transaction for the lot: a half-finished import is worse than none,
- * because nobody can tell which half.
+ * All of it or none of it, in one transaction. A half-finished import is worse
+ * than none, because nobody can tell which half landed; and importing the good
+ * rows while quietly dropping the bad ones leaves the operator believing their
+ * spreadsheet went in whole.
  */
 export async function commitImport(
   actor: Actor,
@@ -353,6 +353,19 @@ export async function commitImport(
 ): Promise<ImportResult> {
   authorize(actor, 'org.manage', { kind: 'org' });
 
+  if (preview.problems.length > 0) {
+    const rows = [...new Set(preview.problems.map((problem) => problem.rowNumber))].sort(
+      (a, b) => a - b,
+    );
+    throw new ConflictError(
+      'Nothing was imported. Fix ' +
+        (rows.length === 1 ? 'row ' : 'rows ') +
+        rows.join(', ') +
+        ' and try again.',
+      { problems: preview.problems },
+    );
+  }
+
   if (preview.ready.length === 0) {
     return { ...preview, created: [] };
   }
@@ -360,9 +373,7 @@ export async function commitImport(
   const created = await withTransaction(async (tx) => {
     const results: Array<{ rowNumber: number; taskKey: string }> = [];
 
-    const projectRows = await tx
-      .select({ id: projects.id, key: projects.key })
-      .from(projects);
+    const projectRows = await tx.select({ id: projects.id, key: projects.key }).from(projects);
     const projectsByKey = new Map(projectRows.map((p) => [p.key.toUpperCase(), p]));
 
     const emails = [...new Set(preview.ready.map((r) => r.assigneeEmail).filter(Boolean))];

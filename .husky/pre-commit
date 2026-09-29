@@ -1,0 +1,5 @@
+# Lint and format only what is being committed.
+#
+# Fast enough not to be resented, which is the whole reason it survives: a
+# hook people routinely bypass with --no-verify protects nothing.
+pnpm exec lint-staged

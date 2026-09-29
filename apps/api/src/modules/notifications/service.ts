@@ -50,7 +50,10 @@ async function preferencesFor(
   handle: Db,
   userIds: string[],
 ): Promise<Map<string, Map<string, { inApp: boolean; email: boolean; digestOnly: boolean }>>> {
-  const byUser = new Map<string, Map<string, { inApp: boolean; email: boolean; digestOnly: boolean }>>();
+  const byUser = new Map<
+    string,
+    Map<string, { inApp: boolean; email: boolean; digestOnly: boolean }>
+  >();
   if (userIds.length === 0) return byUser;
 
   const rows = await handle
@@ -162,6 +165,16 @@ export interface NotifyUserInput {
   title: string;
   summary: string;
   now: Date;
+  /**
+   * Extra payload stored with the notification, so the email can render the
+   * whole thing later without rebuilding it against a clock that has moved on.
+   */
+  data?: Record<string, unknown>;
+  /**
+   * Where this notification points. Taskless notifications have no task to
+   * link to, and a link to /tasks/ with nothing after it is worse than none.
+   */
+  link?: string;
 }
 
 /**
@@ -199,7 +212,12 @@ export async function notifyUser(input: NotifyUserInput): Promise<CreatedNotific
       type: input.type,
       title: input.title,
       body: input.summary,
-      data: { summary: input.summary },
+      data: {
+        summary: input.summary,
+        // Read by the mailer and by the bell; both need somewhere to send you.
+        link: input.link ?? '/dashboard',
+        ...(input.data ?? {}),
+      },
       createdAt: input.now,
     })
     .returning({ id: notifications.id });
@@ -248,6 +266,8 @@ export interface NotificationView {
   body: string | null;
   taskId: string | null;
   taskKey: string | null;
+  /** Where this notification goes, for anything with no task of its own. */
+  link: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -276,6 +296,7 @@ export async function listNotifications(
       body: row.body,
       taskId: row.taskId,
       taskKey: (row.data as { taskKey?: string } | null)?.taskKey ?? null,
+      link: (row.data as { link?: string } | null)?.link ?? null,
       readAt: row.readAt ? row.readAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
     })),
@@ -297,7 +318,11 @@ export async function markRead(actor: Actor, id: string, now = new Date()): Prom
     .update(notifications)
     .set({ readAt: now })
     .where(
-      and(eq(notifications.id, id), eq(notifications.userId, actor.id), isNull(notifications.readAt)),
+      and(
+        eq(notifications.id, id),
+        eq(notifications.userId, actor.id),
+        isNull(notifications.readAt),
+      ),
     )
     .returning({ id: notifications.id });
 

@@ -22,7 +22,11 @@ const MAGIC: Array<{ mime: string; offset: number; bytes: number[] }> = [
   { mime: 'image/gif', offset: 0, bytes: [0x47, 0x49, 0x46, 0x38] },
   { mime: 'application/pdf', offset: 0, bytes: [0x25, 0x50, 0x44, 0x46, 0x2d] },
   // The old Office formats, and .msg, share this compound-document header.
-  { mime: 'application/vnd.ms-office', offset: 0, bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] },
+  {
+    mime: 'application/vnd.ms-office',
+    offset: 0,
+    bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1],
+  },
 ];
 
 /** WEBP is RIFF with a WEBP tag four bytes later. */
@@ -60,25 +64,76 @@ function officeTypeFromZip(buffer: Buffer): string | null {
   return null;
 }
 
-/** Does this look like text rather than a binary blob? */
+/**
+ * Formats that must never be stored, whatever they are called.
+ *
+ * Checked before anything else. These are recognised not to classify them but
+ * to refuse them outright.
+ */
+const EXECUTABLE_SIGNATURES: Array<{ name: string; bytes: number[] }> = [
+  { name: 'DOS/Windows executable', bytes: [0x4d, 0x5a] }, // MZ
+  { name: 'ELF binary', bytes: [0x7f, 0x45, 0x4c, 0x46] },
+  { name: 'Java class file', bytes: [0xca, 0xfe, 0xba, 0xbe] },
+  { name: 'Mach-O binary', bytes: [0xfe, 0xed, 0xfa, 0xce] },
+  { name: 'Mach-O binary', bytes: [0xcf, 0xfa, 0xed, 0xfe] },
+  { name: 'shell script', bytes: [0x23, 0x21] }, // #!
+];
+
+export function looksExecutable(buffer: Buffer): string | null {
+  for (const candidate of EXECUTABLE_SIGNATURES) {
+    if (
+      buffer.length >= candidate.bytes.length &&
+      candidate.bytes.every((byte, i) => buffer[i] === byte)
+    ) {
+      return candidate.name;
+    }
+  }
+  return null;
+}
+
+/**
+ * Does this look like text rather than a binary blob?
+ *
+ * Rejecting only control characters is not enough: a binary made of high bytes
+ * has none, so an executable padded with 0x90 sailed through as text/plain and
+ * was accepted. Real text is valid UTF-8, so that is what gets checked.
+ */
 function looksLikeText(buffer: Buffer): boolean {
   const sample = buffer.subarray(0, Math.min(buffer.length, 2048));
   if (sample.length === 0) return true;
 
   for (const byte of sample) {
-    // A null byte means binary. Control characters other than tab, newline and
-    // carriage return do too.
+    // A null byte means binary. So do control characters other than tab,
+    // newline and carriage return.
     if (byte === 0) return false;
     if (byte < 0x09) return false;
     if (byte > 0x0d && byte < 0x20) return false;
   }
-  return true;
+
+  // Decode strictly. A truncated multi-byte sequence at the sample boundary
+  // would be a false negative, so trim back to a character boundary first.
+  let end = sample.length;
+  while (end > 0 && (sample[end - 1] as number) >= 0x80) end -= 1;
+  if (end === 0) return false;
+
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(sample.subarray(0, end));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function sniffFileType(buffer: Buffer): SniffResult | null {
+  // An executable is never acceptable, so it is not classified at all.
+  if (looksExecutable(buffer)) return null;
+
   for (const candidate of MAGIC) {
     const slice = buffer.subarray(candidate.offset, candidate.offset + candidate.bytes.length);
-    if (slice.length === candidate.bytes.length && candidate.bytes.every((b, i) => slice[i] === b)) {
+    if (
+      slice.length === candidate.bytes.length &&
+      candidate.bytes.every((b, i) => slice[i] === b)
+    ) {
       return { mime: candidate.mime, via: 'magic' };
     }
   }
@@ -142,6 +197,15 @@ export function verifyUpload(
   declaredMime: string,
   allowed: readonly string[],
 ): VerifyResult {
+  const executable = looksExecutable(buffer);
+  if (executable) {
+    return {
+      ok: false,
+      mime: 'application/octet-stream',
+      reason: 'That file is a ' + executable + ', whatever it is named.',
+    };
+  }
+
   const sniffed = sniffFileType(buffer);
 
   if (!sniffed) {

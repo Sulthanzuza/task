@@ -79,14 +79,29 @@ async function roomsFor(actor: Actor): Promise<string[]> {
   return joined;
 }
 
+/**
+ * The rooms a given user would be joined to.
+ *
+ * Exported so the room rules can be tested without opening a socket: getting
+ * this wrong would leak another team's task titles over the wire, with no HTTP
+ * route involved.
+ */
+export async function computeRoomsForUser(userId: string): Promise<string[]> {
+  return roomsFor(await actorFromDatabase(userId));
+}
+
 /** Rebuild the actor from the database, so a stale token cannot widen access. */
 async function authenticateSocket(token: string): Promise<Actor> {
   const claims = verifyAccessToken(token);
+  return actorFromDatabase(claims.sub);
+}
 
+/** Builds an actor from what the database says now, not from the token. */
+async function actorFromDatabase(userId: string): Promise<Actor> {
   const [row] = await db
     .select({ id: users.id, role: users.role, isActive: users.isActive })
     .from(users)
-    .where(eq(users.id, claims.sub))
+    .where(eq(users.id, userId))
     .limit(1);
 
   if (!row || !row.isActive) {

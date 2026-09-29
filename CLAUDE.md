@@ -10,9 +10,11 @@ Members update their own tasks. The system shows facts and evidence; it never co
 - pnpm workspaces: apps/api, apps/web, packages/shared
 - API: Node LTS, Express, TypeScript strict, Drizzle ORM + drizzle-kit, PostgreSQL 16,
   pg-boss, Socket.IO, pino, Zod
-- Web: React, Vite, TypeScript strict, React Router, TanStack Query, TanStack Table,
+- Web: React, Vite, TypeScript strict, React Router, TanStack Query,
   Tailwind, shadcn/ui, React Hook Form, dnd-kit, Recharts
+  (TanStack Table arrives with Prompt 18, for saved views and bulk actions)
 - Tests: Vitest, Supertest, Testcontainers (real Postgres), Playwright
+- Email: nodemailer with hand-written HTML templates
 - Tooling: tsx (runs the API and scripts in dev), tsup (bundles the API for production)
 
 ## Rules
@@ -31,6 +33,8 @@ Members update their own tasks. The system shows facts and evidence; it never co
 12. Config from env parsed with Zod in config/env.ts; keep .env.example current. No secrets in code.
 13. Small functions, plain names, no speculative abstractions. Ask before adding a dependency not listed here.
 14. When done: run typecheck, lint, tests; report what changed and what is left.
+15. A feature is DONE only when it has its API, its UI, and a test. Report anything missing
+    one of these as PARTIAL, never as done.
 
 ## Glossary
 Task key = project key + number (ERP-125). Open = status not COMPLETED or CANCELLED.

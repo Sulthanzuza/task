@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useRealtime } from '@/features/realtime/useRealtime';
 import { Button } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
 import { cn } from '@/lib/utils';
@@ -66,6 +67,11 @@ function useTheme() {
 
 export function Layout() {
   const { user, signOut, isLead } = useAuth();
+
+  // One socket for the whole signed-in session, opened here rather than per
+  // screen so navigating does not reconnect.
+  useRealtime();
+
   const navigate = useNavigate();
   const [dark, setDark] = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);

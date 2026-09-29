@@ -7,6 +7,7 @@ import { UnauthenticatedError, ValidationError } from '../../lib/errors';
 import { generateToken, hashPassword, hashToken, verifyPasswordConstantTime } from '../../lib/crypto';
 import { signAccessToken } from '../../lib/jwt';
 import { logger } from '../../lib/logger';
+import { disconnectUser } from '../../realtime/gateway';
 
 export interface SessionContext {
   userAgent?: string | undefined;
@@ -106,6 +107,54 @@ export async function login(
 
 type SessionRow = typeof sessions.$inferSelect;
 
+/**
+ * Replace one session with a fresh one, inside a transaction.
+ * Returns null when another request rotated it first.
+ */
+async function rotateSession(
+  sessionId: string,
+  userId: string,
+  context: SessionContext,
+  now: Date,
+): Promise<string | null> {
+  return withTransaction(async (tx) => {
+    // Lock the row first: two requests arriving together must not both rotate it,
+    // or each would create a successor and one of them would be orphaned.
+    const [locked] = await tx
+      .select({ revokedAt: sessions.revokedAt })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .for('update');
+
+    if (!locked || locked.revokedAt) return null;
+
+    const refreshToken = generateToken();
+    const [successor] = await tx
+      .insert(sessions)
+      .values({
+        userId,
+        refreshTokenHash: hashToken(refreshToken),
+        userAgent: context.userAgent ?? null,
+        ip: context.ip ?? null,
+        expiresAt: new Date(now.getTime() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
+        createdAt: now,
+      })
+      .returning({ id: sessions.id });
+
+    if (!successor) throw new Error('Session insert returned no row');
+
+    // Recording the successor is what lets a late arrival tell a concurrent
+    // refresh from a replay.
+    await tx
+      .update(sessions)
+      .set({ revokedAt: now, replacedBySessionId: successor.id })
+      .where(eq(sessions.id, sessionId));
+
+    return refreshToken;
+  });
+}
+
 async function assertUserActive(userId: string): Promise<void> {
   const [user] = await db
     .select({ isActive: users.isActive })
@@ -117,29 +166,31 @@ async function assertUserActive(userId: string): Promise<void> {
 }
 
 /**
- * Is this an already-rotated token coming back from a second tab that started its
- * refresh before the first one finished?
+ * For an already-rotated token, the still-live session that replaced it, if this
+ * looks like a second tab that started its refresh before the first finished.
  *
  * Three things must hold: the rotation was moments ago, we know which session
- * replaced it, and that successor is still the live end of the chain. If the
- * successor has itself been rotated or revoked, the chain has moved on and this is
- * a replay of an old token, however recent the rotation looks.
+ * replaced it, and that successor is still the live end of the chain.
  */
-async function isConcurrentRefresh(session: SessionRow, now: Date): Promise<boolean> {
-  if (!session.revokedAt || !session.replacedBySessionId) return false;
+async function liveSuccessorOf(session: SessionRow, now: Date): Promise<string | null> {
+  if (!session.revokedAt || !session.replacedBySessionId) return null;
 
   const ageSeconds = (now.getTime() - session.revokedAt.getTime()) / 1000;
-  if (ageSeconds > env.REFRESH_GRACE_SECONDS) return false;
+  if (ageSeconds > env.REFRESH_GRACE_SECONDS) return null;
 
   const [successor] = await db
-    .select({ revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt })
+    .select({ id: sessions.id, revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt })
     .from(sessions)
     .where(eq(sessions.id, session.replacedBySessionId))
     .limit(1);
 
-  if (!successor) return false;
-  if (successor.revokedAt) return false;
-  return successor.expiresAt.getTime() > now.getTime();
+  if (!successor) return null;
+  // A successor that has itself been rotated means the chain moved on: this is a
+  // replay of an old token, however recent the rotation looks.
+  if (successor.revokedAt) return null;
+  if (successor.expiresAt.getTime() <= now.getTime()) return null;
+
+  return successor.id;
 }
 
 /**
@@ -174,11 +225,26 @@ export async function refresh(
   if (session.revokedAt) {
     // Already rotated away. Either two tabs refreshed at the same moment, or the
     // token was stolen. The difference is whether the chain has moved on.
-    if (await isConcurrentRefresh(session, now)) {
+    const successorId = await liveSuccessorOf(session, now);
+    if (successorId) {
       await assertUserActive(session.userId);
       logger.debug({ userId: session.userId }, 'Concurrent refresh inside the grace window.');
-      // No new cookie: the tab that won the race already set the successor, and
-      // issuing another here would rotate that one away too.
+
+      /*
+       * Rotate the live end of the chain and hand back a fresh cookie.
+       *
+       * Returning a token without a cookie looked tidier, but it left any client
+       * still holding the old value with no way back: it would ride the grace
+       * window until it expired and then be signed out. Since tabs in one browser
+       * share a cookie jar, setting the newest value here is what makes the
+       * situation self-correcting.
+       */
+      const rotatedToken = await rotateSession(successorId, session.userId, context, now);
+      if (rotatedToken) {
+        return { response: await buildLoginResponse(session.userId), refreshToken: rotatedToken };
+      }
+
+      // Something rotated it first; that client now holds the live cookie.
       return { response: await buildLoginResponse(session.userId), refreshToken: null };
     }
 
@@ -190,58 +256,29 @@ export async function refresh(
       .update(sessions)
       .set({ revokedAt: now })
       .where(and(eq(sessions.userId, session.userId), isNull(sessions.revokedAt)));
+    // An open socket would outlive the session it was opened with.
+    await disconnectUser(session.userId, 'reuse-detected');
     throw new UnauthenticatedError('Please sign in again.');
   }
 
   await assertUserActive(session.userId);
 
-  const rotated = await withTransaction(async (tx) => {
-    // Lock the row first: two requests arriving together must not both rotate it,
-    // or each would create a successor and one of them would be orphaned.
-    const [locked] = await tx
-      .select({ revokedAt: sessions.revokedAt })
-      .from(sessions)
-      .where(eq(sessions.id, session.id))
-      .limit(1)
-      .for('update');
-
-    // The other request got here first; fall back to the concurrent-refresh path.
-    if (!locked || locked.revokedAt) return null;
-
-    const refreshToken = generateToken();
-    const [successor] = await tx
-      .insert(sessions)
-      .values({
-        userId: session.userId,
-        refreshTokenHash: hashToken(refreshToken),
-        userAgent: context.userAgent ?? null,
-        ip: context.ip ?? null,
-        expiresAt: new Date(now.getTime() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
-        createdAt: now,
-      })
-      .returning({ id: sessions.id });
-
-    if (!successor) throw new Error('Session insert returned no row');
-
-    // Recording the successor is what lets a late arrival tell a concurrent
-    // refresh from a replay.
-    await tx
-      .update(sessions)
-      .set({ revokedAt: now, replacedBySessionId: successor.id })
-      .where(eq(sessions.id, session.id));
-
-    return refreshToken;
-  });
+  const rotated = await rotateSession(session.id, session.userId, context, now);
 
   return { response: await buildLoginResponse(session.userId), refreshToken: rotated };
 }
 
 export async function logout(presentedToken: string | undefined, now = new Date()): Promise<void> {
   if (!presentedToken) return;
-  await db
+
+  const revoked = await db
     .update(sessions)
     .set({ revokedAt: now })
-    .where(and(eq(sessions.refreshTokenHash, hashToken(presentedToken)), isNull(sessions.revokedAt)));
+    .where(and(eq(sessions.refreshTokenHash, hashToken(presentedToken)), isNull(sessions.revokedAt)))
+    .returning({ userId: sessions.userId });
+
+  const userId = revoked[0]?.userId;
+  if (userId) await disconnectUser(userId, 'logout');
 }
 
 export async function revokeAllSessions(userId: string, now = new Date()): Promise<void> {
@@ -249,6 +286,7 @@ export async function revokeAllSessions(userId: string, now = new Date()): Promi
     .update(sessions)
     .set({ revokedAt: now })
     .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await disconnectUser(userId, 'sessions-revoked');
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +326,7 @@ export async function resetPassword(
   now = new Date(),
 ): Promise<void> {
   const tokenHash = hashToken(token);
+  let userId: string | null = null;
 
   await withTransaction(async (tx) => {
     const [row] = await tx
@@ -315,7 +354,11 @@ export async function resetPassword(
       .update(sessions)
       .set({ revokedAt: now })
       .where(and(eq(sessions.userId, row.userId), isNull(sessions.revokedAt)));
+
+    userId = row.userId;
   });
+
+  if (userId) await disconnectUser(userId, 'password-reset');
 }
 
 export async function changePassword(

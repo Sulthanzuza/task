@@ -7,6 +7,10 @@ import { apiAs, expect, signIn, test, USERS } from '../fixtures';
  * test still means something after the seed changes.
  */
 
+// Walking every KPI means a page load and a list load each; that is genuinely
+// more work than a normal test, not a hang.
+test.describe.configure({ timeout: 120_000 });
+
 /** Each KPI card, the summary field behind it, and the filter its link must apply. */
 const KPIS = [
   { label: 'Active', field: 'active', query: { active: 'true' } },

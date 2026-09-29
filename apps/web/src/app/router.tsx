@@ -9,6 +9,8 @@ import { TasksPage } from '@/features/tasks/TasksPage';
 import { TaskDetailPage } from '@/features/tasks/TaskDetailPage';
 import { MyTasksPage } from '@/features/tasks/MyTasksPage';
 import { MemberPage } from '@/features/team/MemberPage';
+import { BoardPage } from '@/features/board/BoardPage';
+import { CalendarPage } from '@/features/calendar/CalendarPage';
 import { TeamPage } from '@/features/team/TeamPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 
@@ -121,14 +123,8 @@ export function AppRoutes() {
           <Route path="/team" element={<TeamPage />} />
           <Route path="/team/:userId" element={<MemberPage />} />
 
-          <Route
-            path="/board"
-            element={<Placeholder title="Board" note="The Kanban board arrives with the board and calendar work." />}
-          />
-          <Route
-            path="/calendar"
-            element={<Placeholder title="Calendar" note="The calendar arrives with the board and calendar work." />}
-          />
+          <Route path="/board" element={<BoardPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route
             path="/workload"
             element={

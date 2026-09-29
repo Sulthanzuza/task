@@ -70,6 +70,8 @@ test('capture every screen in light and dark, at desktop and phone width', async
     { name: 'task-list', path: '/tasks', ready: 'Tasks' },
     { name: 'task-detail', path: '/tasks/' + taskKey, ready: taskKey },
     { name: 'my-tasks', path: '/my-tasks', ready: 'My tasks' },
+    { name: 'board', path: '/board', ready: 'Board' },
+    { name: 'calendar', path: '/calendar', ready: 'Calendar' },
   ];
 
   await signIn(page, USERS.lead);

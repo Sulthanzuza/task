@@ -80,11 +80,13 @@ export default defineConfig({
       env: apiEnv,
     },
     {
-      command: 'pnpm --filter @tm/web dev',
+      // Build and serve, rather than run the dev server: the suite tests the real
+      // bundle, and no file watcher runs to fall over mid-run on Windows.
+      command: 'pnpm --filter @tm/web build && pnpm --filter @tm/web preview',
       cwd: repoRoot,
       url: E2E_BASE_URL,
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
       env: {

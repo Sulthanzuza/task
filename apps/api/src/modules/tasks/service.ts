@@ -1,6 +1,8 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type {
   AssignTaskInput,
+  BoardSummary,
+  TaskStatus,
   CreateTaskInput,
   ListTasksQuery,
   TaskDetail,
@@ -10,12 +12,15 @@ import type {
   UpdateTaskInput,
 } from '@tm/shared';
 import {
+  COLLAPSED_BOARD_COLUMNS,
+  TASK_STATUSES,
   availableTransitions,
   canTransition,
   isUuid,
   parseTaskKey,
   transitionEffects,
 } from '@tm/shared';
+import { sql } from 'drizzle-orm';
 import { db, withTransaction, type Db } from '../../db/client';
 import { taskActivity, taskComments, taskDependencies, tasks } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
@@ -27,12 +32,31 @@ import {
 } from '../../lib/errors';
 import { EventBuffer } from '../../lib/events';
 import { workingHoursBetween } from '../../lib/date-utils';
-import { buildPredicateContext } from './predicates';
+import { aliased, buildPredicateContext, isActive, isOpen } from './predicates';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
 import * as repo from './repo';
 import type { TaskRow } from './repo';
+
+/**
+ * The fields every task event carries. Built in one place so no emit site can
+ * forget the team, the timestamp or the mutation id the realtime layer needs.
+ */
+function eventBase(row: TaskRow, actor: Actor, now: Date) {
+  return {
+    taskId: row.id,
+    taskKey: taskKeyOf(row),
+    projectId: row.projectId,
+    teamId: row.teamId,
+    title: row.title,
+    actorId: actor.id,
+    at: now,
+    // Every mutation sets updated_at to now, so this is the row's new value.
+    updatedAt: now,
+    clientMutationId: actor.clientMutationId ?? null,
+  };
+}
 
 /** Everything a permission decision about a task needs. */
 async function toResource(handle: Db, row: TaskRow): Promise<TaskResource> {
@@ -184,12 +208,7 @@ export async function createTask(
 
   const row = await loadTaskOr404(db, taskId);
   buffer.add('task.created', {
-    taskId,
-    taskKey: taskKeyOf(row),
-    projectId,
-    title: row.title,
-    actorId: actor.id,
-    at: now,
+    ...eventBase(row, actor, now),
     assigneeId: row.assigneeId,
     reviewerId: row.reviewerId,
   });
@@ -415,12 +434,8 @@ export async function updateTask(
 
     if (activity.length > 0) {
       buffer.add('task.updated', {
-        taskId,
-        taskKey: taskKeyOf(row),
-        projectId: row.projectId,
+        ...eventBase(row, actor, now),
         title: (changes.title as string) ?? row.title,
-        actorId: actor.id,
-        at: now,
         changedFields: activity.map((a) => a.field ?? 'unknown'),
       });
     }
@@ -522,12 +537,7 @@ export async function transitionTask(
     await repo.writeActivity(tx, activity, now);
 
     buffer.add('task.transitioned', {
-      taskId,
-      taskKey: taskKeyOf(row),
-      projectId: row.projectId,
-      title: row.title,
-      actorId: actor.id,
-      at: now,
+      ...eventBase(row, actor, now),
       from: row.status,
       to: input.to,
       assigneeId: row.assigneeId,
@@ -544,12 +554,7 @@ export async function transitionTask(
 
       if (dependents.length > 0) {
         buffer.add('dependency.completed', {
-          taskId,
-          taskKey: taskKeyOf(row),
-          projectId: row.projectId,
-          title: row.title,
-          actorId: actor.id,
-          at: now,
+          ...eventBase(row, actor, now),
           dependentTaskIds: dependents.map((d) => d.taskId),
         });
       }
@@ -653,12 +658,7 @@ export async function assignTask(
     await repo.writeActivity(tx, activity, now);
 
     buffer.add('task.assigned', {
-      taskId,
-      taskKey: taskKeyOf(row),
-      projectId: row.projectId,
-      title: row.title,
-      actorId: actor.id,
-      at: now,
+      ...eventBase(row, actor, now),
       assigneeId: input.assigneeId,
       previousAssigneeId,
       reviewerId: input.reviewerId ?? row.reviewerId,
@@ -708,12 +708,7 @@ export async function updateProgress(
     );
 
     buffer.add('task.progress', {
-      taskId,
-      taskKey: taskKeyOf(row),
-      projectId: row.projectId,
-      title: row.title,
-      actorId: actor.id,
-      at: now,
+      ...eventBase(row, actor, now),
       from: row.progress,
       to: progress,
     });
@@ -739,12 +734,7 @@ export async function softDeleteTask(actor: Actor, taskId: string, now = new Dat
     );
 
     buffer.add('task.deleted', {
-      taskId,
-      taskKey: taskKeyOf(row),
-      projectId: row.projectId,
-      title: row.title,
-      actorId: actor.id,
-      at: now,
+      ...eventBase(row, actor, now),
     });
   });
 
@@ -852,3 +842,72 @@ export async function removeDependency(
 }
 
 export { loadTaskOr404, toResource, visibleTeamIds, workingHoursBetween };
+
+/**
+ * Board column counts.
+ *
+ * Counted in SQL over everything the caller may see, using the same predicates
+ * as the dashboard, so the header on a column is the real number rather than
+ * the size of the page the browser loaded.
+ */
+export async function getBoardSummary(
+  actor: Actor,
+  query: { projectId?: string | undefined; teamId?: string | undefined },
+): Promise<BoardSummary> {
+  // The status counts need no clock; open and active are pure status predicates.
+  const c = aliased('t');
+  const scope = visibleTeamIds(actor);
+  const conditions = [sql`t.deleted_at IS NULL`];
+
+  if (query.projectId) conditions.push(sql`t.project_id = ${query.projectId}::uuid`);
+  if (query.teamId) conditions.push(sql`p.team_id = ${query.teamId}::uuid`);
+
+  if (scope !== null) {
+    conditions.push(
+      scope.length > 0
+        ? sql`(p.team_id IN (${sql.join(scope.map((id) => sql`${id}::uuid`), sql`, `)})
+               OR t.assignee_id = ${actor.id}::uuid
+               OR t.reviewer_id = ${actor.id}::uuid
+               OR t.created_by = ${actor.id}::uuid)`
+        : sql`(t.assignee_id = ${actor.id}::uuid
+               OR t.reviewer_id = ${actor.id}::uuid
+               OR t.created_by = ${actor.id}::uuid)`,
+    );
+  }
+
+  const result = await db.execute(sql`
+    SELECT t.status::text AS status, count(*)::int AS total
+    FROM tasks t
+    JOIN projects p ON p.id = t.project_id
+    WHERE ${sql.join(conditions, sql` AND `)}
+    GROUP BY t.status
+  `);
+
+  const counts = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<
+    TaskStatus,
+    number
+  >;
+
+  for (const raw of result.rows) {
+    const row = raw as { status: string; total: number | string };
+    counts[row.status as TaskStatus] = Number(row.total);
+  }
+
+  const totals = await db.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE ${isOpen(c)})::int AS open,
+      count(*) FILTER (WHERE ${isActive(c)})::int AS active
+    FROM tasks t
+    JOIN projects p ON p.id = t.project_id
+    WHERE ${sql.join(conditions, sql` AND `)}
+  `);
+
+  const totalsRow = (totals.rows[0] ?? {}) as { open?: number; active?: number };
+
+  return {
+    counts,
+    open: Number(totalsRow.open ?? 0),
+    active: Number(totalsRow.active ?? 0),
+    collapsed: [...COLLAPSED_BOARD_COLUMNS],
+  };
+}

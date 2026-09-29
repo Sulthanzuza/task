@@ -3,9 +3,14 @@ import { createApp } from './app';
 import { env, unsafeProductionSettings } from './config/env';
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
+import { closeRealtime, createRealtimeGateway } from './realtime/gateway';
 
 const app = createApp();
 const server = createServer(app);
+
+// Shares the HTTP server, so the Vite proxy and Nginx forward /socket.io on the
+// same origin as the API.
+createRealtimeGateway(server);
 
 // Say so loudly if a relaxed test setting has reached production.
 for (const warning of unsafeProductionSettings()) {
@@ -20,6 +25,7 @@ server.listen(env.PORT, () => {
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Shutting down.');
   server.close(() => {
+    void closeRealtime();
     closeDatabase()
       .then(() => process.exit(0))
       .catch(() => process.exit(1));

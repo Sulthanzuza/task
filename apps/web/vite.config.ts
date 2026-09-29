@@ -35,7 +35,17 @@ export default defineConfig(({ mode }) => {
       },
     },
 
-    preview: { port, strictPort: true },
+    // The e2e suite serves the built app through preview, so it needs the same
+    // same-origin proxy the dev server has. Testing the real bundle also avoids
+    // running a file watcher that nothing in a test run needs.
+    preview: {
+      port,
+      strictPort: true,
+      proxy: {
+        '/api': { target: apiUrl, changeOrigin: true },
+        '/socket.io': { target: apiUrl, changeOrigin: true, ws: true },
+      },
+    },
 
     build: { outDir: 'dist', sourcemap: true },
   };

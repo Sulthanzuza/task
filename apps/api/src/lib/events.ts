@@ -12,9 +12,15 @@ export interface TaskEventBase {
   taskId: string;
   taskKey: string;
   projectId: string;
+  /** Which team may see this, so the gateway can pick the room without a query. */
+  teamId: string;
   title: string;
   actorId: string | null;
   at: Date;
+  /** The task's updated_at after the change; lets a client drop stale events. */
+  updatedAt: Date;
+  /** Echoed so the originating tab can ignore its own change. */
+  clientMutationId: string | null;
 }
 
 export interface DomainEvents {

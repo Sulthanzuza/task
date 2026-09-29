@@ -359,17 +359,19 @@ describe('concurrent refresh across tabs', () => {
     expect(first.body.accessToken).toBeTruthy();
     expect(second.body.accessToken).toBeTruthy();
 
-    // Exactly one of them rotated the cookie; the other left it alone.
+    // At least one hands back a cookie, and the last one to land in the jar is
+    // live. Both may rotate: tabs share one jar, so the newest value wins and
+    // the other self-heals through the grace window on its next attempt.
     const rotations = [first, second].filter((r) => {
       const raw = r.headers['set-cookie'];
       const cookies = Array.isArray(raw) ? raw : raw ? [raw] : [];
       return cookies.some((c) => c.startsWith('tm_refresh='));
     });
-    expect(rotations, 'only one response may set a new refresh cookie').toHaveLength(1);
+    expect(rotations.length, 'at least one response must set a refresh cookie').toBeGreaterThan(0);
 
-    // And the session survives: the successor still works.
-    const successor = refreshCookie(rotations[0] as request.Response);
-    await refreshWith(successor).expect(200);
+    // The session survives: the newest cookie still works.
+    const newest = refreshCookie(rotations[rotations.length - 1] as request.Response);
+    await refreshWith(newest).expect(200);
   });
 
   it('accepts a sequential replay inside the grace window', async () => {
@@ -378,13 +380,16 @@ describe('concurrent refresh across tabs', () => {
     const rotated = await refreshWith(cookie).expect(200);
     const successor = refreshCookie(rotated);
 
-    // The same old token again, moments later: still a concurrent refresh.
+    // The same old token again, moments later: still treated as a concurrent
+    // refresh, and answered with a usable cookie so the caller can recover.
     const late = await refreshWith(cookie).expect(200);
     expect(late.body.accessToken).toBeTruthy();
-    expect(late.headers['set-cookie']).toBeUndefined();
 
-    // The live session is untouched.
-    await refreshWith(successor).expect(200);
+    const recovered = refreshCookie(late);
+    expect(recovered).not.toBe(successor);
+
+    // The cookie it handed back works.
+    await refreshWith(recovered).expect(200);
   });
 
   it('revokes everything when the token is replayed after the grace window', async () => {

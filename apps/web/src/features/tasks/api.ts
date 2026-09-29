@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   AssignTaskInput,
+  BoardSummary,
   CommentEntry,
   CreateTaskInput,
   ListTasksQuery,
@@ -173,5 +174,13 @@ export function useWatchToggle(taskId: string | undefined) {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId ?? '') });
     },
+  });
+}
+
+/** Column counts, counted on the server so they match the dashboard. */
+export function useBoardSummary(filters: { projectId?: string | undefined }) {
+  return useQuery({
+    queryKey: ['tasks', 'board', filters],
+    queryFn: ({ signal }) => api.get<BoardSummary>('/tasks/board' + toQuery(filters), signal),
   });
 }

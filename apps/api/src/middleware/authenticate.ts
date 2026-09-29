@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { UserRole } from '@tm/shared';
+import { CLIENT_MUTATION_ID_HEADER } from '@tm/shared';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { users } from '../db/schema';
@@ -12,6 +13,11 @@ export interface Actor {
   role: UserRole;
   teamIds: string[];
   ledTeamIds: string[];
+  /**
+   * The id the calling tab stamped on this mutation, echoed back in the realtime
+   * event so that tab can ignore its own change: it already applied it optimistically.
+   */
+  clientMutationId?: string | null;
 }
 
 declare global {
@@ -55,12 +61,16 @@ export async function authenticate(
       throw new UnauthenticatedError('This account is no longer active.');
     }
 
+    const rawMutationId = req.get(CLIENT_MUTATION_ID_HEADER);
+    const mutationId = typeof rawMutationId === 'string' ? rawMutationId : null;
+
     req.user = {
       id: row.id,
       // Trust the database for the role, not the token: a demotion takes effect at once.
       role: row.role,
       teamIds: claims.teamIds,
       ledTeamIds: claims.ledTeamIds,
+      clientMutationId: mutationId && mutationId.length <= 100 ? mutationId : null,
     };
     next();
   } catch (error) {

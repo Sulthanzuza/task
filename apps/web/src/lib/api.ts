@@ -1,4 +1,5 @@
 import type { ApiErrorBody, LoginResponse } from '@tm/shared';
+import { CLIENT_MUTATION_ID_HEADER } from '@tm/shared';
 
 /**
  * The single way the app talks to the server.
@@ -9,6 +10,32 @@ import type { ApiErrorBody, LoginResponse } from '@tm/shared';
  */
 
 const BASE = '/api/v1';
+
+/**
+ * A stable id for this tab. Every mutation it sends is stamped with it, and the
+ * realtime event that follows carries it back, so this tab can recognise its own
+ * change and skip it: the optimistic update already applied it.
+ */
+const TAB_ID =
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : String(Date.now()) + Math.random().toString(36).slice(2);
+
+let mutationCounter = 0;
+
+export function nextMutationId(): string {
+  mutationCounter += 1;
+  return TAB_ID + ':' + mutationCounter;
+}
+
+export function getTabId(): string {
+  return TAB_ID;
+}
+
+/** Did this tab send the mutation behind an event? */
+export function isOwnMutation(clientMutationId: string | null | undefined): boolean {
+  return typeof clientMutationId === 'string' && clientMutationId.startsWith(TAB_ID + ':');
+}
 
 let accessToken: string | null = null;
 /** When the current token stops being accepted, as an epoch milliseconds value. */
@@ -185,6 +212,14 @@ export function hasSessionHint(): boolean {
   return document.cookie.split(';').some((part) => part.trim().startsWith('tm_session='));
 }
 
+/**
+ * The one locked refresh, exposed so the socket can use it too. Sharing it means
+ * a socket reconnect and an HTTP 401 never refresh at the same moment.
+ */
+export async function refreshSession(): Promise<boolean> {
+  return (await performRefresh()) !== null;
+}
+
 export async function restoreSession(): Promise<LoginResponse | null> {
   if (!hasSessionHint()) return null;
   return performRefresh();
@@ -196,6 +231,8 @@ interface RequestOptions {
   signal?: AbortSignal;
   /** Set for the login call, which has no token yet and must not trigger a refresh. */
   skipAuth?: boolean;
+  /** Reuse an id across a retry, so one logical change keeps one identity. */
+  mutationId?: string;
 }
 
 async function send(path: string, options: RequestOptions, isRetry: boolean): Promise<Response> {
@@ -207,6 +244,12 @@ async function send(path: string, options: RequestOptions, isRetry: boolean): Pr
   const headers: Record<string, string> = { 'X-Requested-With': 'XMLHttpRequest' };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (accessToken && !options.skipAuth) headers.Authorization = 'Bearer ' + accessToken;
+
+  // Writes are stamped so their realtime echo can be recognised and ignored here.
+  const method = (options.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    headers[CLIENT_MUTATION_ID_HEADER] = options.mutationId ?? nextMutationId();
+  }
 
   const response = await fetch(BASE + path, {
     method: options.method ?? 'GET',

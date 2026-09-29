@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   addDependencySchema,
+  boardQuerySchema,
   assignTaskSchema,
   createCommentSchema,
   createTaskSchema,
@@ -38,6 +39,16 @@ projectTasksRouter.post(
       req.body,
     );
     res.status(201).json(task);
+  }),
+);
+
+/** Registered before /:idOrKey so "board" is not read as a task key. */
+tasksRouter.get(
+  '/board',
+  validate({ query: boardQuerySchema }),
+  handler(async (req, res) => {
+    const { projectId, teamId } = req.query as { projectId?: string; teamId?: string };
+    res.json(await service.getBoardSummary(requireActor(req), { projectId, teamId }));
   }),
 );
 

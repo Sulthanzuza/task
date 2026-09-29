@@ -155,6 +155,13 @@ rotated within `REFRESH_GRACE_SECONDS` to be presented again *provided its succe
 the live end of the chain*. Outside that window, or once the chain has moved on, reuse
 detection revokes every session as before.
 
+**Realtime is server-authored.** The socket verifies the access token at the handshake and
+joins only the rooms `authorize()` allows; a client never names a room. Every mutation carries
+an `X-Client-Mutation-Id`, echoed in the event, so the tab that made the change ignores its own
+echo. Events carry the task's `updated_at`, so one arriving late cannot undo a newer one. After
+a reconnect the client invalidates once rather than replaying what it missed. Logout, session
+revocation, reuse detection and deactivation all close that user's sockets immediately.
+
 **Task numbers cannot collide.** A new task takes its number from
 `UPDATE projects SET task_counter = task_counter + 1 ... RETURNING` inside the creating
 transaction, so simultaneous creates queue instead of clashing. There is a test for ten at once.
@@ -231,6 +238,10 @@ Screenshots of every main screen, in light and dark at 1280px and 375px, are wri
 narrow captures also assert there is no horizontal page scroll.
 
 If Chromium is missing: `pnpm --filter @tm/web exec playwright install chromium`.
+
+The suite serves the **built** app through `vite preview`, not the dev server: it exercises the
+real bundle and runs no file watcher. If a run is interrupted, its servers can survive and the
+next run will refuse to start; free ports 4100 and 5199 and try again.
 
 The e2e API issues 8 second access tokens, so tokens genuinely expire during a run and the
 cross-tab test can wait one out. CI runs the suite on every pull request with a Postgres

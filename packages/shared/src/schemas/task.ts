@@ -242,3 +242,25 @@ export const ACTIVITY_ACTIONS = [
   'attachment.deleted',
 ] as const;
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
+
+/**
+ * Per-column counts for the board.
+ *
+ * Counted on the server with the shared predicates, so a column header agrees
+ * with the dashboard and does not merely count whichever page of cards the
+ * browser happens to have loaded.
+ */
+export const boardSummarySchema = z.object({
+  counts: z.record(taskStatusSchema, z.number().int()),
+  open: z.number().int(),
+  active: z.number().int(),
+  /** Columns the board hides until the user asks for them. */
+  collapsed: z.array(taskStatusSchema),
+});
+export type BoardSummary = z.infer<typeof boardSummarySchema>;
+
+export const boardQuerySchema = z.object({
+  projectId: uuidSchema.optional(),
+  teamId: uuidSchema.optional(),
+});
+export type BoardQuery = z.infer<typeof boardQuerySchema>;

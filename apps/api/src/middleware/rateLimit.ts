@@ -1,7 +1,7 @@
 import rateLimit, { ipKeyGenerator, type Options } from 'express-rate-limit';
 import type { Request } from 'express';
 import { ERROR_CODES } from '@tm/shared';
-import { isTest } from '../config/env';
+import { env, isTest } from '../config/env';
 
 const shared: Partial<Options> = {
   standardHeaders: 'draft-7',
@@ -32,18 +32,18 @@ function ipAndEmailKey(req: Request): string {
 export const authLimiter = rateLimit({
   ...shared,
   windowMs: 60_000,
-  limit: 5,
+  limit: env.AUTH_RATE_LIMIT_PER_MINUTE,
   keyGenerator: ipAndEmailKey,
 });
 
 export const apiLimiter = rateLimit({
   ...shared,
   windowMs: 60_000,
-  limit: 300,
+  limit: env.API_RATE_LIMIT_PER_MINUTE,
 });
 
 export const uploadLimiter = rateLimit({
   ...shared,
   windowMs: 60_000,
-  limit: 30,
+  limit: env.UPLOAD_RATE_LIMIT_PER_MINUTE,
 });

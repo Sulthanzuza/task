@@ -20,13 +20,15 @@ interface Kpi {
 }
 
 const KPIS: Kpi[] = [
-  { key: 'active', label: 'Active', to: '/tasks?open=true' },
+  // active=true, not open=true: "Active" excludes the backlog, so open=true
+  // would show more rows than the card claims.
+  { key: 'active', label: 'Active', to: '/tasks?active=true' },
   { key: 'dueToday', label: 'Due today', to: '/tasks?dueToday=true', tone: 'warning' },
   { key: 'overdue', label: 'Overdue', to: '/tasks?overdue=true', tone: 'danger' },
   { key: 'blocked', label: 'Blocked', to: '/tasks?blocked=true', tone: 'danger' },
   { key: 'waitingReview', label: 'Waiting review', to: '/tasks?status=READY_FOR_REVIEW,IN_REVIEW' },
   { key: 'noUpdate', label: 'No update', to: '/tasks?noUpdate=true', tone: 'warning' },
-  { key: 'completedThisWeek', label: 'Done this week', to: '/tasks?status=COMPLETED' },
+  { key: 'completedThisWeek', label: 'Done this week', to: '/tasks?completedThisWeek=true' },
   { key: 'unassignedOpen', label: 'Unassigned', to: '/tasks?assigneeId=none&open=true' },
 ];
 

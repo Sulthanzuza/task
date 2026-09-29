@@ -26,7 +26,7 @@ import {
   ValidationError,
 } from '../../lib/errors';
 import { EventBuffer } from '../../lib/events';
-import { workingHoursBetween } from '../../lib/date-utils';
+import { startOfDayUtc, startOfWeek, toDateOnly, workingHoursBetween } from '../../lib/date-utils';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
@@ -206,22 +206,22 @@ export async function listTasksForActor(
   query: ListTasksQuery,
 ): Promise<{ items: TaskSummary[]; nextCursor: string | null }> {
   const { settings, calendar } = await getOrgContext();
-  const todayInOrg = new Intl.DateTimeFormat('en-CA', {
-    timeZone: calendar.timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+  const now = new Date();
 
-  const noUpdateBefore = new Date(
-    Date.now() - settings.noUpdateThresholdHours * 3_600_000,
-  );
+  // The same date-utils the dashboard uses, so a list filtered from a KPI card
+  // resolves "today" and "this week" exactly as the KPI did.
+  const todayInOrg = toDateOnly(now, calendar.timezone);
+  const weekStart = startOfWeek(todayInOrg, calendar);
+  const weekStartInstant = startOfDayUtc(weekStart, calendar.timezone);
+
+  const noUpdateBefore = new Date(now.getTime() - settings.noUpdateThresholdHours * 3_600_000);
 
   const { rows, nextCursor } = await repo.listTasks(db, {
     query,
     actorId: actor.id,
     visibleTeamIds: visibleTeamIds(actor),
     today: todayInOrg,
+    weekStartInstant,
     noUpdateBefore,
   });
 

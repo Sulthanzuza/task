@@ -353,6 +353,11 @@ function buildFilters(query: ListTasksQuery, actorId: string, visibleTeamIds: st
 
   if (query.open === true) filters.push(sql`${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`);
   if (query.open === false) filters.push(sql`${tasks.status} IN ('COMPLETED', 'CANCELLED')`);
+
+  // Active is open minus the backlog; see the metric definitions.
+  if (query.active === true) {
+    filters.push(sql`${tasks.status} NOT IN ('COMPLETED', 'CANCELLED', 'BACKLOG')`);
+  }
   if (query.blocked) filters.push(eq(tasks.status, 'BLOCKED'));
 
   if (query.q) {
@@ -373,6 +378,8 @@ export interface ListTasksOptions {
   visibleTeamIds: string[] | null;
   /** Today in the org time zone, so overdue is computed against the right day. */
   today: string;
+  /** The instant the current week began, in the org time zone. */
+  weekStartInstant: Date;
   /** Cut-off for the no-update filter. */
   noUpdateBefore?: Date;
 }
@@ -388,6 +395,16 @@ export async function listTasks(
     filters.push(
       sql`${tasks.dueDate} < ${today}::date AND ${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`,
     );
+  }
+
+  if (query.dueToday) {
+    filters.push(
+      sql`${tasks.dueDate} = ${today}::date AND ${tasks.status} NOT IN ('COMPLETED', 'CANCELLED')`,
+    );
+  }
+
+  if (query.completedThisWeek) {
+    filters.push(sql`${tasks.completedAt} >= ${options.weekStartInstant}`);
   }
 
   if (query.noUpdate && options.noUpdateBefore) {

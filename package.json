@@ -17,12 +17,13 @@
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "test": "pnpm -r test",
-    "test:e2e": "pnpm --filter @tm/web test:e2e",
     "db:generate": "pnpm --filter @tm/api db:generate",
     "db:migrate": "pnpm --filter @tm/api db:migrate",
     "db:seed": "pnpm --filter @tm/api db:seed",
     "db:reset": "pnpm --filter @tm/api db:reset",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "e2e": "pnpm --filter @tm/web e2e",
+    "e2e:ui": "pnpm --filter @tm/web e2e:ui"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

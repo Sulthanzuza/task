@@ -17,12 +17,8 @@ interface Group {
   match(task: TaskSummary, today: string, weekEnd: string): boolean;
 }
 
+/** Due-date order first, because that is the order people work in. */
 const GROUPS: Group[] = [
-  {
-    key: 'review',
-    title: 'Waiting for your review',
-    match: () => false, // filled separately from the reviewer query
-  },
   {
     key: 'overdue',
     title: 'Overdue',
@@ -45,6 +41,12 @@ const GROUPS: Group[] = [
     key: 'later',
     title: 'Later',
     match: (task, _today, weekEnd) => !task.dueDate || task.dueDate > weekEnd,
+  },
+  {
+    key: 'review',
+    title: 'Waiting for your review',
+    // Filled from the reviewer query, not from this person's own tasks.
+    match: () => false,
   },
 ];
 

@@ -1,0 +1,122 @@
+import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { E2E_API_URL } from './playwright.config';
+
+/**
+ * Every test gets a page that fails if the browser logged an error or a request
+ * came back 4xx/5xx unexpectedly. A screen that "works" while throwing in the
+ * console is not working.
+ */
+
+export interface PageProblem {
+  kind: 'console' | 'pageerror' | 'response';
+  detail: string;
+}
+
+interface Fixtures {
+  /** Problems seen so far. A test may forgive an expected one by name. */
+  problems: {
+    all(): PageProblem[];
+    /** Mark a status+url-fragment pair as expected, e.g. a deliberate 403. */
+    expectFailure(status: number, urlFragment: string): void;
+  };
+  api: APIRequestContext;
+}
+
+export const test = base.extend<Fixtures>({
+  api: async ({ playwright }, use) => {
+    const context = await playwright.request.newContext({ baseURL: E2E_API_URL });
+    await use(context);
+    await context.dispose();
+  },
+
+  problems: async ({ page }, use) => {
+    const found: PageProblem[] = [];
+    const allowed: Array<{ status: number; urlFragment: string }> = [];
+
+    page.on('console', (message) => {
+      if (message.type() !== 'error') return;
+      const text = message.text();
+      // React Router prints future-flag notices as errors; they are not defects.
+      if (text.includes('React Router Future Flag')) return;
+
+      // The browser logs its own "Failed to load resource" line for every 4xx,
+      // including ones the test has declared expected. Match it back to the
+      // request by URL so an expected refusal is not counted twice.
+      const url = message.location()?.url ?? '';
+      if (
+        text.includes('Failed to load resource') &&
+        allowed.some((a) => url.includes(a.urlFragment) && text.includes(String(a.status)))
+      ) {
+        return;
+      }
+
+      found.push({ kind: 'console', detail: text });
+    });
+
+    page.on('pageerror', (error) => {
+      found.push({ kind: 'pageerror', detail: error.message });
+    });
+
+    page.on('response', (response) => {
+      const status = response.status();
+      if (status < 400) return;
+      const url = response.url();
+      if (allowed.some((a) => a.status === status && url.includes(a.urlFragment))) return;
+      found.push({ kind: 'response', detail: status + ' ' + url });
+    });
+
+    await use({
+      all: () => found,
+      expectFailure: (status, urlFragment) => allowed.push({ status, urlFragment }),
+    });
+
+    // Anything left unexplained fails the test.
+    expect(
+      found.map((p) => p.kind + ': ' + p.detail),
+      'the page reported errors',
+    ).toEqual([]);
+  },
+});
+
+export { expect };
+
+export const USERS = {
+  lead: { email: 'sulthan@example.com', password: 'Password123!', name: 'Sulthan' },
+  member: { email: 'rahul@example.com', password: 'Password123!', name: 'Rahul' },
+  otherLead: { email: 'nisha@example.com', password: 'Password123!', name: 'Nisha' },
+} as const;
+
+/** Signs in through the real form, the way a person would. */
+export async function signIn(page: Page, user: { email: string; password: string }): Promise<void> {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(user.email);
+  await page.getByLabel('Password').fill(user.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+}
+
+/**
+ * Calls the API directly with the same credentials, so a test can compare what the
+ * screen shows against what the server actually said.
+ */
+export async function apiAs(
+  api: APIRequestContext,
+  user: { email: string; password: string },
+): Promise<{ token: string; get<T>(path: string): Promise<T> }> {
+  const login = await api.post('/api/v1/auth/login', {
+    data: { email: user.email, password: user.password },
+  });
+  expect(login.ok(), 'API login failed').toBeTruthy();
+  const token = (await login.json()).accessToken as string;
+
+  return {
+    token,
+    async get<T>(path: string): Promise<T> {
+      const response = await api.get('/api/v1' + path, {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      expect(response.ok(), 'GET ' + path + ' failed: ' + response.status()).toBeTruthy();
+      return (await response.json()) as T;
+    },
+  };
+}

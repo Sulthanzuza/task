@@ -8,14 +8,18 @@ import { runMigrations } from './migrate';
 import { seed } from './seed';
 
 /** Drops everything and rebuilds from migrations, then seeds. Development only. */
-async function reset(): Promise<void> {
+export async function reset(): Promise<void> {
   if (isProduction) {
     throw new Error('Refusing to reset the database in production.');
   }
 
-  await db.execute(sql`DROP SCHEMA public CASCADE`);
+  await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
+  // Drizzle keeps its migration journal in its own schema. Dropping only public
+  // would leave the journal behind, and the migrator would then skip every
+  // migration and leave the database empty.
+  await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
   await db.execute(sql`CREATE SCHEMA public`);
-  logger.info('Schema dropped and recreated.');
+  logger.info('Schemas dropped and recreated.');
 
   await runMigrations();
   logger.info('Migrations applied.');

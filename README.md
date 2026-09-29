@@ -191,6 +191,27 @@ read or change team B's data, through any route.
 
 The first integration run pulls the `postgres:16-alpine` image, so it takes a minute.
 
+### End-to-end
+
+```bash
+pnpm e2e          # headless Chromium against a real API
+pnpm e2e:ui       # the same, with Playwright's inspector
+```
+
+`pnpm e2e` starts its own API and web server on ports 4100 and 5199, against a **separate
+database** (`taskmanager_e2e`) that is dropped, migrated and seeded before every run. It never
+touches your development database or your running dev servers.
+
+A test fails if the browser logged **any** console error or if a request came back 4xx/5xx
+that the test did not explicitly expect. A screen that works while throwing in the console is
+not working.
+
+Screenshots of every main screen, in light and dark at 1280px and 375px, are written to
+`apps/web/e2e/screenshots/` and committed, so a visual regression shows up in the diff. The
+narrow captures also assert there is no horizontal page scroll.
+
+If Chromium is missing: `pnpm --filter @tm/web exec playwright install chromium`.
+
 ---
 
 ## API conventions

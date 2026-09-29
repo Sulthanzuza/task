@@ -80,6 +80,9 @@ const SEED_USERS: SeedUser[] = [
   { name: 'Arun', email: 'arun@example.com', role: 'MEMBER' },
   { name: 'Faisal', email: 'faisal@example.com', role: 'MEMBER' },
   { name: 'Akhil', email: 'akhil@example.com', role: 'MEMBER' },
+  // Leads the second team. Nothing of theirs is visible to the first team,
+  // which is what makes cross-team access testable.
+  { name: 'Nisha', email: 'nisha@example.com', role: 'TEAM_LEAD' },
 ];
 
 async function seedUsers(): Promise<Map<string, string>> {
@@ -139,6 +142,96 @@ async function seedTeam(userIds: Map<string, string>): Promise<string> {
     .onConflictDoNothing();
 
   return teamId;
+}
+
+/**
+ * A second team, with its own lead, project and task.
+ * Nobody from the first team belongs to it, so any route that leaks its data
+ * across the team boundary shows up immediately in the tests.
+ */
+async function seedSecondTeam(
+  userIds: Map<string, string>,
+  createdBy: string,
+): Promise<{ teamId: string; projectId: string }> {
+  const leadId = userIds.get('nisha@example.com');
+  if (!leadId) throw new Error('The second team lead must exist');
+
+  const existing = await db.select().from(teams).where(eq(teams.name, 'Platform')).limit(1);
+  let teamId = existing[0]?.id;
+
+  if (!teamId) {
+    const [created] = await db
+      .insert(teams)
+      .values({ name: 'Platform', leadId })
+      .returning({ id: teams.id });
+    teamId = created?.id;
+  }
+  if (!teamId) throw new Error('Could not create the Platform team');
+
+  await db.insert(teamMembers).values({ teamId, userId: leadId }).onConflictDoNothing();
+
+  const [project] = await db
+    .insert(projects)
+    .values({
+      key: 'OPS',
+      name: 'Platform Operations',
+      description: 'Infrastructure work for the platform team.',
+      teamId,
+      createdBy,
+    })
+    .onConflictDoUpdate({ target: projects.key, set: { name: 'Platform Operations' } })
+    .returning({ id: projects.id });
+
+  if (!project) throw new Error('Could not create the OPS project');
+
+  const alreadyThere = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.projectId, project.id))
+    .limit(1);
+
+  if (alreadyThere.length === 0) {
+    const [counter] = await db
+      .update(projects)
+      .set({ taskCounter: sql`${projects.taskCounter} + 1` })
+      .where(eq(projects.id, project.id))
+      .returning({ number: projects.taskCounter });
+
+    if (counter) {
+      const [task] = await db
+        .insert(tasks)
+        .values({
+          projectId: project.id,
+          number: counter.number,
+          title: 'Rotate the production database credentials',
+          description: 'Platform team work. Not visible to the product team.',
+          status: 'IN_PROGRESS',
+          priority: 'HIGH',
+          createdBy: leadId,
+          assigneeId: leadId,
+          progress: 40,
+          dueDate: daysFromToday(3),
+          estimatedMinutes: 240,
+          lastActivityAt: hoursAgo(4),
+          createdAt: hoursAgo(72),
+          updatedAt: hoursAgo(4),
+        })
+        .returning({ id: tasks.id });
+
+      if (task) {
+        await db.insert(taskWatchers).values({ taskId: task.id, userId: leadId }).onConflictDoNothing();
+        await db.insert(taskActivity).values({
+          taskId: task.id,
+          actorId: leadId,
+          action: 'task.created',
+          newValue: { title: 'Rotate the production database credentials', status: 'BACKLOG' },
+          createdAt: hoursAgo(72),
+        });
+      }
+    }
+  }
+
+  return { teamId, projectId: project.id };
 }
 
 async function seedProjects(teamId: string, createdBy: string): Promise<Map<string, string>> {
@@ -400,9 +493,16 @@ async function main(): Promise<void> {
   const projectIds = await seedProjects(teamId, adminId);
   const labelIds = await seedLabels(projectIds);
   const createdTasks = await seedTasks(projectIds, userIds, labelIds);
+  const secondTeam = await seedSecondTeam(userIds, adminId);
 
   logger.info(
-    { users: userIds.size, projects: projectIds.size, tasksCreated: createdTasks, timezone: TZ },
+    {
+      users: userIds.size,
+      projects: projectIds.size + 1,
+      tasksCreated: createdTasks,
+      secondTeamId: secondTeam.teamId,
+      timezone: TZ,
+    },
     'Seed complete.',
   );
   logger.info(

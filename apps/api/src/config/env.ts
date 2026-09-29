@@ -41,6 +41,15 @@ const envSchema = z.object({
 
   COOKIE_DOMAIN: z.string().optional(),
 
+  /**
+   * Rate limits, per minute. Configurable because the right number depends on the
+   * deployment: a shared office IP needs more headroom than a single user, and an
+   * end-to-end test run needs far more than either.
+   */
+  AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(5),
+  API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(300),
+  UPLOAD_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(30),
+
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().int().default(1025),
   SMTP_USER: z.string().optional(),

@@ -42,6 +42,9 @@ function useFilters() {
       blocked: params.get('blocked') === 'true' ? true : undefined,
       noUpdate: params.get('noUpdate') === 'true' ? true : undefined,
       open: params.get('open') === 'true' ? true : undefined,
+      active: params.get('active') === 'true' ? true : undefined,
+      dueToday: params.get('dueToday') === 'true' ? true : undefined,
+      completedThisWeek: params.get('completedThisWeek') === 'true' ? true : undefined,
       sort: (get('sort') ?? 'lastActivityAt') as ListTasksQuery['sort'],
       order: (get('order') ?? 'desc') as 'asc' | 'desc',
     };

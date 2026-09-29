@@ -461,3 +461,122 @@ describe('dependencies', () => {
     expect(detailB.body.blocks[0].key).toBe(a.key);
   });
 });
+
+describe('the filters behind the dashboard cards', () => {
+  /**
+   * Each KPI card links to the task list with a filter. If the filter does not
+   * mean the same thing as the metric, the card lies about what it will show.
+   */
+  async function seedStatuses() {
+    const backlog = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Still in the backlog' });
+    const assigned = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Assigned and waiting',
+      assigneeId: fx.member.id,
+    });
+    const started = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Work in progress',
+      assigneeId: fx.member.id,
+      reviewerId: fx.reviewer.id,
+    });
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + started.id + '/transition')
+      .send({ to: 'IN_PROGRESS' })
+      .expect(200);
+
+    return { backlog, assigned, started };
+  }
+
+  it('active excludes the backlog, while open includes it', async () => {
+    const { backlog } = await seedStatuses();
+
+    const open = await as(harness.app, fx.lead).get('/api/v1/tasks?open=true').expect(200);
+    const active = await as(harness.app, fx.lead).get('/api/v1/tasks?active=true').expect(200);
+
+    const openIds = open.body.items.map((t: { id: string }) => t.id);
+    const activeIds = active.body.items.map((t: { id: string }) => t.id);
+
+    expect(openIds).toContain(backlog.id);
+    expect(activeIds).not.toContain(backlog.id);
+    expect(activeIds.length).toBe(openIds.length - 1);
+  });
+
+  it('active and the dashboard summary agree', async () => {
+    await seedStatuses();
+
+    const summary = await as(harness.app, fx.lead)
+      .get('/api/v1/dashboard/summary?teamId=' + fx.team.id)
+      .expect(200);
+    const active = await as(harness.app, fx.lead).get('/api/v1/tasks?active=true').expect(200);
+
+    expect(active.body.items).toHaveLength(summary.body.active);
+  });
+
+  it('dueToday selects exactly the open tasks due today in the org time zone', async () => {
+    const { settings, calendar } = await import('../src/modules/org/service').then(async (m) => ({
+      settings: await m.getOrgSettings(),
+      calendar: (await m.getOrgContext()).calendar,
+    }));
+    const { toDateOnly } = await import('../src/lib/date-utils');
+    const today = toDateOnly(new Date(), calendar.timezone);
+    expect(settings.timezone).toBe(calendar.timezone);
+
+    const dueNow = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Has to land today',
+      dueDate: today,
+      assigneeId: fx.member.id,
+    });
+    await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Has a while yet',
+      dueDate: '2099-01-01',
+    });
+
+    const response = await as(harness.app, fx.lead).get('/api/v1/tasks?dueToday=true').expect(200);
+    expect(response.body.items.map((t: { id: string }) => t.id)).toEqual([dueNow.id]);
+
+    const summary = await as(harness.app, fx.lead)
+      .get('/api/v1/dashboard/summary?teamId=' + fx.team.id)
+      .expect(200);
+    expect(response.body.items).toHaveLength(summary.body.dueToday);
+  });
+
+  it('completedThisWeek matches the summary and excludes older completions', async () => {
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Finished this week',
+      assigneeId: fx.member.id,
+      reviewerId: fx.reviewer.id,
+    });
+    const move = (user: typeof fx.member, body: Record<string, unknown>) =>
+      as(harness.app, user).post('/api/v1/tasks/' + task.id + '/transition').send(body);
+
+    await move(fx.member, { to: 'IN_PROGRESS' }).expect(200);
+    await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200);
+    await move(fx.reviewer, { to: 'COMPLETED' }).expect(200);
+
+    // Backdate a second completion well into the past.
+    const older = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Finished long ago',
+      assigneeId: fx.member.id,
+      reviewerId: fx.reviewer.id,
+    });
+    const { db } = await import('../src/db/client');
+    const { tasks: taskTable } = await import('../src/db/schema');
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(taskTable)
+      .set({ status: 'COMPLETED', completedAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(taskTable.id, older.id));
+
+    const response = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks?completedThisWeek=true')
+      .expect(200);
+
+    const ids = response.body.items.map((t: { id: string }) => t.id);
+    expect(ids).toContain(task.id);
+    expect(ids).not.toContain(older.id);
+
+    const summary = await as(harness.app, fx.lead)
+      .get('/api/v1/dashboard/summary?teamId=' + fx.team.id)
+      .expect(200);
+    expect(response.body.items).toHaveLength(summary.body.completedThisWeek);
+  });
+});

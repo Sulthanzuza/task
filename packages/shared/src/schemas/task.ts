@@ -161,6 +161,15 @@ export const listTasksQuerySchema = cursorPaginationSchema.extend({
   overdue: booleanQuerySchema,
   blocked: booleanQuerySchema,
   open: booleanQuerySchema,
+  /** Active = open and not Backlog, matching the metric definition exactly. */
+  active: booleanQuerySchema,
+  /**
+   * Due today and completed-this-week are evaluated on the server, because only
+   * it knows the org time zone and which day the week starts on. The browser
+   * must not compute either from its own clock.
+   */
+  dueToday: booleanQuerySchema,
+  completedThisWeek: booleanQuerySchema,
   noUpdate: booleanQuerySchema,
   parentId: z.union([uuidSchema, z.literal('none')]).optional(),
   q: z.string().trim().min(1).max(200).optional(),

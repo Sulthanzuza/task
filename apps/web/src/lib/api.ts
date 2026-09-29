@@ -59,12 +59,16 @@ export class ApiError extends Error {
 }
 
 /**
- * Concurrent 401s must not each fire their own refresh, or the rotation would
- * invalidate itself and log the user out. They all wait on the same promise.
+ * Refreshing rotates the token on the server, and presenting a rotated token again
+ * is treated as theft: every session for that user is revoked. So two refreshes
+ * must never be in flight at once.
+ *
+ * Every caller — a 401 retry, a session restore, two components mounting together,
+ * React's double-invoked effects in development — shares this one promise.
  */
-let inFlightRefresh: Promise<boolean> | null = null;
+let inFlightRefresh: Promise<LoginResponse | null> | null = null;
 
-async function refreshOnce(): Promise<boolean> {
+function performRefresh(): Promise<LoginResponse | null> {
   inFlightRefresh ??= (async () => {
     try {
       const response = await fetch(BASE + '/auth/refresh', {
@@ -72,12 +76,12 @@ async function refreshOnce(): Promise<boolean> {
         credentials: 'include',
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       });
-      if (!response.ok) return false;
+      if (!response.ok) return null;
       const body = (await response.json()) as LoginResponse;
       accessToken = body.accessToken;
-      return true;
+      return body;
     } catch {
-      return false;
+      return null;
     } finally {
       // Release the lock on the next tick, so waiters read the new token first.
       queueMicrotask(() => {
@@ -89,20 +93,23 @@ async function refreshOnce(): Promise<boolean> {
   return inFlightRefresh;
 }
 
+async function refreshOnce(): Promise<boolean> {
+  return (await performRefresh()) !== null;
+}
+
+/**
+ * The API sets a readable tm_session flag next to the httpOnly refresh cookie.
+ * Checking it first means an anonymous visitor never fires a refresh request
+ * just to be told 401.
+ */
+export function hasSessionHint(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.cookie.split(';').some((part) => part.trim().startsWith('tm_session='));
+}
+
 export async function restoreSession(): Promise<LoginResponse | null> {
-  try {
-    const response = await fetch(BASE + '/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    });
-    if (!response.ok) return null;
-    const body = (await response.json()) as LoginResponse;
-    accessToken = body.accessToken;
-    return body;
-  } catch {
-    return null;
-  }
+  if (!hasSessionHint()) return null;
+  return performRefresh();
 }
 
 interface RequestOptions {

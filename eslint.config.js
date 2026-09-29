@@ -40,5 +40,14 @@ export default tseslint.config(
     files: ['**/*.test.ts', '**/*.test.tsx', '**/test/**'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-explicit-any': 'off' },
   },
+  {
+    // Playwright fixtures take a callback named `use`, which the React hook rules
+    // mistake for a hook. These files are Node, not React.
+    files: ['apps/web/e2e/**/*.ts'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+      'no-console': 'off',
+    },
+  },
   prettier,
 );

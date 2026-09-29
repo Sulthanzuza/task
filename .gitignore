@@ -11,3 +11,7 @@ uploads/
 .vite/
 playwright-report/
 test-results/
+
+# Playwright e2e output
+apps/web/e2e/.artifacts/
+apps/web/e2e/.report/

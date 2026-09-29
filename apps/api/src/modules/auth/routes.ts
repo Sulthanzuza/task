@@ -20,6 +20,17 @@ const REFRESH_COOKIE = 'tm_refresh';
 /** Scoped to the auth routes, so the cookie is not sent with every API call. */
 const COOKIE_PATH = '/api/v1/auth';
 
+/**
+ * A readable flag saying "a session cookie exists", set and cleared alongside the
+ * refresh cookie. It holds no secret and grants nothing.
+ *
+ * The refresh cookie is httpOnly, so the app cannot tell whether it has a session
+ * without asking. Without this hint every anonymous page load would fire a refresh
+ * request purely to be told 401 -- a wasted round trip and a console error on a
+ * page where nothing is wrong.
+ */
+const SESSION_HINT_COOKIE = 'tm_session';
+
 function cookieOptions(): CookieOptions {
   return {
     // Never readable from JavaScript, so a cross-site script cannot steal the session.
@@ -35,12 +46,19 @@ function cookieOptions(): CookieOptions {
   };
 }
 
+/** The hint is readable by the app, so it is not httpOnly and covers the whole site. */
+function hintCookieOptions(): CookieOptions {
+  return { ...cookieOptions(), httpOnly: false, path: '/' };
+}
+
 function setRefreshCookie(res: Response, token: string): void {
   res.cookie(REFRESH_COOKIE, token, cookieOptions());
+  res.cookie(SESSION_HINT_COOKIE, '1', hintCookieOptions());
 }
 
 function clearRefreshCookie(res: Response): void {
   res.clearCookie(REFRESH_COOKIE, { ...cookieOptions(), maxAge: undefined });
+  res.clearCookie(SESSION_HINT_COOKIE, { ...hintCookieOptions(), maxAge: undefined });
 }
 
 function sessionContext(req: Request) {

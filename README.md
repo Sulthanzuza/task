@@ -196,6 +196,18 @@ sends one message listing all of it, and stamps the rows, in one transaction. Th
 pg-boss's `short` policy, so a second change during the window adds no job and simply rides
 along with the one already waiting.
 
+**Production refuses to start misconfigured.** `config/env.ts` rejects a development
+secret, a non-https origin, email or the job queue switched off, a raised sign-in limit, or
+uploads on a container disk. A deployment running in a weakened state looks healthy while
+doing the wrong thing; refusing to boot is the only failure mode anyone notices. The
+test-only job route is not mounted outside `NODE_ENV=test`, and the seed script refuses to
+run in production at all.
+
+**Uploads are identified by their bytes.** The file name and the declared `Content-Type`
+both come from whoever is uploading, so neither decides what a file is; `lib/fileType.ts`
+reads the magic bytes, and the sniffed type is what gets stored. Downloads always carry
+`Content-Disposition: attachment`, so an uploaded SVG can never render on our own origin.
+
 **Task numbers cannot collide.** A new task takes its number from
 `UPDATE projects SET task_counter = task_counter + 1 ... RETURNING` inside the creating
 transaction, so simultaneous creates queue instead of clashing. There is a test for ten at once.
@@ -222,6 +234,30 @@ tests cannot drift apart. "Open" means any status except `COMPLETED` and `CANCEL
 The median, not the mean, so one unusual task does not distort the figure.
 
 ---
+
+## Production
+
+Deployment, TLS, SPF and DKIM, backups and the restore drill are in
+[docs/deploy.md](docs/deploy.md). In short:
+
+```bash
+cp .env.production.example .env.production   # then fill in real secrets
+docker compose -f docker-compose.prod.yml up -d --build
+
+# The first administrator, made on the server. Everyone else is invited
+# from the UI, which needs somebody signed in to do the inviting.
+docker compose -f docker-compose.prod.yml run --rm api   node dist/cli/createUser.js --email you@example.com --name "Your Name" --role SUPER_ADMIN
+```
+
+Run **one API instance**: Socket.IO holds connection state in memory, so a second would
+leave half the team's boards silently not updating. `docs/deploy.md` says what to do before
+scaling out. Several workers are already safe.
+
+After any deploy, against the live site:
+
+```bash
+BASE_URL=https://tasks.example.com SMOKE_EMAIL=... SMOKE_PASSWORD=... pnpm smoke
+```
 
 ## Scripts
 

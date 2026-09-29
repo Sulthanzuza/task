@@ -11,6 +11,35 @@ interface PostgresError {
   detail?: string;
 }
 
+interface BodyParserError {
+  type: string;
+  status?: number;
+  statusCode?: number;
+}
+
+function isBodyParserError(error: unknown): error is BodyParserError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    typeof (error as BodyParserError).type === 'string' &&
+    (error as BodyParserError).type.startsWith('entity.')
+  );
+}
+
+interface MulterError {
+  name: string;
+  code: string;
+}
+
+function isMulterError(error: unknown): error is MulterError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as MulterError).name === 'MulterError' &&
+    typeof (error as MulterError).code === 'string'
+  );
+}
+
 function isPostgresError(error: unknown): error is PostgresError {
   return typeof error === 'object' && error !== null && typeof (error as PostgresError).code === 'string';
 }
@@ -65,8 +94,21 @@ export function errorHandler(
     });
   } else if (isPostgresError(error) && fromPostgres(error)) {
     appError = fromPostgres(error) as AppError;
-  } else if (error instanceof SyntaxError && 'body' in error) {
-    appError = new AppError(400, ERROR_CODES.VALIDATION_FAILED, 'The request body is not valid JSON.');
+  } else if (isBodyParserError(error)) {
+    /*
+     * body-parser rejects an oversized or malformed body before any handler
+     * runs, with its own type and status. Without this it fell through to a
+     * 500, which told the caller nothing about what was wrong.
+     */
+    appError =
+      error.type === 'entity.too.large'
+        ? new AppError(413, ERROR_CODES.PAYLOAD_TOO_LARGE, 'That request body is too large.')
+        : new AppError(400, ERROR_CODES.VALIDATION_FAILED, 'The request body is not valid JSON.');
+  } else if (isMulterError(error)) {
+    appError =
+      error.code === 'LIMIT_FILE_SIZE'
+        ? new AppError(413, ERROR_CODES.PAYLOAD_TOO_LARGE, 'That file is larger than the limit.')
+        : new AppError(400, ERROR_CODES.VALIDATION_FAILED, 'That upload was not accepted.');
   } else {
     appError = new AppError(500, ERROR_CODES.INTERNAL, 'Something went wrong on our side.');
   }

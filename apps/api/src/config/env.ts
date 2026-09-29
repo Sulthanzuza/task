@@ -127,11 +127,83 @@ export const env: Env = load();
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
 
+/**
+ * How many reverse proxies sit in front of this process.
+ *
+ * One in production, because there is exactly one Nginx. Trusting every hop
+ * would let a caller forge X-Forwarded-For and dodge the rate limiter;
+ * trusting none would make every request look like it came from Nginx, so one
+ * person's failed sign-ins would lock out the whole team.
+ */
+export const trustedProxyHops: number | false = isProduction ? 1 : false;
+
 export const jobQueueEnabled =
   env.JOB_QUEUE_ENABLED !== undefined ? env.JOB_QUEUE_ENABLED === 'true' : !isTest;
 
 export const mailEnabled =
   env.MAIL_ENABLED !== undefined ? env.MAIL_ENABLED === 'true' : !isTest;
+
+/**
+ * Settings that are fine in development and dangerous in production.
+ *
+ * These are refusals, not warnings. A deployment that starts with a default
+ * secret, or with email quietly switched off, looks healthy while doing the
+ * wrong thing; refusing to start is the only failure mode anyone notices.
+ */
+const KNOWN_DEV_SECRETS = new Set([
+  'dev_access_secret_change_me_0000000000000000',
+  'test_secret_used_only_in_tests_0000000000',
+]);
+
+export function productionConfigErrors(): string[] {
+  if (!isProduction) return [];
+
+  const errors: string[] = [];
+
+  // Secrets: present, long enough, and not one of the ones in the repository.
+  if (Buffer.byteLength(env.JWT_ACCESS_SECRET, 'utf8') < 32) {
+    errors.push('JWT_ACCESS_SECRET must be at least 32 bytes');
+  }
+  if (KNOWN_DEV_SECRETS.has(env.JWT_ACCESS_SECRET)) {
+    errors.push('JWT_ACCESS_SECRET is a development default and must be replaced');
+  }
+
+  // Anything credentialed must be over TLS, or the session cookie is readable
+  // by anyone on the network.
+  for (const origin of [env.WEB_ORIGIN, ...env.CORS_ORIGINS]) {
+    if (!origin.startsWith('https://')) {
+      errors.push('every allowed origin must be https, but found ' + origin);
+    }
+  }
+
+  // Both default to off under test; reaching production off means alerts and
+  // invitations silently do nothing.
+  if (!mailEnabled) errors.push('MAIL_ENABLED must be true in production');
+  if (!jobQueueEnabled) errors.push('JOB_QUEUE_ENABLED must be true in production');
+
+  if (env.AUTH_RATE_LIMIT_PER_MINUTE > 5) {
+    errors.push(
+      'AUTH_RATE_LIMIT_PER_MINUTE is ' +
+        env.AUTH_RATE_LIMIT_PER_MINUTE +
+        '; a raised sign-in limit must not reach production',
+    );
+  }
+
+  if (env.NODE_ENV === 'production' && env.STORAGE_DRIVER === 'local') {
+    errors.push('STORAGE_DRIVER=local keeps uploads on a single container disk; use s3');
+  }
+
+  return errors;
+}
+
+/** Called at start-up. Throws rather than letting a misconfigured process serve. */
+export function assertProductionConfig(): void {
+  const errors = productionConfigErrors();
+  if (errors.length === 0) return;
+
+  const detail = errors.map((error) => '  - ' + error).join('\n');
+  throw new Error('Refusing to start in production:\n' + detail);
+}
 
 /**
  * The origins CORS will accept. WEB_ORIGIN is always allowed, so a correct

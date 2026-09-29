@@ -109,3 +109,21 @@ export async function enqueueNotificationEmail(
     retryBackoff: true,
   });
 }
+
+/**
+ * Is the queue usable?
+ *
+ * Reported by /ready. When the queue is deliberately off, as it is under test,
+ * "not running" is the correct state rather than a fault.
+ */
+export async function pingQueue(): Promise<boolean> {
+  if (!jobQueueEnabled) return true;
+  try {
+    const instance = await getQueue();
+    await instance.getQueue(QUEUES.notificationEmail);
+    return true;
+  } catch (error) {
+    logger.error({ err: error }, 'The job queue is not reachable.');
+    return false;
+  }
+}

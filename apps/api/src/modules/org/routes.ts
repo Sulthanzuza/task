@@ -4,14 +4,16 @@ import { z } from 'zod';
 import { dateOnlySchema, uuidSchema } from '@tm/shared';
 import { isTest } from '../../config/env';
 import { db } from '../../db/client';
+import { users } from '../../db/schema';
 import { orgSettings } from '../../db/schema';
-import { ForbiddenError, NotFoundError } from '../../lib/errors';
+import { NotFoundError, ValidationError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { authenticate, requireActor, requireRole } from '../../middleware/authenticate';
 import { handler, validate } from '../../middleware/validate';
 import { authorize } from '../permissions/authorize';
 import { buildDigest } from '../alerts/digest';
 import { clearOrgCache, getOrgSettings } from './service';
+import { listAudit, recordAudit } from '../audit/service';
 import { isRunnableJob, rescheduleAfterSettingsChange, runJob } from '../../jobs/scheduler';
 
 export const orgRouter: Router = Router();
@@ -63,6 +65,16 @@ orgRouter.patch(
     clearOrgCache();
 
     const after = await getOrgSettings();
+
+    await recordAudit({
+      actor: requireActor(req),
+      action: 'org_settings.updated',
+      subjectType: 'org_settings',
+      subjectId: '1',
+      before,
+      after,
+      req,
+    });
 
     /*
      * The time zone and the digest time are baked into the schedule rows, so a
@@ -118,25 +130,104 @@ orgRouter.get(
 /**
  * Runs a scheduled job with an explicit clock, for end-to-end tests.
  *
- * Refused outside the test environment. A route that can make the system think
- * it is a different day has no business existing in production, however well
- * guarded by a role.
+ * Not mounted at all outside a test build. A guard inside the handler would
+ * still leave the route in the routing table, discoverable and one refactor
+ * away from being reachable; a route that can make the system believe it is a
+ * different day should simply not exist in production.
+ */
+if (isTest) {
+  orgRouter.post(
+    '/test/run-job',
+    validate({
+      body: z.object({
+        name: z.string().min(1).max(60),
+        now: z.string().datetime().optional(),
+      }),
+    }),
+    handler(async (req, res) => {
+      const { name, now } = req.body as { name: string; now?: string };
+      if (!isRunnableJob(name)) throw new NotFoundError('That job');
+
+      const result = await runJob(name, now ? new Date(now) : new Date());
+      res.json({ name, result });
+    }),
+  );
+}
+
+/**
+ * Sends a test email to the caller.
+ *
+ * The point is to find out, before inviting anybody, whether SPF and DKIM are
+ * right. It goes to the caller's own address and nowhere else, so it cannot be
+ * used to send mail to strangers.
  */
 orgRouter.post(
-  '/test/run-job',
+  '/test-email',
+  requireRole('SUPER_ADMIN'),
+  handler(async (req, res) => {
+    const actor = requireActor(req);
+
+    const [person] = await db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, actor.id))
+      .limit(1);
+
+    if (!person) throw new NotFoundError('Your account');
+
+    const { emailLayout, sendMail } = await import('../notifications/mailer');
+    const settings = await getOrgSettings();
+
+    try {
+      await sendMail({
+        to: person.email,
+        subject: 'Task Manager test email',
+        text: [
+          'This is a test from your Task Manager deployment.',
+          '',
+          'If it reached your inbox rather than spam, check the headers show',
+          'spf=pass and dkim=pass before inviting anybody.',
+          '',
+          'Sent at ' + new Date().toISOString() + ' (' + settings.timezone + ')',
+        ].join('\n'),
+        html: emailLayout(
+          'Test email',
+          '<p>This is a test from your Task Manager deployment.</p>' +
+            '<p>If it reached your inbox rather than spam, check the headers show ' +
+            '<code>spf=pass</code> and <code>dkim=pass</code> before inviting anybody.</p>',
+        ),
+      });
+    } catch (error) {
+      // The operator needs the reason, not a generic failure.
+      throw new ValidationError(
+        'The message could not be sent: ' +
+          (error instanceof Error ? error.message : 'unknown error'),
+      );
+    }
+
+    await recordAudit({ actor, action: 'email.test_sent', subjectType: 'org_settings', req });
+
+    res.json({ sent: true, to: person.email });
+  }),
+);
+
+/** The audit log itself. Admin only, because it records who granted what. */
+orgRouter.get(
+  '/audit',
+  requireRole('SUPER_ADMIN'),
   validate({
-    body: z.object({
-      name: z.string().min(1).max(60),
-      now: z.string().datetime().optional(),
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(500).optional(),
+      action: z.string().max(60).optional(),
     }),
   }),
   handler(async (req, res) => {
-    if (!isTest) throw new ForbiddenError('This endpoint only exists in the test environment.');
-
-    const { name, now } = req.body as { name: string; now?: string };
-    if (!isRunnableJob(name)) throw new NotFoundError('That job');
-
-    const result = await runJob(name, now ? new Date(now) : new Date());
-    res.json({ name, result });
+    const { limit, action } = req.query as unknown as { limit?: number; action?: string };
+    res.json(
+      await listAudit(requireActor(req), {
+        ...(limit ? { limit } : {}),
+        ...(action ? { action } : {}),
+      }),
+    );
   }),
 );

@@ -484,6 +484,12 @@ async function seedTasks(
 }
 
 async function main(): Promise<void> {
+  // Seeded accounts have known passwords. They have no business existing on a
+  // real deployment, whatever the operator intended by running this.
+  if (env.NODE_ENV === 'production') {
+    throw new Error('The seed script refuses to run in production.');
+  }
+
   await seedOrgSettings();
   const userIds = await seedUsers();
   const teamId = await seedTeam(userIds);

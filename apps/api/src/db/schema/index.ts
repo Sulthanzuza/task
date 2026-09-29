@@ -6,3 +6,4 @@ export * from './tasks';
 export * from './collaboration';
 export * from './workspace';
 export * from './notifications';
+export * from './audit';

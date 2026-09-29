@@ -19,14 +19,25 @@ const shared: Partial<Options> = {
 };
 
 /**
- * Login and password reset are limited per IP and per email.
- * ipKeyGenerator collapses an IPv6 address to its /64 prefix, so one client cannot
- * walk through the addresses it was handed to get a fresh budget each time.
+ * The caller's real address.
+ *
+ * req.ip is only the real client when Express is told how many proxies to
+ * trust; app.ts sets that. Behind Nginx without it, every request carries the
+ * proxy's address, all users share one bucket, and one person's failed
+ * sign-ins lock out everybody. There is a test for exactly that.
+ *
+ * ipKeyGenerator collapses an IPv6 address to its /64 prefix, so a client
+ * cannot walk through the addresses it was handed for a fresh budget.
  */
+export function clientKey(req: Request): string {
+  return ipKeyGenerator(req.ip ?? 'unknown');
+}
+
+/** Login and password reset are limited per client and per email address. */
 function ipAndEmailKey(req: Request): string {
   const body = req.body as { email?: unknown } | undefined;
   const email = typeof body?.email === 'string' ? body.email.toLowerCase() : 'no-email';
-  return ipKeyGenerator(req.ip ?? 'unknown') + '|' + email;
+  return clientKey(req) + '|' + email;
 }
 
 export const authLimiter = rateLimit({
@@ -40,10 +51,12 @@ export const apiLimiter = rateLimit({
   ...shared,
   windowMs: 60_000,
   limit: env.API_RATE_LIMIT_PER_MINUTE,
+  keyGenerator: clientKey,
 });
 
 export const uploadLimiter = rateLimit({
   ...shared,
   windowMs: 60_000,
   limit: env.UPLOAD_RATE_LIMIT_PER_MINUTE,
+  keyGenerator: clientKey,
 });

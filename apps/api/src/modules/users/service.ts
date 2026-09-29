@@ -12,6 +12,7 @@ import { revokeAllSessions } from '../auth/service';
 import { sendSetPasswordEmail } from '../notifications/mailer';
 import { logger } from '../../lib/logger';
 import { buildPage, decodeCursor } from '../../lib/cursor';
+import { recordAudit } from '../audit/service';
 
 function toSummary(row: {
   id: string;
@@ -160,6 +161,14 @@ export async function createUser(
     return created.id;
   });
 
+  await recordAudit({
+    actor,
+    action: 'user.created',
+    subjectType: 'user',
+    subjectId: userId,
+    after: { email: input.email, role: input.role, teamIds: input.teamIds },
+  });
+
   return getUser(actor, userId);
 }
 
@@ -181,8 +190,35 @@ export async function updateUser(
   if (input.timezone !== undefined) changes.timezone = input.timezone;
   if (input.avatarUrl !== undefined) changes.avatarUrl = input.avatarUrl;
 
+  const before = await db
+    .select({ role: users.role, name: users.name })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
   const updated = await db.update(users).set(changes).where(eq(users.id, userId)).returning({ id: users.id });
   if (updated.length === 0) throw new NotFoundError('That user');
+
+  // A role change is the one that matters most: it is a grant of access.
+  if (input.role !== undefined) {
+    await recordAudit({
+      actor,
+      action: 'user.role_changed',
+      subjectType: 'user',
+      subjectId: userId,
+      before: { role: before[0]?.role },
+      after: { role: input.role },
+    });
+  } else {
+    await recordAudit({
+      actor,
+      action: 'user.updated',
+      subjectType: 'user',
+      subjectId: userId,
+      before: before[0] ?? null,
+      after: changes,
+    });
+  }
 
   return getUser(actor, userId);
 }
@@ -200,11 +236,20 @@ export async function deactivateUser(actor: Actor, userId: string, now = new Dat
 
   // Deactivating must take effect now, not when the access token happens to expire.
   await revokeAllSessions(userId, now);
+
+  await recordAudit({
+    actor,
+    action: 'user.deactivated',
+    subjectType: 'user',
+    subjectId: userId,
+  });
 }
 
 export async function reactivateUser(actor: Actor, userId: string, now = new Date()): Promise<void> {
   authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
   await db.update(users).set({ isActive: true, updatedAt: now }).where(eq(users.id, userId));
+
+  await recordAudit({ actor, action: 'user.reactivated', subjectType: 'user', subjectId: userId });
 }
 
 /** Members of the teams an actor may look at; used by the dashboard and pickers. */

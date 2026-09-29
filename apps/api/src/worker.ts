@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { env } from './config/env';
+import { assertProductionConfig, env } from './config/env';
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
 import { purgeExpired } from './modules/auth/service';
@@ -109,6 +109,7 @@ function startHealthEndpoint(): Server | null {
 }
 
 async function main(): Promise<void> {
+  assertProductionConfig();
   logger.info('Worker started.');
   const health = startHealthEndpoint();
   await startJobWorkers();

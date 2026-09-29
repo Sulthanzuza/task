@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { createApp } from './app';
-import { env, unsafeProductionSettings } from './config/env';
+import { assertProductionConfig, env, unsafeProductionSettings } from './config/env';
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
 import { closeRealtime, createRealtimeGateway } from './realtime/gateway';
@@ -11,6 +11,9 @@ const server = createServer(app);
 // Shares the HTTP server, so the Vite proxy and Nginx forward /socket.io on the
 // same origin as the API.
 createRealtimeGateway(server);
+
+// A misconfigured production process must not serve at all.
+assertProductionConfig();
 
 // Say so loudly if a relaxed test setting has reached production.
 for (const warning of unsafeProductionSettings()) {

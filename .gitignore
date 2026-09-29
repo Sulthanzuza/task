@@ -15,3 +15,7 @@ test-results/
 # Playwright e2e output
 apps/web/e2e/.artifacts/
 apps/web/e2e/.report/
+apps/web/e2e/.smoke-artifacts/
+apps/web/e2e/.smoke-report/
+backups/
+.env.production

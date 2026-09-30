@@ -56,8 +56,14 @@ test('today is marked using the org date, not the browser date', async ({ page, 
   const todayCell = page.locator('[data-date="' + summary.asOfDate + '"]');
   await expect(todayCell).toHaveCount(1);
 
-  // The marker is the accent-filled day number inside that cell.
-  await expect(todayCell.locator('.bg-accent').first()).toBeVisible();
+  /*
+   * The cell says it is today, and the day number is filled with the accent
+   * gradient. Asserting on data-today rather than on a utility class means a
+   * restyle cannot silently pass while the marker moves to another day.
+   */
+  await expect(todayCell).toHaveAttribute('data-today', 'true');
+  await expect(todayCell.locator('.accent-gradient').first()).toBeVisible();
+  await expect(page.locator('[data-today="true"]')).toHaveCount(1);
 });
 
 test('the week view shows seven days and keeps the tasks on the right ones', async ({
@@ -99,9 +105,9 @@ test('filtering by project narrows the calendar', async ({ page, api }) => {
   await expect(page.locator('[data-task-key]').first()).toBeVisible();
 
   // Nothing from the other project may appear.
-  const entries = await page.locator('[data-task-key]').evaluateAll((nodes) =>
-    nodes.map((n) => n.getAttribute('data-task-key') ?? ''),
-  );
+  const entries = await page
+    .locator('[data-task-key]')
+    .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-task-key') ?? ''));
   expect(entries.length).toBeGreaterThan(0);
   expect(entries.every((key) => key.startsWith('ERP-'))).toBe(true);
 });

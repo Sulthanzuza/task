@@ -275,12 +275,18 @@ export async function listTasksForActor(
   );
 
   return {
-    items: rows.map((row) => toTaskSummary(row, people, labelMap.get(row.id) ?? [])),
+    items: rows.map((row) =>
+      toTaskSummary(row, people, labelMap.get(row.id) ?? [], { today: ctx.today, calendar }),
+    ),
     nextCursor,
   };
 }
 
-export async function getTaskDetail(actor: Actor, idOrKey: string): Promise<TaskDetail> {
+export async function getTaskDetail(
+  actor: Actor,
+  idOrKey: string,
+  now = new Date(),
+): Promise<TaskDetail> {
   const row = await loadTaskOr404(db, idOrKey);
   const resource = await toResource(db, row);
   authorize(actor, 'task.view', resource);
@@ -295,8 +301,11 @@ export async function getTaskDetail(actor: Actor, idOrKey: string): Promise<Task
   const creator = toUserSummary(people.get(row.createdById));
   if (!creator) throw new NotFoundError('The task creator');
 
+  const { settings, calendar } = await getOrgContext();
+  const ctx = buildPredicateContext(settings, calendar, now);
+
   return {
-    ...toTaskSummary(row, people, labelMap.get(row.id) ?? []),
+    ...toTaskSummary(row, people, labelMap.get(row.id) ?? [], { today: ctx.today, calendar }),
     description: row.description ?? null,
     createdBy: creator,
     watcherIds: resource.watcherIds,

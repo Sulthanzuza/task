@@ -1,9 +1,17 @@
 import { Link } from 'react-router-dom';
 import type { TaskSummary } from '@tm/shared';
 import { useTaskList, useTransitionTask } from './api';
-import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
-import { DueBadge, PriorityBadge, ProgressBar, StatusBadge } from '@/components/common/badges';
-import { todayIso } from '@/lib/utils';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Figure,
+  FigureLabel,
+  HeroCard,
+  Skeleton,
+} from '@/components/ui/primitives';
+import { DueBadge, PriorityIcon, ProgressBar, StatusBadge } from '@/components/common/badges';
+import { cn, todayIso } from '@/lib/utils';
 
 /**
  * A member's working screen. Tasks are grouped by when they are due, because that
@@ -108,6 +116,8 @@ export function MyTasksPage() {
         </p>
       </header>
 
+      <MyDay tasks={tasks} reviews={reviews} today={today} />
+
       {grouped.length === 0 ? (
         <Card>
           <EmptyState
@@ -146,6 +156,63 @@ export function MyTasksPage() {
   );
 }
 
+/**
+ * The three numbers worth knowing before opening anything.
+ *
+ * Deliberately the same dark card as the dashboard's, because it answers the
+ * same kind of question: what is pressing, right now.
+ */
+function MyDay({
+  tasks,
+  reviews,
+  today,
+}: {
+  tasks: TaskSummary[];
+  reviews: TaskSummary[];
+  today: string;
+}) {
+  const overdue = tasks.filter((task) => task.dueDate && task.dueDate < today).length;
+  const dueToday = tasks.filter((task) => task.dueDate === today).length;
+
+  const figures: Array<{ label: string; value: number; to: string; tone?: 'danger' | 'warning' }> =
+    [
+      {
+        label: 'Due today',
+        value: dueToday,
+        to: '/tasks?assigneeId=me&dueToday=true',
+        tone: 'warning',
+      },
+      { label: 'Overdue', value: overdue, to: '/tasks?assigneeId=me&overdue=true', tone: 'danger' },
+      { label: 'In review', value: reviews.length, to: '/tasks?reviewerId=me' },
+    ];
+
+  return (
+    <HeroCard>
+      <div className="grid grid-cols-3 gap-3">
+        {figures.map((figure) => (
+          <Link
+            key={figure.label}
+            to={figure.to}
+            className="min-w-0 rounded-xl p-1 hover:underline"
+          >
+            <FigureLabel>{figure.label}</FigureLabel>
+            <div className="mt-1">
+              <Figure
+                value={figure.value}
+                size="md"
+                className={cn(
+                  figure.tone === 'danger' && figure.value > 0 && 'text-danger',
+                  figure.tone === 'warning' && figure.value > 0 && 'text-warning',
+                )}
+              />
+            </div>
+          </Link>
+        ))}
+      </div>
+    </HeroCard>
+  );
+}
+
 /** Quick actions come from the workflow, so a member sees only what they may do. */
 function TaskRow({ task }: { task: TaskSummary }) {
   const transition = useTransitionTask(task.id);
@@ -160,19 +227,38 @@ function TaskRow({ task }: { task: TaskSummary }) {
           : null;
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-      <Link to={'/tasks/' + task.key} className="font-mono text-xs text-accent hover:underline">
-        {task.key}
-      </Link>
+    /*
+     * Fixed columns from md up so the eye can run down one, wrapping below
+     * that because seven columns do not fit a phone.
+     */
+    <li
+      className={cn(
+        'flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3',
+        'md:grid md:grid-cols-[78px_minmax(0,1fr)_96px_auto_80px_auto] md:gap-y-0',
+      )}
+    >
+      <span className="flex items-center gap-1.5">
+        <PriorityIcon priority={task.priority} />
+        <Link to={'/tasks/' + task.key} className="font-mono text-xs text-accent hover:underline">
+          {task.key}
+        </Link>
+      </span>
 
-      <Link to={'/tasks/' + task.key} className="min-w-0 flex-1 truncate text-sm hover:underline">
+      <Link
+        to={'/tasks/' + task.key}
+        title={task.title}
+        className="min-w-0 flex-1 truncate text-sm hover:underline"
+      >
         {task.title}
       </Link>
 
-      <ProgressBar value={task.progress} className="w-24" showLabel />
-      <PriorityBadge priority={task.priority} />
+      <ProgressBar value={task.progress} showLabel />
       <StatusBadge status={task.status} />
-      <DueBadge dueDate={task.dueDate} status={task.status} />
+      <DueBadge
+        dueDate={task.dueDate}
+        status={task.status}
+        workingDaysLate={task.workingDaysLate}
+      />
 
       {quickAction ? (
         <Button

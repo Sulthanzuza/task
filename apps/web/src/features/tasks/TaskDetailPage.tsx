@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Eye, EyeOff, Plus, X } from 'lucide-react';
 import type { TaskDetail, TaskStatus, TimelineEntry, TransitionRequirement } from '@tm/shared';
-import { STATUS_LABELS } from '@tm/shared';
+import { STATUS_LABELS, statusColor } from '@tm/shared';
 import {
   isPendingComment,
   useAddComment,
@@ -16,6 +16,7 @@ import {
 } from './api';
 import { useLabels, useUsers } from '@/features/team/api';
 import { Markdown } from '@/components/common/Markdown';
+import { RingGauge } from '@/components/charts';
 import { Attachments } from './Attachments';
 import { CommentBody, MentionBox } from './MentionBox';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -34,7 +35,6 @@ import {
   DueBadge,
   LabelChip,
   PriorityBadge,
-  ProgressBar,
   StatusBadge,
   UserAvatar,
 } from '@/components/common/badges';
@@ -93,7 +93,7 @@ export function TaskDetailPage() {
   if (!task.data) return null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 md:pb-6">
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <TaskHeader task={task.data} />
@@ -215,7 +215,18 @@ function TransitionBar({ task }: { task: TaskDetail }) {
   };
 
   return (
-    <div>
+    <div
+      className={
+        /*
+         * On a phone the status actions follow you: by the time you have read
+         * the description and the timeline, the buttons are far off screen,
+         * and they are the reason most people opened the task.
+         */
+        'max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-30 max-md:border-t ' +
+        'max-md:border-border-subtle max-md:bg-[var(--color-canvas)]/95 max-md:p-3 ' +
+        'max-md:backdrop-blur-xl'
+      }
+    >
       <div className="flex flex-wrap gap-2">
         {task.availableTransitions.map((option) => (
           <Button
@@ -426,6 +437,11 @@ function FieldsCard({ task }: { task: TaskDetail }) {
     <Card className="space-y-4 p-4">
       <div>
         <Label htmlFor="progress">Progress</Label>
+        <div className="mb-2 flex justify-center">
+          {/* Unlabelled: the slider below is the labelled control, and the
+              ring is the same number drawn. */}
+          <RingGauge value={shown} size={104} />
+        </div>
         <input
           id="progress"
           type="range"
@@ -444,7 +460,6 @@ function FieldsCard({ task }: { task: TaskDetail }) {
             setDraft(null);
           }}
         />
-        <ProgressBar value={shown} showLabel />
       </div>
 
       <AssigneeField task={task} />
@@ -498,6 +513,26 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="min-w-0 text-right">{children}</span>
     </div>
   );
+}
+
+/**
+ * A colour per kind of event, from the shared status map wherever one applies.
+ *
+ * The dot is decoration: every row also says in words what happened, so the
+ * colour is a shortcut for people who can use it and costs nothing to those
+ * who cannot.
+ */
+function activityColour(action: string): string {
+  if (action.startsWith('comment')) return 'var(--color-chart-4)';
+  if (action.startsWith('attachment')) return 'var(--color-chart-3)';
+  if (action === 'task.created') return statusColor('BACKLOG');
+  if (action === 'task.assigned' || action === 'task.reviewer_changed') {
+    return statusColor('ASSIGNED');
+  }
+  if (action === 'task.transitioned') return statusColor('IN_PROGRESS');
+  if (action === 'task.progress') return 'var(--color-accent)';
+  if (action === 'task.deleted') return statusColor('CANCELLED');
+  return 'var(--color-border-strong)';
 }
 
 /** Activity rows are rendered as sentences, so the history reads like a story. */
@@ -575,14 +610,15 @@ function TimelineCard({
           ))}
         </div>
       ) : (
-        <ol className="space-y-3">
+        // A line down the left, with a dot per entry coloured by what happened.
+        <ol className="relative space-y-3 before:absolute before:top-2 before:bottom-2 before:left-[3px] before:w-px before:bg-border-subtle">
           {visible.map((entry) =>
             entry.kind === 'comment' ? (
               <li key={'c' + entry.id} className="flex gap-2.5">
                 <UserAvatar user={entry.author} size="sm" />
                 <div
                   className={
-                    'min-w-0 flex-1 rounded-lg bg-surface-muted px-3 py-2' +
+                    'min-w-0 flex-1 rounded-2xl rounded-tl-sm bg-surface-muted px-3.5 py-2.5' +
                     // Still on its way: shown, but visibly not yet landed.
                     (isPendingComment(entry.id) ? ' opacity-60' : '')
                   }
@@ -599,7 +635,11 @@ function TimelineCard({
               </li>
             ) : (
               <li key={'a' + entry.id} className="flex items-baseline gap-2 text-xs text-ink-muted">
-                <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-subtle" />
+                <span
+                  aria-hidden
+                  className="mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-surface"
+                  style={{ background: activityColour(entry.action) }}
+                />
                 <span className="flex-1">{describe(entry)}</span>
                 <time dateTime={entry.createdAt} className="shrink-0 text-ink-faint">
                   {relativeTime(entry.createdAt)}

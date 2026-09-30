@@ -73,10 +73,10 @@
   --color-status-review: #a78bfa;
   --color-status-changes: #f472b6;
   --color-status-completed: #34d399;
-  --color-status-cancelled: #778aa6;
+  --color-status-cancelled: #8b99b0;
 
   /* Priority. */
-  --color-priority-low: #7c93b5;
+  --color-priority-low: #889cbb;
   --color-priority-medium: #60a5fa;
   --color-priority-high: #fbbf24;
   --color-priority-urgent: #fb7185;
@@ -89,9 +89,19 @@
   --color-chart-5: #fbbf24;
   --color-chart-6: #fb7185;
   --color-chart-7: #34d399;
-  --color-chart-8: #3e5c8f;
+  --color-chart-8: #4a6ea8;
+
+  /*
+   * The hottest a heat-map cell gets. The ramp used to run all the way to the
+   * accent, which passes through the middle of the range where neither the
+   * ink nor its opposite is readable against it. This is the far end that
+   * still clears 4.5:1 against --color-ink, so one text colour serves the
+   * whole ramp.
+   */
+  --color-heat-max: #16718d;
+
   --color-chart-grid: rgba(120, 200, 255, 0.18);
-  --color-chart-axis: #5b7095;
+  --color-chart-axis: #778aac;
   /* Bars outside the highlighted period: quiet, but still clearly a bar. */
   --color-chart-muted: #3c5580;
 
@@ -143,7 +153,7 @@
   --color-ink-faint: #5e6d82;
 
   /* Darkened so cyan on a pale card still clears AA for text. */
-  --color-accent: #0e7490;
+  --color-accent: #0b667e;
   --color-accent-2: #0f766e;
   --color-accent-hover: #155e75;
   --color-accent-soft: rgba(14, 116, 144, 0.12);
@@ -153,28 +163,28 @@
 
   --color-danger: #be123c;
   --color-danger-soft: rgba(190, 18, 60, 0.1);
-  --color-warning: #af5109;
-  --color-warning-soft: rgba(251, 191, 36, 0.24);
-  --color-success: #047857;
+  --color-warning: #a94e09;
+  --color-warning-soft: rgba(251, 191, 36, 0.14);
+  --color-success: #046c4f;
   --color-success-soft: rgba(4, 120, 87, 0.12);
   --color-info: #1d4ed8;
   --color-info-soft: rgba(29, 78, 216, 0.1);
   --color-neutral-soft: rgba(27, 42, 68, 0.08);
 
-  --color-status-backlog: #55647f;
+  --color-status-backlog: #515e77;
   --color-status-assigned: #1d4ed8;
-  --color-status-progress: #0f766e;
-  --color-status-blocked: #b91c1c;
-  --color-status-review-ready: #af5109;
+  --color-status-progress: #0c675f;
+  --color-status-blocked: #b41b1b;
+  --color-status-review-ready: #974509;
   --color-status-review: #6d28d9;
-  --color-status-changes: #a21caf;
-  --color-status-completed: #047857;
-  --color-status-cancelled: #5e6d82;
+  --color-status-changes: #9d1baa;
+  --color-status-completed: #046c4f;
+  --color-status-cancelled: #526172;
 
-  --color-priority-low: #5e6d82;
+  --color-priority-low: #526172;
   --color-priority-medium: #1d4ed8;
-  --color-priority-high: #af5109;
-  --color-priority-urgent: #be123c;
+  --color-priority-high: #974509;
+  --color-priority-urgent: #b21038;
 
   --color-chart-1: #0e7490;
   --color-chart-2: #0f766e;
@@ -184,6 +194,16 @@
   --color-chart-6: #be123c;
   --color-chart-7: #047857;
   --color-chart-8: #3e5c8f;
+
+  /*
+   * The hottest a heat-map cell gets. The ramp used to run all the way to the
+   * accent, which passes through the middle of the range where neither the
+   * ink nor its opposite is readable against it. This is the far end that
+   * still clears 4.5:1 against --color-ink, so one text colour serves the
+   * whole ramp.
+   */
+  --color-heat-max: #669eaf;
+
   --color-chart-grid: rgba(27, 42, 68, 0.12);
   --color-chart-axis: #4a5b78;
   --color-chart-muted: #b6c2d4;
@@ -210,7 +230,7 @@
   --color-ink-muted: #4b5a77;
   --color-ink-faint: #62708a;
 
-  --color-accent: #0e7490;
+  --color-accent: #0d708a;
   --color-accent-2: #0f766e;
   --color-accent-hover: #155e75;
   --color-accent-soft: rgba(14, 116, 144, 0.1);
@@ -220,9 +240,9 @@
 
   --color-danger: #be123c;
   --color-danger-soft: rgba(190, 18, 60, 0.09);
-  --color-warning: #af5109;
-  --color-warning-soft: rgba(251, 191, 36, 0.22);
-  --color-success: #047857;
+  --color-warning: #a94e09;
+  --color-warning-soft: rgba(251, 191, 36, 0.14);
+  --color-success: #047253;
   --color-success-soft: rgba(4, 120, 87, 0.11);
   --color-info: #1d4ed8;
   --color-info-soft: rgba(29, 78, 216, 0.09);
@@ -230,17 +250,17 @@
 
   --color-status-backlog: #55647f;
   --color-status-assigned: #1d4ed8;
-  --color-status-progress: #0f766e;
+  --color-status-progress: #0d6c64;
   --color-status-blocked: #b91c1c;
-  --color-status-review-ready: #af5109;
+  --color-status-review-ready: #9d4809;
   --color-status-review: #6d28d9;
   --color-status-changes: #a21caf;
-  --color-status-completed: #047857;
-  --color-status-cancelled: #62708a;
+  --color-status-completed: #046c4f;
+  --color-status-cancelled: #56647a;
 
-  --color-priority-low: #62708a;
+  --color-priority-low: #56647a;
   --color-priority-medium: #1d4ed8;
-  --color-priority-high: #af5109;
+  --color-priority-high: #9d4809;
   --color-priority-urgent: #be123c;
 
   --color-chart-1: #0e7490;
@@ -251,6 +271,16 @@
   --color-chart-6: #be123c;
   --color-chart-7: #047857;
   --color-chart-8: #3e5c8f;
+
+  /*
+   * The hottest a heat-map cell gets. The ramp used to run all the way to the
+   * accent, which passes through the middle of the range where neither the
+   * ink nor its opposite is readable against it. This is the far end that
+   * still clears 4.5:1 against --color-ink, so one text colour serves the
+   * whole ramp.
+   */
+  --color-heat-max: #5197ab;
+
   --color-chart-grid: rgba(22, 33, 58, 0.1);
   --color-chart-axis: #4b5a77;
   --color-chart-muted: #c3cbd9;
@@ -311,7 +341,7 @@
   --color-status-review: #38bdf8;
   --color-status-changes: #f472b6;
   --color-status-completed: #34d399;
-  --color-status-cancelled: #887b9c;
+  --color-status-cancelled: #948aa8;
 
   --color-priority-low: #a294b8;
   --color-priority-medium: #a78bfa;
@@ -326,8 +356,18 @@
   --color-chart-6: #fb7185;
   --color-chart-7: #34d399;
   --color-chart-8: #6366f1;
+
+  /*
+   * The hottest a heat-map cell gets. The ramp used to run all the way to the
+   * accent, which passes through the middle of the range where neither the
+   * ink nor its opposite is readable against it. This is the far end that
+   * still clears 4.5:1 against --color-ink, so one text colour serves the
+   * whole ramp.
+   */
+  --color-heat-max: #a438b6;
+
   --color-chart-grid: rgba(192, 38, 211, 0.18);
-  --color-chart-axis: #7d6f93;
+  --color-chart-axis: #887b9c;
   --color-chart-muted: #4a3f63;
 
   /* The hero borrows the violet gradient here rather than the cyan one. */
@@ -371,6 +411,26 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /*
+   * Tap targets on a phone.
+   *
+   * A 32px pill is comfortable with a mouse and a nuisance with a thumb, so
+   * every control gets 44px of height at phone widths. Applied by width
+   * rather than by pointer type so the end-to-end suite can actually check it.
+   */
+  @media (max-width: 767px) {
+    button,
+    [role='button'],
+    [role='radio'],
+    [role='switch'],
+    [role='menuitem'],
+    input:not([type='range']):not([type='checkbox']):not([type='radio']),
+    select,
+    textarea {
+      min-height: 44px;
+    }
+  }
+
   /* A visible focus ring everywhere, because this app is used with a keyboard all day. */
   :focus-visible {
     outline: 2px solid var(--color-accent);
@@ -408,7 +468,15 @@
     --color-ink: var(--color-hero-ink);
     --color-ink-muted: var(--color-hero-ink-muted);
     --color-ink-faint: var(--color-hero-ink-muted);
+    /*
+     * The surfaces too, not only the ink. A control that switches to
+     * --color-surface on focus would otherwise turn pale under light text.
+     */
+    --color-surface: rgba(255, 255, 255, 0.12);
     --color-surface-muted: rgba(255, 255, 255, 0.1);
+    --color-surface-raised: rgba(255, 255, 255, 0.16);
+    --color-border-subtle: rgba(255, 255, 255, 0.18);
+    --color-border-strong: rgba(255, 255, 255, 0.3);
     --color-accent: var(--color-hero-accent);
     --color-accent-2: var(--color-hero-accent-2);
     --color-accent-from: var(--color-hero-accent);

@@ -40,7 +40,13 @@ export function ForgotPasswordPage() {
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div>
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" autoComplete="username" autoFocus {...register('email')} />
+            <Input
+              id="email"
+              type="email"
+              autoComplete="username"
+              autoFocus
+              {...register('email')}
+            />
             <FieldError message={errors.email?.message} />
           </div>
           <Button type="submit" className="w-full" disabled={isSubmitting}>
@@ -102,7 +108,13 @@ export function ResetPasswordPage() {
           <Label htmlFor="password" hint="at least 10 characters">
             New password
           </Label>
-          <Input id="password" type="password" autoComplete="new-password" autoFocus {...register('password')} />
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            autoFocus
+            {...register('password')}
+          />
           <FieldError message={errors.password?.message} />
         </div>
 
@@ -135,8 +147,10 @@ export function ResetPasswordPage() {
 
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-canvas px-4 py-10">
-      <Card className="w-full max-w-sm p-6">
+    // The same face as the sign-in screen: these are the other two pages
+    // somebody sees before they are anybody.
+    <div className="hero-surface flex min-h-full items-center justify-center px-4 py-10">
+      <Card className="w-full max-w-sm border-white/15 bg-white/8 p-6 backdrop-blur-xl">
         <h1 className="mb-5 text-lg font-semibold tracking-tight">{title}</h1>
         {children}
       </Card>

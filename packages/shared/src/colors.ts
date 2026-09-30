@@ -53,7 +53,14 @@ export function priorityColor(priority: TaskPriority): string {
  * a fixed tint of it behind. Written as inline style rather than as classes
  * because the colour is a variable, and a Tailwind class cannot be built from
  * one at runtime.
+ *
+ * PILL_TINT is deliberately low. Tinting the background with the same hue as
+ * the text moves the two closer together, and at 18% that cost was enough to
+ * drop most of the badges under 4.5:1 even though every token cleared it
+ * against the plain card. The tokens are now tuned against this figure, so
+ * changing it means re-running the contrast test.
  */
+export const PILL_TINT = 14;
 export function tintedPill(colour: string): {
   color: string;
   backgroundColor: string;
@@ -62,7 +69,7 @@ export function tintedPill(colour: string): {
   return {
     color: colour,
     // color-mix keeps the tint in step with whatever the theme set.
-    backgroundColor: 'color-mix(in srgb, ' + colour + ' 18%, transparent)',
+    backgroundColor: 'color-mix(in srgb, ' + colour + ' ' + PILL_TINT + '%, transparent)',
     borderColor: 'color-mix(in srgb, ' + colour + ' 32%, transparent)',
   };
 }

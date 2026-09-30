@@ -99,7 +99,16 @@ export function Layout() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-40 border-b border-border-subtle bg-[var(--color-canvas)]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 sm:px-6">
-          <NavLink to="/" className="flex shrink-0 items-center gap-2">
+          {/*
+            Named on the link itself. The wordmark beside it disappears below
+            1366, and without this the only link on the page announced as a
+            bare URL was the one back to the dashboard.
+          */}
+          <NavLink
+            to="/"
+            aria-label="Task Manager, dashboard"
+            className="flex shrink-0 items-center gap-2"
+          >
             <span className="accent-gradient flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-accent-ink)]">
               <Shield size={16} aria-hidden />
             </span>

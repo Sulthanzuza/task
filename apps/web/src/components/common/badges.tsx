@@ -89,10 +89,18 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
 export function DueBadge({
   dueDate,
   status,
+  workingDaysLate,
   className,
 }: {
   dueDate: string | null;
   status?: TaskStatus;
+  /**
+   * Working days past the date, counted on the server against the
+   * organisation's calendar. When it is given, the badge says how late the
+   * task is rather than when it was due, which is the more useful fact and
+   * the one a lead asks for first.
+   */
+  workingDaysLate?: number | null;
   className?: string;
 }) {
   if (!dueDate) return <span className="text-xs text-ink-faint">—</span>;
@@ -101,6 +109,13 @@ export function DueBadge({
   const today = todayIso();
   const overdue = !closed && dueDate < today;
   const dueToday = !closed && dueDate === today;
+
+  const late =
+    overdue && workingDaysLate !== null && workingDaysLate !== undefined
+      ? Math.max(1, Math.round(workingDaysLate))
+      : null;
+
+  const shown = late === null ? formatDate(dueDate) : late + 'd late';
 
   return (
     <span
@@ -111,17 +126,29 @@ export function DueBadge({
         !overdue && !dueToday && 'text-ink-muted',
         className,
       )}
-      title={overdue ? 'Overdue' : dueToday ? 'Due today' : undefined}
+      title={
+        late === null
+          ? overdue
+            ? 'Overdue'
+            : dueToday
+              ? 'Due today'
+              : undefined
+          : 'Due ' + formatDate(dueDate) + ', ' + late + ' working days late'
+      }
       /*
        * The state goes in the accessible name rather than a visually hidden
        * span. sr-only is absolutely positioned, and inside a wide scrolling
        * table its containing block is the viewport rather than the scroller,
        * so it escapes the clip and drags the whole page sideways.
        */
-      aria-label={formatDate(dueDate) + (overdue ? ', overdue' : dueToday ? ', due today' : '')}
+      aria-label={
+        late === null
+          ? formatDate(dueDate) + (overdue ? ', overdue' : dueToday ? ', due today' : '')
+          : 'Due ' + formatDate(dueDate) + ', ' + late + ' working days late'
+      }
     >
       {overdue ? <AlertTriangle size={11} aria-hidden /> : null}
-      {formatDate(dueDate)}
+      {shown}
     </span>
   );
 }
@@ -140,19 +167,28 @@ export function ProgressBar({
   value,
   className,
   showLabel = false,
+  label = 'Progress',
 }: {
   value: number;
   className?: string;
   showLabel?: boolean;
+  /**
+   * A progressbar with no name is announced as a bare number. In a list of
+   * tasks that is dozens of unlabelled percentages, so the name is not
+   * optional; callers with better context override it.
+   */
+  label?: string;
 }) {
   const clamped = Math.max(0, Math.min(100, value));
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <div
         role="progressbar"
+        aria-label={label}
         aria-valuenow={clamped}
         aria-valuemin={0}
         aria-valuemax={100}
+        aria-valuetext={clamped + '% complete'}
         className="h-1.5 w-full min-w-10 overflow-hidden rounded-full bg-surface-muted"
       >
         <div
@@ -217,12 +253,27 @@ export function UserAvatar({
   );
 }
 
+/**
+ * A label's colour is chosen by whoever made it, out of a picker, so it cannot
+ * be trusted to be readable. Unlike a status, there is no token to tune: the
+ * value comes from the database.
+ *
+ * So the colour identifies the label and the ink reads it. The dot and the
+ * border carry the hue, the text stays on the theme's own ink, and a chip is
+ * legible whatever colour somebody picked.
+ */
 export function LabelChip({ name, color }: { name: string; color: string }) {
+  const tint = tintedPill(color);
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
-      style={{ backgroundColor: color + '22', color }}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-ink"
+      style={{ backgroundColor: tint.backgroundColor, borderColor: tint.borderColor }}
     >
+      <span
+        aria-hidden
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
       {name}
     </span>
   );

@@ -11,11 +11,12 @@ import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/
 import {
   DueBadge,
   LabelChip,
-  PriorityBadge,
+  PriorityIcon,
   ProgressBar,
   StatusBadge,
   UserAvatar,
 } from '@/components/common/badges';
+import { DataTable, type Column } from '@/components/common/table';
 import { relativeTime } from '@/lib/utils';
 
 /**
@@ -64,6 +65,20 @@ function useFilters() {
   return { params, filters, setFilter, clearAll, activeCount };
 }
 
+/**
+ * Fixed widths, so the key column is the same width on every screen and a
+ * long title truncates rather than pushing the dates out of sight.
+ */
+const TASK_COLUMNS: Column[] = [
+  { label: 'Key', width: '9rem' },
+  { label: 'Title', width: 'auto' },
+  { label: 'Assignee', width: '11rem' },
+  { label: 'Status', width: '10rem' },
+  { label: 'Progress', width: '8.5rem' },
+  { label: 'Due', width: '7rem' },
+  { label: 'Last update', width: '8rem' },
+];
+
 export function TasksPage() {
   const { filters, params, setFilter, clearAll, activeCount } = useFilters();
   const { isLead } = useAuth();
@@ -90,7 +105,7 @@ export function TasksPage() {
         ) : null}
       </header>
 
-      <Card className="flex flex-wrap items-end gap-2 p-3">
+      <Card className="flex flex-wrap items-center gap-2 p-3">
         <div className="min-w-44 flex-1">
           <Input
             type="search"
@@ -109,7 +124,7 @@ export function TasksPage() {
         </div>
 
         <Select
-          className="w-auto min-w-32"
+          className="w-auto min-w-32 rounded-full"
           value={params.get('projectId') ?? ''}
           onChange={(e) => setFilter('projectId', e.currentTarget.value || undefined)}
           aria-label="Project"
@@ -123,7 +138,7 @@ export function TasksPage() {
         </Select>
 
         <Select
-          className="w-auto min-w-32"
+          className="w-auto min-w-32 rounded-full"
           value={params.get('assigneeId') ?? ''}
           onChange={(e) => setFilter('assigneeId', e.currentTarget.value || undefined)}
           aria-label="Assignee"
@@ -139,7 +154,7 @@ export function TasksPage() {
         </Select>
 
         <Select
-          className="w-auto min-w-32"
+          className="w-auto min-w-32 rounded-full"
           value={params.get('status') ?? ''}
           onChange={(e) => setFilter('status', e.currentTarget.value || undefined)}
           aria-label="Status"
@@ -219,69 +234,63 @@ export function TasksPage() {
             }
           />
         ) : (
-          <div className="relative overflow-x-auto">
-            <table className="w-full min-w-[56rem] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-border-subtle text-left text-xs text-ink-muted">
-                  <Th>Key</Th>
-                  <Th>Title</Th>
-                  <Th>Assignee</Th>
-                  <Th>Priority</Th>
-                  <Th>Status</Th>
-                  <Th className="w-28">Progress</Th>
-                  <Th>Due</Th>
-                  <Th>Last update</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task) => (
-                  <tr
-                    key={task.id}
-                    className="border-b border-border-subtle last:border-0 hover:bg-surface-muted"
-                  >
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+          <DataTable columns={TASK_COLUMNS} sticky>
+            <tbody>
+              {tasks.map((task) => (
+                <tr
+                  key={task.id}
+                  className="border-b border-border-subtle last:border-0 hover:bg-surface-muted"
+                >
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <span className="flex items-center gap-1.5">
+                      <PriorityIcon priority={task.priority} />
                       <Link
                         to={'/tasks/' + task.key}
                         className="font-mono text-xs text-accent hover:underline"
                       >
                         {task.key}
                       </Link>
-                    </td>
-                    <td className="max-w-md px-3 py-2.5">
-                      <Link to={'/tasks/' + task.key} className="block truncate hover:underline">
-                        {task.title}
-                      </Link>
-                      {task.labels.length > 0 ? (
-                        <span className="mt-1 flex flex-wrap gap-1">
-                          {task.labels.map((label) => (
-                            <LabelChip key={label.id} name={label.name} color={label.color} />
-                          ))}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <UserAvatar user={task.assignee} size="sm" />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <PriorityBadge priority={task.priority} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <StatusBadge status={task.status} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <ProgressBar value={task.progress} showLabel />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <DueBadge dueDate={task.dueDate} status={task.status} />
-                    </td>
-                    <td className="px-3 py-2.5 text-xs whitespace-nowrap text-ink-muted">
-                      {relativeTime(task.lastActivityAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <Link
+                      to={'/tasks/' + task.key}
+                      title={task.title}
+                      className="block truncate hover:underline"
+                    >
+                      {task.title}
+                    </Link>
+                    {task.labels.length > 0 ? (
+                      <span className="mt-1 flex flex-wrap gap-1">
+                        {task.labels.map((label) => (
+                          <LabelChip key={label.id} name={label.name} color={label.color} />
+                        ))}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <UserAvatar user={task.assignee} size="sm" />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <StatusBadge status={task.status} />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <ProgressBar value={task.progress} showLabel />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <DueBadge
+                      dueDate={task.dueDate}
+                      status={task.status}
+                      workingDaysLate={task.workingDaysLate}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 text-xs whitespace-nowrap text-ink-muted">
+                    {relativeTime(task.lastActivityAt)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
         )}
       </Card>
 
@@ -300,10 +309,6 @@ export function TasksPage() {
       <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
-}
-
-function Th({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <th className={'px-3 py-2 font-medium ' + (className ?? '')}>{children}</th>;
 }
 
 function Toggle({

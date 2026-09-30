@@ -38,6 +38,12 @@ export const taskSummarySchema = z.object({
   blockedReason: z.string().nullable(),
   blockerType: blockerTypeSchema.nullable(),
   blockedAt: z.string().nullable(),
+  /**
+   * Working days past the due date, counted on the server against the
+   * organisation's weekends and holidays. Null when the task is not overdue.
+   * The browser cannot work this out: it does not know the calendar.
+   */
+  workingDaysLate: z.number().int().nullable(),
   lastActivityAt: z.string(),
   completedAt: z.string().nullable(),
   parentTaskId: uuidSchema.nullable(),

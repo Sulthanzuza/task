@@ -209,6 +209,7 @@ export function CalendarPage() {
               <div
                 key={date}
                 data-date={date}
+                data-today={isToday ? 'true' : undefined}
                 className={cn(
                   'min-h-24 border-r border-b border-border-subtle p-1.5 last:border-r-0',
                   outside && 'bg-surface-muted/40',
@@ -219,7 +220,9 @@ export function CalendarPage() {
                   <span
                     className={cn(
                       'inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs tabular-nums',
-                      isToday ? 'bg-accent font-semibold text-white' : 'text-ink-muted',
+                      isToday
+                        ? 'accent-gradient font-semibold text-[var(--color-accent-ink)]'
+                        : 'text-ink-muted',
                       outside && 'text-ink-faint',
                     )}
                   >

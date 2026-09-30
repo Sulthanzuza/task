@@ -5,7 +5,16 @@ import { useMemberActivity, useMemberStats } from '@/features/dashboard/api';
 import { useTaskList } from '@/features/tasks/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import type { ApiError } from '@/lib/api';
-import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Figure,
+  FigureLabel,
+  HeroCard,
+  Skeleton,
+} from '@/components/ui/primitives';
+import { RingGauge } from '@/components/charts';
 import {
   DueBadge,
   PriorityBadge,
@@ -83,15 +92,49 @@ export function MemberPage() {
         </div>
       </header>
 
+      {/* The same dark card as the dashboard: the headline facts, together. */}
+      <HeroCard>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="grid flex-1 grid-cols-3 gap-4">
+            <span>
+              <FigureLabel>Active</FigureLabel>
+              <div className="mt-1">
+                <Figure value={stats.data.active} size="md" />
+              </div>
+            </span>
+            <span>
+              <FigureLabel>Overdue</FigureLabel>
+              <div className="mt-1">
+                <Figure
+                  value={stats.data.overdue}
+                  size="md"
+                  className={stats.data.overdue > 0 ? 'text-danger' : undefined}
+                />
+              </div>
+            </span>
+            <span>
+              <FigureLabel>Done, 30 days</FigureLabel>
+              <div className="mt-1">
+                <Figure value={stats.data.completedLast30Days} size="md" />
+              </div>
+            </span>
+          </div>
+
+          <RingGauge
+            value={(stats.data.onTimeRate ?? 0) * 100}
+            label="On-time rate"
+            size={88}
+            caption="On time"
+          />
+        </div>
+      </HeroCard>
+
       <section
         aria-label="Statistics"
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
       >
-        <StatCard label="Active" value={stats.data.active} />
-        <StatCard label="Overdue" value={stats.data.overdue} tone="danger" />
         <StatCard label="Blocked" value={stats.data.blocked} tone="danger" />
         <StatCard label="In review" value={stats.data.waitingReview} />
-        <StatCard label="Done, 30 days" value={stats.data.completedLast30Days} />
         <StatCard
           label="On-time rate"
           value={

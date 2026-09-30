@@ -38,8 +38,13 @@ export function LoginPage() {
   });
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-canvas px-4 py-10">
-      <Card className="w-full max-w-sm p-6">
+    /*
+     * The hero gradient behind a glass card. This is the one screen somebody
+     * sees before they are anybody, so it carries the product's face rather
+     * than the plain page background.
+     */
+    <div className="hero-surface flex min-h-full items-center justify-center px-4 py-10">
+      <Card className="w-full max-w-sm border-white/15 bg-white/8 p-6 backdrop-blur-xl">
         <h1 className="text-lg font-semibold tracking-tight">Sign in</h1>
         <p className="mt-1 mb-6 text-sm text-ink-muted">Team Task Manager</p>
 

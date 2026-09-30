@@ -311,8 +311,8 @@ export function DesignPage() {
             <DueBadge dueDate={new Date().toISOString().slice(0, 10)} />
             <DueBadge dueDate="2099-01-01" />
             <BlockerBadge type="WAITING_ON_CLIENT" />
-            <LabelChip name="bug" color="#ef4444" />
-            <LabelChip name="feature" color="#0ea5e9" />
+            <LabelChip name="bug" color="var(--color-chart-6)" />
+            <LabelChip name="feature" color="var(--color-chart-3)" />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Pill>Neutral</Pill>

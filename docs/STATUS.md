@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-09-30. Branch `master`, head `3e968ae`.
+Last updated: 2026-09-30. Branch `master`, head `a5313f0` plus the design-system work below.
 
 ## Built, by prompt
 
@@ -38,6 +38,64 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `682ac5f` | Digest content and links, pre-commit hook, the tests that were missing |
 | `37cdeae` | Admin area: people, teams, projects, organisation settings, holidays, email, import, audit |
 | `3e968ae` | Task screens: attachments, mention autocomplete, full create drawer, optimistic updates |
+| `696e511` | Design system: four themes as tokens, the top-bar shell, `/design` |
+| `30ad223` | Responsive top bar: pill icons down to 900px, identity into the account menu |
+| `a5313f0` | Dashboard redesign, the chart set, and `pnpm db:seed --demo` |
+| _this one_ | The design system applied to every remaining screen (below) |
+
+### The design system, applied (three design prompts)
+
+These came as their own prompts, separate from the build plan above.
+
+1. **Tokens and shell.** Four themes (`midnight`, `dusk`, `light`, `violet`) defined in
+   `apps/web/src/index.css`, the top bar, and `/design` as a live sheet of every token
+   and component.
+2. **Dashboard.** Four rows on a twelve-column grid: KPI pills, hero, throughput, work
+   mix, projects, status and priority mixes, the attention list, the team table and the
+   due-load heat map. Charts in `apps/web/src/components/charts/index.tsx`.
+3. **Everything else.** My Tasks, the task list, task detail, board, calendar, team and
+   member, notifications and its preferences, login and reset, and all eight admin
+   screens. Colour comes only from `packages/shared/src/colors.ts`; lists share
+   `apps/web/src/components/common/table.tsx`; dates share `formatDate` and
+   `formatDateTime` in `apps/web/src/lib/utils.ts`.
+
+Two guards were added with the third, because both problems it fixed were invisible
+until measured:
+
+- `apps/web/src/__tests__/tokens.test.ts` reads `index.css` and fails on a hex literal
+  anywhere in `apps/web/src` outside the palette files, then checks every theme for
+  contrast: 4.5:1 for text, 4.5:1 for a badge **against its own tint** rather than
+  against the bare card, 4.5:1 for the heat-map ink at five points along the ramp,
+  3:1 for a chart mark as a graphical object, and CIE76 dE >= 22 between the seven open
+  statuses so the donut can be read.
+- `apps/web/e2e/tests/accessibility.spec.ts` runs axe in all four themes over ten
+  screens, over login, and over the states a screenshot never catches: the notification
+  dropdown, the create drawer, a confirm dialog and a transition dialog. A fourth test
+  fails any control under 44px at 375px.
+
+What those two found, all fixed in the app rather than in the test:
+
+- Every status and priority badge was under 4.5:1 in at least one theme. The tint was
+  18% of the badge's own colour, which pulls the background towards the text; the
+  tokens cleared the floor against a plain card and not against the pill they are
+  actually drawn in. The tint is now `PILL_TINT` (14%) and 25 tokens were re-tuned
+  against the real background.
+- A label chip took its text colour from the database, so any colour somebody picked in
+  the label editor could be unreadable. The hue is now a dot and a border; the text is
+  the theme's ink.
+- The heat map switched its text colour at an intensity of 0.55, and the cells near the
+  switch were unreadable either way. The ramp now ends at `--color-heat-max`, the
+  darkest shade the ink still clears, so one text colour serves the whole scale.
+- The unread badge on the bell was white on `--color-danger`, which is a light red in
+  the dark themes.
+- Board cards carried dnd-kit's `role="button"` over a link, so nothing inside them
+  could be reached by keyboard. Pointer drag stays on the whole card; keyboard drag
+  moved to a grip button.
+- The progress ring on task detail announced the same value as the slider beside it,
+  under the same name. The ring is now unlabelled where a control already carries it.
+- `aria-expanded` on the mention textarea is not allowed on a textbox; the open state
+  moved to a live region.
+- The logo link had no accessible name below 1366, where the wordmark is hidden.
 
 ## Accepted deviations
 
@@ -48,6 +106,17 @@ These are decided, not oversights. Do not "fix" them without asking.
 - **TanStack Table deferred to prompt 18.** It arrives with saved views and bulk
   actions, which is the first thing that actually needs it. Tables before then are
   plain `<table>`.
+- **Lists of records stay real tables, not divs in a CSS grid.** The ask was fixed
+  column widths so the columns line up, and `DataTable`
+  (`apps/web/src/components/common/table.tsx`) gets that from `table-fixed` and a
+  `<colgroup>`. Rebuilding them out of divs would line the columns up equally well and
+  take the row and column semantics away from a screen reader, which the same prompt
+  asked to protect. Card lists that are not tabular — My Tasks, the attention list, the
+  notification rows — do use a CSS grid, because there is nothing to lose there.
+- **Screenshots are written twice from one capture.** `e2e/screenshots` is committed
+  and uploaded by CI so a visual change shows up in a diff; `e2e/.shots` is ignored and
+  is the pile a reviewer opens. Both get the same bytes, named
+  `<screen>-<theme>-<width>.png`.
 - **Leads can open `/admin/projects` and `/admin/import`.** The brief gives leads their
   own team's projects, so those two screens are lead-visible; every other admin screen
   is super-admin only. The server enforces the team boundary in both cases, so the
@@ -70,9 +139,8 @@ None of these is blocking. Each is a real gap, checked against the code today.
   another day should move its due date, the way the board moves status.
 - **Board swimlanes.** The board has columns and no grouping. Rows by assignee or by
   priority is the usual next ask from a lead with fifteen people.
-- **Seed size.** 20 tasks. Enough to see every screen work, not enough to see paging,
-  a slow query or a crowded board. A larger optional seed would make the deferred
-  performance work measurable.
+- **Seed size.** The ordinary seed is still 20 tasks, which is what the e2e suite
+  counts. `pnpm db:seed --demo` adds about 180 more for looking at the charts.
 - **Infinite scroll.** The task list has a "Load more" button
   (`TasksPage.tsx`). The query is already an infinite query, so this is a scroll
   sentinel, not a rewrite.
@@ -128,10 +196,11 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
-| `apps/api` integration | 19 | 358 |
-| `apps/web` end-to-end | 12 | 47 |
+| `apps/web` unit (tokens and contrast) | 1 | 29 |
+| `apps/api` integration | 20 | 376 |
+| `apps/web` end-to-end | 13 | 55 |
 
-All passing, with typecheck and lint clean, at `3e968ae`.
+All passing, with typecheck and lint clean.
 
 A commit runs lint-staged through `.husky/pre-commit`, so ESLint and Prettier touch
 every staged file on the way in. Expect formatting changes in the commit you just made.

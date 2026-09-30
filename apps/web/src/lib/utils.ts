@@ -37,9 +37,8 @@ export function relativeTime(iso: string | null | undefined, now = new Date()): 
   );
 }
 
-/** A date the way a person writes it: 28 Sep 2026. */
 /**
- * The year appears only when it is not this one.
+ * A date the way a person writes it, and the year only when it is not this one.
  *
  * Nearly every date on these screens is within a few weeks, and "2026" on all
  * of them is noise that pushes the useful part of the row out of view.
@@ -56,14 +55,19 @@ export function formatDate(date: string | null | undefined): string {
   }).format(parsed);
 }
 
+/** The same rule as formatDate, with the time: the year only when it is not this one. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
+  const parsed = new Date(iso);
+  const thisYear = parsed.getFullYear() === new Date().getFullYear();
+
   return new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     month: 'short',
+    ...(thisYear ? {} : { year: 'numeric' }),
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(iso));
+  }).format(parsed);
 }
 
 export function initials(name: string): string {

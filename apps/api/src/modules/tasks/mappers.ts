@@ -1,6 +1,27 @@
 import type { TaskSummary, UserSummary } from '@tm/shared';
 import { formatTaskKey } from '@tm/shared';
+import { workingDaysBetween, type WorkCalendar } from '../../lib/date-utils';
 import type { LabelRow, TaskRow, UserRow } from './repo';
+
+/** What the mapper needs to say how late something is. */
+export interface LatenessContext {
+  today: string;
+  calendar: WorkCalendar;
+}
+
+/**
+ * How many working days past its due date a task is.
+ *
+ * Counted here rather than in the browser, which has no idea which days this
+ * organisation treats as weekends or holidays and would call a Monday three
+ * days late when it is one.
+ */
+function lateness(row: TaskRow, ctx: LatenessContext | undefined): number | null {
+  if (!ctx || !row.dueDate) return null;
+  if (row.status === 'COMPLETED' || row.status === 'CANCELLED') return null;
+  if (row.dueDate >= ctx.today) return null;
+  return workingDaysBetween(row.dueDate, ctx.today, ctx.calendar);
+}
 
 export function toUserSummary(row: UserRow | undefined | null): UserSummary | null {
   if (!row) return null;
@@ -22,6 +43,7 @@ export function toTaskSummary(
   row: TaskRow,
   people: Map<string, UserRow>,
   taskLabels: LabelRow[],
+  ctx?: LatenessContext,
 ): TaskSummary {
   return {
     id: row.id,
@@ -41,6 +63,7 @@ export function toTaskSummary(
     blockedReason: row.blockedReason,
     blockerType: row.blockerType,
     blockedAt: iso(row.blockedAt),
+    workingDaysLate: lateness(row, ctx),
     lastActivityAt: row.lastActivityAt.toISOString(),
     completedAt: iso(row.completedAt),
     parentTaskId: row.parentTaskId,

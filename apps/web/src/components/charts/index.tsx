@@ -631,11 +631,12 @@ export function HatchedBars({
 export function ThinProgress({
   value,
   max = 100,
-  label,
+  label = 'Progress',
   className,
 }: {
   value: number;
   max?: number;
+  /** Always set: an unnamed progressbar is announced as a number with no subject. */
   label?: string;
   className?: string;
 }) {
@@ -643,10 +644,11 @@ export function ThinProgress({
   return (
     <div
       role="progressbar"
+      aria-label={label}
       aria-valuenow={Math.round(percent)}
       aria-valuemin={0}
       aria-valuemax={100}
-      {...(label ? { 'aria-label': label } : {})}
+      aria-valuetext={Math.round(percent) + '%'}
       className={cn('h-1.5 w-full overflow-hidden rounded-full bg-surface-muted', className)}
     >
       <div
@@ -712,6 +714,11 @@ export function RingGauge({
 }: {
   /** 0 to 100. */
   value: number;
+  /**
+   * Omit it where a labelled control next to the ring already carries the
+   * same number. Two things announcing "Progress, 40%" is not twice as
+   * accessible; it is one ambiguous control.
+   */
   label?: string;
   size?: number;
   thickness?: number;
@@ -730,8 +737,9 @@ export function RingGauge({
       <svg
         width={size}
         height={size}
-        role="img"
-        aria-label={(label ?? 'Progress') + ': ' + Math.round(clamped) + '%'}
+        {...(label
+          ? { role: 'img', 'aria-label': label + ': ' + Math.round(clamped) + '%' }
+          : { 'aria-hidden': true })}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
@@ -890,14 +898,20 @@ export function Heatmap({
                                 'repeating-linear-gradient(45deg, var(--color-border-strong) 0 1px, transparent 1px 5px)',
                             }
                           : {
+                              /*
+                               * One ramp, one text colour. Switching the text
+                               * at a guessed intensity meant the cells near
+                               * the switch were unreadable either way, so the
+                               * ramp now stops at --color-heat-max, which is
+                               * the darkest shade the ink still clears.
+                               */
                               background:
                                 intensity === 0
                                   ? 'var(--color-surface-muted)'
-                                  : 'color-mix(in srgb, var(--color-accent) ' +
-                                    Math.round(18 + intensity * 72) +
+                                  : 'color-mix(in srgb, var(--color-heat-max) ' +
+                                    Math.round(18 + intensity * 82) +
                                     '%, transparent)',
-                              color:
-                                intensity > 0.55 ? 'var(--color-accent-ink)' : 'var(--color-ink)',
+                              color: 'var(--color-ink)',
                             }
                       }
                     >

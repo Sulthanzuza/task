@@ -153,8 +153,13 @@ export function MentionBox({
         value={value}
         disabled={disabled}
         placeholder={placeholder}
+        /*
+          aria-autocomplete and aria-controls belong on a textbox;
+          aria-expanded does not, it is part of the combobox pattern, and a
+          textarea may not take the combobox role. The open state is announced
+          through the live region below instead.
+        */
         aria-autocomplete="list"
-        aria-expanded={showing}
         aria-controls={showing ? 'mention-list' : undefined}
         onChange={(event) => {
           onChange(event.target.value);
@@ -169,6 +174,10 @@ export function MentionBox({
           window.setTimeout(() => setOpen(false), 150);
         }}
       />
+
+      <p aria-live="polite" className="sr-only">
+        {showing ? matches.length + ' people. Use the arrow keys to choose one.' : ''}
+      </p>
 
       {showing ? (
         <ul

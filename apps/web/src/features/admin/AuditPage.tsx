@@ -3,6 +3,8 @@ import type { AuditEntryView, ListAuditQuery } from '@tm/shared';
 import { useAdminPeople, useAudit } from './api';
 import { AdminPage, Field } from './shared';
 import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/ui/primitives';
+import { DataTable, Truncated, type Column } from '@/components/common/table';
+import { formatDateTime } from '@/lib/utils';
 
 /**
  * Who did what, and when.
@@ -106,31 +108,14 @@ export function AuditPage() {
       {audit.isLoading ? (
         <Skeleton className="h-96 w-full" />
       ) : audit.data?.items.length ? (
-        <Card className="relative overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Administrative actions</caption>
-            <thead>
-              <tr className="border-b border-border-subtle text-left text-xs text-ink-faint">
-                <th scope="col" className="px-3 py-2 font-medium">
-                  When
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Who
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  What
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Details
-                </th>
-              </tr>
-            </thead>
+        <Card className="p-0">
+          <DataTable columns={AUDIT_COLUMNS} minWidth="44rem">
             <tbody className="divide-y divide-border-subtle">
               {audit.data.items.map((entry) => (
                 <AuditRow key={entry.id} entry={entry} />
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </Card>
       ) : (
         <Card>
@@ -148,6 +133,13 @@ export function AuditPage() {
   );
 }
 
+const AUDIT_COLUMNS: Column[] = [
+  { label: 'When', width: '12rem' },
+  { label: 'Who', width: '16rem' },
+  { label: 'What', width: '14rem' },
+  { label: 'Details', width: 'auto' },
+];
+
 function AuditRow({ entry }: { entry: AuditEntryView }) {
   const [open, setOpen] = useState(false);
   const hasDetail = entry.before !== null || entry.after !== null;
@@ -156,17 +148,17 @@ function AuditRow({ entry }: { entry: AuditEntryView }) {
     <>
       <tr>
         <td className="px-3 py-2 align-top whitespace-nowrap text-xs text-ink-muted">
-          {new Date(entry.createdAt).toLocaleString()}
+          {formatDateTime(entry.createdAt)}
         </td>
         <td className="px-3 py-2 align-top">
-          <span className="block">{entry.actorName ?? 'Someone since deleted'}</span>
+          <Truncated text={entry.actorName ?? 'Someone since deleted'} />
           {entry.actorEmail ? (
-            <span className="block text-xs text-ink-faint">{entry.actorEmail}</span>
+            <Truncated text={entry.actorEmail} className="text-xs text-ink-faint" />
           ) : null}
         </td>
         <td className="px-3 py-2 align-top">
-          <span className="font-mono text-xs">{entry.action}</span>
-          <span className="block text-xs text-ink-faint">{entry.subjectType}</span>
+          <Truncated text={entry.action} className="font-mono text-xs" />
+          <Truncated text={entry.subjectType} className="text-xs text-ink-faint" />
         </td>
         <td className="px-3 py-2 align-top">
           {hasDetail ? (

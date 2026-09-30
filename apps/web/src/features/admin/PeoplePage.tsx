@@ -17,6 +17,7 @@ import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
 import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
 import { ApiError } from '@/lib/api';
+import { DataTable, type Column } from '@/components/common/table';
 
 /**
  * Everyone in the organisation, and the four things an admin does to them:
@@ -115,25 +116,8 @@ export function PeoplePage() {
       {people.isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : people.data?.items.length ? (
-        <Card>
-          <table className="w-full text-sm">
-            <caption className="sr-only">Everyone in the organisation</caption>
-            <thead>
-              <tr className="border-b border-border-subtle text-left text-xs text-ink-faint">
-                <th scope="col" className="px-4 py-2 font-medium">
-                  Name
-                </th>
-                <th scope="col" className="px-4 py-2 font-medium">
-                  Role
-                </th>
-                <th scope="col" className="hidden px-4 py-2 font-medium md:table-cell">
-                  Teams
-                </th>
-                <th scope="col" className="px-4 py-2 text-right font-medium">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
+        <Card className="p-0">
+          <DataTable columns={PEOPLE_COLUMNS} minWidth="42rem">
             <tbody className="divide-y divide-border-subtle">
               {people.data.items.map((person) => (
                 <PersonRow
@@ -162,7 +146,7 @@ export function PeoplePage() {
                 />
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </Card>
       ) : (
         <Card>
@@ -227,6 +211,13 @@ interface PersonRowProps {
   onFailed(message: string): void;
 }
 
+const PEOPLE_COLUMNS: Column[] = [
+  { label: 'Name', width: 'auto' },
+  { label: 'Role', width: '12rem' },
+  { label: 'Teams', width: '14rem', hideBelow: 'md' },
+  { label: 'Actions', width: '11rem', align: 'right' },
+];
+
 function PersonRow({
   person,
   teams,
@@ -244,7 +235,7 @@ function PersonRow({
 
   return (
     <tr className={person.isActive ? '' : 'opacity-60'}>
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2.5">
         <div className="flex items-center gap-2.5">
           <UserAvatar user={person} />
           <div className="min-w-0">
@@ -261,7 +252,7 @@ function PersonRow({
         </div>
       </td>
 
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2.5">
         <Select
           aria-label={'Role for ' + person.name}
           value={person.role}
@@ -285,7 +276,7 @@ function PersonRow({
         </Select>
       </td>
 
-      <td className="hidden px-4 py-2.5 md:table-cell">
+      <td className="hidden px-3 py-2.5 md:table-cell">
         <div className="flex flex-wrap items-center gap-1.5">
           {theirTeams.map((team) => (
             <span
@@ -339,7 +330,7 @@ function PersonRow({
         </div>
       </td>
 
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2.5">
         <div className="flex items-center justify-end gap-1">
           <Button
             variant="ghost"

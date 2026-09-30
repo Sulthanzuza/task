@@ -1,4 +1,10 @@
-import { useMemo, useState } from 'react';
+import {
+  useMemo,
+  useState,
+  type KeyboardEventHandler,
+  type PointerEventHandler,
+  type ReactNode,
+} from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   DndContext,
@@ -11,16 +17,23 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { Ban, Eye, EyeOff } from 'lucide-react';
+import { Ban, Eye, EyeOff, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TaskDetail, TaskStatus, TaskSummary, TransitionRequirement } from '@tm/shared';
-import { BOARD_COLUMNS, COLLAPSED_BOARD_COLUMNS, STATUS_LABELS, canTransition } from '@tm/shared';
+import {
+  BOARD_COLUMNS,
+  COLLAPSED_BOARD_COLUMNS,
+  STATUS_LABELS,
+  canTransition,
+  priorityColor,
+  statusColor,
+} from '@tm/shared';
 import { useBoardSummary, useTaskList, useTransitionTask } from '@/features/tasks/api';
 import { useProjects } from '@/features/team/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { ApiError, api } from '@/lib/api';
 import { Button, Card, EmptyState, Select, Skeleton } from '@/components/ui/primitives';
-import { DueBadge, PriorityBadge, ProgressBar, UserAvatar } from '@/components/common/badges';
+import { DueBadge, PriorityIcon, ProgressBar, UserAvatar } from '@/components/common/badges';
 import { TransitionDialog } from '@/features/tasks/TransitionDialog';
 import { cn } from '@/lib/utils';
 
@@ -180,7 +193,11 @@ export function BoardPage() {
           onDragCancel={() => setDragging(null)}
           onDragEnd={onDragEnd}
         >
-          <div className="flex flex-1 gap-3 relative overflow-x-auto pb-3">
+          {/*
+            The strip scrolls, not the page. A board that moves the whole
+            window sideways on a phone loses the top bar with it.
+          */}
+          <div className="relative flex max-w-full flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-3">
             {columns.map((status) => (
               <Column
                 key={status}
@@ -238,7 +255,8 @@ function Column({
       data-status={status}
       data-droppable="true"
       className={cn(
-        'flex w-64 shrink-0 flex-col rounded-card border bg-surface-muted/50 transition-colors',
+        'flex w-64 shrink-0 flex-col rounded-[var(--radius-card)] border backdrop-blur-sm transition-colors',
+        'bg-surface/60',
         isOver && !rejects && 'border-accent bg-accent-soft/40',
         isOver && rejects && 'border-danger bg-danger-soft/40',
         !isOver && 'border-border-subtle',
@@ -246,9 +264,14 @@ function Column({
       )}
     >
       <header className="flex items-center gap-2 px-3 py-2.5">
+        <span
+          aria-hidden
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: statusColor(status) }}
+        />
         <h2 className="text-xs font-semibold">{STATUS_LABELS[status]}</h2>
         <span
-          className="ml-auto rounded-md bg-surface px-1.5 text-xs tabular-nums text-ink-muted"
+          className="tabular ml-auto rounded-full bg-surface-muted px-2 py-0.5 text-xs text-ink-muted"
           data-testid={'count-' + status}
         >
           {total ?? tasks.length}
@@ -265,31 +288,77 @@ function Column({
   );
 }
 
+/**
+ * Pointer drag from anywhere on the card, keyboard drag from the grip.
+ *
+ * Spreading dnd-kit's attributes over the whole card gave it role="button",
+ * and the card holds a link to the task, so it became a button wrapping a
+ * link: nothing inside could be reached by keyboard. Splitting the two keeps
+ * the easy pointer target and gives the keyboard a real control to use.
+ */
 function DraggableCard({ task }: { task: TaskSummary }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
+
+  // dnd-kit types its listeners as a bag of Function, since it does not know
+  // which element they will land on.
+  const startByPointer = listeners?.onPointerDown as
+    PointerEventHandler<HTMLDivElement> | undefined;
+  const startByKeyboard = listeners?.onKeyDown as
+    KeyboardEventHandler<HTMLButtonElement> | undefined;
 
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
+      onPointerDown={startByPointer}
       className={cn('touch-none', isDragging && 'opacity-40')}
     >
-      <TaskCard task={task} />
+      <TaskCard
+        task={task}
+        handle={
+          <button
+            type="button"
+            {...attributes}
+            onKeyDown={startByKeyboard}
+            title={'Move ' + task.key}
+            aria-label={'Move ' + task.key + '. Press space, then the arrow keys.'}
+            className="ml-auto cursor-grab rounded-md p-1 text-ink-faint hover:bg-surface-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+          >
+            <GripVertical size={13} aria-hidden />
+          </button>
+        }
+      />
     </div>
   );
 }
 
-function TaskCard({ task, overlay = false }: { task: TaskSummary; overlay?: boolean }) {
+function TaskCard({
+  task,
+  overlay = false,
+  handle,
+}: {
+  task: TaskSummary;
+  overlay?: boolean;
+  handle?: ReactNode;
+}) {
   return (
     <article
       data-task-key={task.key}
       className={cn(
-        'rounded-lg border border-border-subtle bg-surface p-2.5',
-        overlay && 'shadow-lg',
+        // The stripe down the left is the priority, from the shared map, so a
+        // glance across the column sorts the urgent from the rest.
+        'relative overflow-hidden rounded-xl border border-border-subtle bg-surface p-2.5 pl-3',
+        // The dragged card carries the accent glow rather than a grey shadow.
+        overlay && 'shadow-[0_18px_40px_-12px_var(--color-accent)] ring-1 ring-accent',
       )}
     >
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ background: priorityColor(task.priority) }}
+      />
+
       <div className="flex items-center gap-2">
+        <PriorityIcon priority={task.priority} size={12} />
         <Link
           to={'/tasks/' + task.key}
           className="font-mono text-[11px] text-accent hover:underline"
@@ -298,19 +367,23 @@ function TaskCard({ task, overlay = false }: { task: TaskSummary; overlay?: bool
           {task.key}
         </Link>
         {task.status === 'BLOCKED' ? (
-          <Ban size={12} className="text-danger" aria-label="Blocked" />
+          <Ban size={12} className="ml-auto text-danger" aria-label="Blocked" />
         ) : null}
-        <span className="ml-auto">
-          <PriorityBadge priority={task.priority} />
-        </span>
+        <span className={cn(task.status === 'BLOCKED' ? 'ml-1' : 'ml-auto')}>{handle}</span>
       </div>
 
-      <p className="mt-1.5 line-clamp-2 text-sm">{task.title}</p>
+      <p className="mt-1.5 line-clamp-2 text-sm" title={task.title}>
+        {task.title}
+      </p>
 
       <div className="mt-2 flex items-center gap-2">
         <UserAvatar user={task.assignee} size="sm" />
         <span className="ml-auto">
-          <DueBadge dueDate={task.dueDate} status={task.status} />
+          <DueBadge
+            dueDate={task.dueDate}
+            status={task.status}
+            workingDaysLate={task.workingDaysLate}
+          />
         </span>
       </div>
 

@@ -61,7 +61,7 @@ export function DashboardPage() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-5">
-        <section aria-labelledby="attention-heading" className="lg:col-span-3">
+        <section aria-labelledby="attention-heading" className="min-w-0 lg:col-span-3">
           <h2 id="attention-heading" className="mb-2 text-sm font-semibold">
             Needs your attention
           </h2>
@@ -87,7 +87,7 @@ export function DashboardPage() {
           </Card>
         </section>
 
-        <section aria-labelledby="members-heading" className="lg:col-span-2">
+        <section aria-labelledby="members-heading" className="min-w-0 lg:col-span-2">
           <h2 id="members-heading" className="mb-2 text-sm font-semibold">
             The team
           </h2>
@@ -125,7 +125,10 @@ export function DashboardPage() {
                 ))}
               </ul>
             ) : (
-              <EmptyState title="No members yet" description="Add people to this team to see them here." />
+              <EmptyState
+                title="No members yet"
+                description="Add people to this team to see them here."
+              />
             )}
           </Card>
         </section>
@@ -167,7 +170,9 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: 'da
       title={label}
       className={cn(
         'inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 font-medium',
-        value > 0 && tone === 'danger' ? 'bg-danger-soft text-danger' : 'bg-surface-muted text-ink-muted',
+        value > 0 && tone === 'danger'
+          ? 'bg-danger-soft text-danger'
+          : 'bg-surface-muted text-ink-muted',
       )}
     >
       {value}
@@ -201,11 +206,14 @@ function AttentionRow({ item }: { item: AttentionItem }) {
 
         <span className="shrink-0 font-mono text-xs text-ink-faint">{item.key}</span>
 
-        <span className="min-w-40 flex-1 truncate text-sm">{item.title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
 
-        <span className="shrink-0 text-xs text-ink-muted">{item.detail}</span>
+        <span className="text-xs text-ink-muted">{item.detail}</span>
 
-        <span className="flex shrink-0 items-center gap-2">
+        {/* Wraps rather than holding the row open: four badges do not fit
+            beside a title on a phone, and forcing them to would push the whole
+            card past the viewport. */}
+        <span className="flex flex-wrap items-center gap-2">
           <PriorityBadge priority={item.priority} />
           <StatusBadge status={item.status} />
           <DueBadge dueDate={item.dueDate} status={item.status} />

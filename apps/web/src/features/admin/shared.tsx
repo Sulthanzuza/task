@@ -29,7 +29,7 @@ export function AdminTabs() {
   const tabs = TABS.filter((tab) => isAdmin || !tab.adminOnly);
 
   return (
-    <nav aria-label="Administration" className="-mx-1 flex gap-1 overflow-x-auto pb-1">
+    <nav aria-label="Administration" className="-mx-1 flex gap-1 relative overflow-x-auto pb-1">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}

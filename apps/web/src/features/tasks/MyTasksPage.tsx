@@ -60,7 +60,13 @@ export function MyTasksPage() {
   const today = todayIso();
   const weekEnd = endOfWeek(today);
 
-  const mine = useTaskList({ assigneeId: 'me', open: true, sort: 'dueDate', order: 'asc', limit: 100 });
+  const mine = useTaskList({
+    assigneeId: 'me',
+    open: true,
+    sort: 'dueDate',
+    order: 'asc',
+    limit: 100,
+  });
   const toReview = useTaskList({
     reviewerId: 'me',
     status: ['READY_FOR_REVIEW', 'IN_REVIEW'],
@@ -104,7 +110,10 @@ export function MyTasksPage() {
 
       {grouped.length === 0 ? (
         <Card>
-          <EmptyState title="Nothing on your plate" description="No open tasks are assigned to you." />
+          <EmptyState
+            title="Nothing on your plate"
+            description="No open tasks are assigned to you."
+          />
         </Card>
       ) : (
         grouped.map(({ group, tasks: groupTasks }) => (
@@ -156,7 +165,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
         {task.key}
       </Link>
 
-      <Link to={'/tasks/' + task.key} className="min-w-40 flex-1 truncate text-sm hover:underline">
+      <Link to={'/tasks/' + task.key} className="min-w-0 flex-1 truncate text-sm hover:underline">
         {task.title}
       </Link>
 

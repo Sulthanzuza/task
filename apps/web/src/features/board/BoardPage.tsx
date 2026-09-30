@@ -14,23 +14,13 @@ import {
 import { Ban, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TaskDetail, TaskStatus, TaskSummary, TransitionRequirement } from '@tm/shared';
-import {
-  BOARD_COLUMNS,
-  COLLAPSED_BOARD_COLUMNS,
-  STATUS_LABELS,
-  canTransition,
-} from '@tm/shared';
+import { BOARD_COLUMNS, COLLAPSED_BOARD_COLUMNS, STATUS_LABELS, canTransition } from '@tm/shared';
 import { useBoardSummary, useTaskList, useTransitionTask } from '@/features/tasks/api';
 import { useProjects } from '@/features/team/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { ApiError, api } from '@/lib/api';
 import { Button, Card, EmptyState, Select, Skeleton } from '@/components/ui/primitives';
-import {
-  DueBadge,
-  PriorityBadge,
-  ProgressBar,
-  UserAvatar,
-} from '@/components/common/badges';
+import { DueBadge, PriorityBadge, ProgressBar, UserAvatar } from '@/components/common/badges';
 import { TransitionDialog } from '@/features/tasks/TransitionDialog';
 import { cn } from '@/lib/utils';
 
@@ -169,14 +159,17 @@ export function BoardPage() {
       </header>
 
       {query.isLoading ? (
-        <div className="flex gap-3 overflow-x-auto">
+        <div className="flex gap-3 relative overflow-x-auto">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-72 w-64 shrink-0" />
           ))}
         </div>
       ) : tasks.length === 0 ? (
         <Card>
-          <EmptyState title="No tasks on this board" description="Pick another project, or create one." />
+          <EmptyState
+            title="No tasks on this board"
+            description="Pick another project, or create one."
+          />
         </Card>
       ) : (
         <DndContext
@@ -187,7 +180,7 @@ export function BoardPage() {
           onDragCancel={() => setDragging(null)}
           onDragEnd={onDragEnd}
         >
-          <div className="flex flex-1 gap-3 overflow-x-auto pb-3">
+          <div className="flex flex-1 gap-3 relative overflow-x-auto pb-3">
             {columns.map((status) => (
               <Column
                 key={status}

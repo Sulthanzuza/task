@@ -1,74 +1,84 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
   ChartNoAxesColumn,
-  CircleUser,
-  FolderKanban,
+  CheckCircle2,
+  ChevronDown,
   Gauge,
   KanbanSquare,
   ListTodo,
   LogOut,
   Menu,
-  Moon,
   Search,
   Settings,
-  Sun,
-  UserCog,
+  Shield,
   Users,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useRealtime } from '@/features/realtime/useRealtime';
 import { NotificationBell } from '@/features/notifications/NotificationBell';
+import { ThemeSwitch } from './ThemeSwitch';
+import { PeriodSwitcher } from './PeriodSwitcher';
 import { Button } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
+import { ROLE_LABELS } from '@tm/shared';
 import { cn } from '@/lib/utils';
+
+/**
+ * The top bar from the reference: name on the left, pill navigation in the
+ * middle, controls on the right.
+ *
+ * Below 900px the pills do not shrink into something unusable; they move into a
+ * sheet behind a menu button, which is the only honest way to fit eight
+ * destinations on a phone.
+ */
 
 interface NavItem {
   to: string;
   label: string;
   icon: typeof Gauge;
   leadOnly?: boolean;
-  adminOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: Gauge, leadOnly: true },
-  { to: '/my-tasks', label: 'My tasks', icon: ListTodo },
+  { to: '/my-tasks', label: 'My tasks', icon: CheckCircle2 },
   { to: '/tasks', label: 'Tasks', icon: ListTodo },
   { to: '/board', label: 'Board', icon: KanbanSquare },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
   { to: '/team', label: 'Team', icon: Users },
   { to: '/workload', label: 'Workload', icon: ChartNoAxesColumn, leadOnly: true },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesColumn, leadOnly: true },
-  { to: '/admin/projects', label: 'Projects', icon: FolderKanban, leadOnly: true },
-  { to: '/admin/people', label: 'People', icon: UserCog, adminOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
-function useTheme() {
-  const [dark, setDark] = useState(() => {
-    try {
-      const stored = localStorage.getItem('tm-theme');
-      if (stored) return stored === 'dark';
-    } catch {
-      // Private browsing can block storage; fall back to the system preference.
-    }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    try {
-      localStorage.setItem('tm-theme', dark ? 'dark' : 'light');
-    } catch {
-      // Not being able to remember the choice is not worth breaking the page over.
-    }
-  }, [dark]);
-
-  return [dark, setDark] as const;
+interface MoreItem {
+  to: string;
+  label: string;
+  adminOnly?: boolean;
+  leadOnly?: boolean;
 }
+
+const MORE: MoreItem[] = [
+  { to: '/settings/notifications', label: 'Notification preferences' },
+  { to: '/admin/projects', label: 'Projects', leadOnly: true },
+  { to: '/admin/import', label: 'Import', leadOnly: true },
+  { to: '/admin/people', label: 'People', adminOnly: true },
+  { to: '/admin/teams', label: 'Teams', adminOnly: true },
+  { to: '/settings/organisation', label: 'Organisation', adminOnly: true },
+  { to: '/settings/holidays', label: 'Holidays', adminOnly: true },
+  { to: '/settings/email', label: 'Email', adminOnly: true },
+  { to: '/admin/audit', label: 'Audit', adminOnly: true },
+];
+
+const pillClass = (isActive: boolean) =>
+  cn(
+    'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm whitespace-nowrap transition-all',
+    isActive
+      ? 'accent-gradient font-medium text-[var(--color-accent-ink)] shadow-[0_6px_16px_-8px_var(--color-accent)]'
+      : 'text-ink-muted hover:bg-surface-muted hover:text-ink',
+  );
 
 export function Layout() {
   const { user, signOut, isLead, isAdmin } = useAuth();
@@ -78,46 +88,244 @@ export function Layout() {
   useRealtime();
 
   const navigate = useNavigate();
-  const [dark, setDark] = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const items = NAV.filter((item) => (!item.leadOnly || isLead) && (!item.adminOnly || isAdmin));
+  const items = NAV.filter((item) => !item.leadOnly || isLead);
+  const moreItems = MORE.filter(
+    (item) => (!item.adminOnly || isAdmin) && (!item.leadOnly || isLead),
+  );
 
   return (
-    <div className="flex h-full">
-      {/* The sidebar slides in on a phone and is always present from md up. */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-border-subtle bg-surface',
-          'transition-transform md:static md:translate-x-0',
-          menuOpen ? 'translate-x-0' : '-translate-x-full',
-        )}
-      >
-        <div className="flex h-14 items-center justify-between px-4">
-          <span className="text-sm font-semibold tracking-tight">Task Manager</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setMenuOpen(false)}
-            aria-label="Close menu"
-          >
-            <X size={16} />
-          </Button>
-        </div>
+    <div className="flex min-h-full flex-col">
+      <header className="sticky top-0 z-40 border-b border-border-subtle bg-[var(--color-canvas)]/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 sm:px-6">
+          <NavLink to="/" className="flex shrink-0 items-center gap-2">
+            <span className="accent-gradient flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-accent-ink)]">
+              <Shield size={16} aria-hidden />
+            </span>
+            {/*
+              The wordmark yields to the navigation between 900 and 1400px.
+              A complete set of destinations is worth more than repeating the
+              name of the app the person is already inside.
+            */}
+            <span className="text-sm font-semibold tracking-tight max-[900px]:hidden min-[900px]:max-[1400px]:hidden">
+              Task Manager
+            </span>
+          </NavLink>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
+          {/*
+            The pills. Hidden below 900px, where the sheet takes over. Allowed
+            to shrink and scroll rather than push the bar wider than the
+            window: eight destinations and a full set of controls do not fit a
+            1280px screen at their natural width.
+          */}
+          <nav
+            aria-label="Main"
+            className={cn(
+              'mx-auto hidden min-w-0 items-center gap-0.5 overflow-x-auto rounded-full',
+              'border border-border-subtle bg-surface/70 p-1 min-[900px]:flex',
+              '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+            )}
+          >
+            {items.map((item) => (
+              <NavLink key={item.to} to={item.to} className={({ isActive }) => pillClass(isActive)}>
+                {/*
+                  Below 1400px the icons go and the labels stay: the label is
+                  what identifies the destination, and the space buys back the
+                  signed-in name on the right.
+                */}
+                <item.icon size={14} aria-hidden className="hidden min-[1400px]:inline" />
+                {item.label}
+              </NavLink>
+            ))}
+            {moreItems.length > 0 ? <MoreMenu items={moreItems} /> : null}
+          </nav>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1 min-[900px]:ml-0">
+            <PeriodSwitcher />
+
+            <NavLink
+              to="/tasks"
+              aria-label="Search tasks"
+              className="rounded-full p-2 text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+            >
+              <Search size={17} />
+            </NavLink>
+
+            <NotificationBell />
+            <ThemeSwitch />
+
+            <div className="ml-1 hidden shrink-0 items-center gap-2 sm:flex">
+              <NavLink to={'/team/' + (user?.id ?? '')} className="flex items-center gap-2">
+                <UserAvatar user={user ? { ...user, isActive: true } : null} />
+                <span className="hidden leading-tight min-[1000px]:block">
+                  <span className="block max-w-32 truncate text-xs font-medium">{user?.name}</span>
+                  <span className="block text-[11px] text-ink-faint">
+                    {user ? ROLE_LABELS[user.role] : ''}
+                  </span>
+                </span>
+              </NavLink>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Sign out"
+                onClick={() => {
+                  void signOut().then(() => navigate('/login'));
+                }}
+              >
+                <LogOut size={16} />
+              </Button>
+            </div>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              className="min-[900px]:hidden"
+              aria-label="Open menu"
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu size={18} />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="min-w-0 flex-1">
+        <Outlet />
+      </main>
+
+      {menuOpen ? (
+        <MenuSheet
+          items={items}
+          moreItems={moreItems}
+          onClose={() => setMenuOpen(false)}
+          onSignOut={() => {
+            setMenuOpen(false);
+            void signOut().then(() => navigate('/login'));
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Settings and administration, kept out of the main run of pills. */
+function MoreMenu({ items }: { items: MoreItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((shown) => !shown)}
+        className={pillClass(false)}
+      >
+        <Settings size={14} aria-hidden className="hidden min-[1400px]:inline" />
+        More
+        <ChevronDown size={13} aria-hidden />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Settings and administration"
+          className="absolute right-0 z-50 mt-2 w-60 rounded-2xl border border-border-subtle bg-surface p-1.5 shadow-[var(--shadow-lift)]"
+        >
           {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              onClick={() => setMenuOpen(false)}
+              role="menuitem"
+              onClick={() => setOpen(false)}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                  'block rounded-xl px-3 py-2 text-sm transition-colors',
+                  isActive ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-surface-muted',
+                )
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Below 900px every destination lives here. */
+function MenuSheet({
+  items,
+  moreItems,
+  onClose,
+  onSignOut,
+}: {
+  items: NavItem[];
+  moreItems: MoreItem[];
+  onClose(): void;
+  onSignOut(): void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 min-[900px]:hidden"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menu"
+        className="ml-auto flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-l border-border-subtle bg-surface p-4"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-semibold">Menu</span>
+          <Button variant="ghost" size="icon" aria-label="Close menu" onClick={onClose}>
+            <X size={16} />
+          </Button>
+        </div>
+
+        <nav aria-label="Main" className="space-y-1">
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={onClose}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors',
                   isActive
                     ? 'bg-accent-soft font-medium text-accent'
-                    : 'text-ink-muted hover:bg-surface-muted hover:text-ink',
+                    : 'text-ink-muted hover:bg-surface-muted',
                 )
               }
             >
@@ -127,90 +335,36 @@ export function Layout() {
           ))}
         </nav>
 
-        <div className="border-t border-border-subtle p-3">
-          <div className="flex items-center gap-2">
-            <UserAvatar user={user ? { ...user, isActive: true } : null} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{user?.name}</p>
-              <p className="truncate text-xs text-ink-faint">
-                {user?.role === 'SUPER_ADMIN'
-                  ? 'Super admin'
-                  : user?.role === 'TEAM_LEAD'
-                    ? 'Team lead'
-                    : 'Member'}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Sign out"
-              onClick={() => {
-                void signOut().then(() => navigate('/login'));
-              }}
-            >
-              <LogOut size={16} />
-            </Button>
-          </div>
-        </div>
-      </aside>
+        {moreItems.length > 0 ? (
+          <>
+            <p className="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-ink-faint uppercase">
+              Settings
+            </p>
+            <nav aria-label="Settings and administration" className="space-y-1">
+              {moreItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={onClose}
+                  className={({ isActive }) =>
+                    cn(
+                      'block rounded-xl px-3 py-2 text-sm transition-colors',
+                      isActive
+                        ? 'bg-accent-soft font-medium text-accent'
+                        : 'text-ink-muted hover:bg-surface-muted',
+                    )
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          </>
+        ) : null}
 
-      {menuOpen ? (
-        <button
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
-          aria-label="Close menu"
-          onClick={() => setMenuOpen(false)}
-        />
-      ) : null}
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setMenuOpen(true)}
-            aria-label="Open menu"
-          >
-            <Menu size={18} />
-          </Button>
-
-          <div className="relative hidden max-w-sm flex-1 sm:block">
-            <Search
-              size={15}
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint"
-              aria-hidden
-            />
-            <input
-              type="search"
-              placeholder="Search tasks (Ctrl+K)"
-              className="h-9 w-full rounded-lg border border-border-subtle bg-canvas pr-3 pl-9 text-sm placeholder:text-ink-faint"
-              onFocus={(event) => event.currentTarget.blur()}
-              readOnly
-              title="Global search arrives with the search and saved views work"
-            />
-          </div>
-
-          <div className="ml-auto flex items-center gap-1">
-            <NotificationBell />
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-              onClick={() => setDark(!dark)}
-            >
-              {dark ? <Sun size={17} /> : <Moon size={17} />}
-            </Button>
-            <NavLink to={'/team/' + (user?.id ?? '')} aria-label="My page">
-              <Button variant="ghost" size="icon">
-                <CircleUser size={17} />
-              </Button>
-            </NavLink>
-          </div>
-        </header>
-
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
+        <Button variant="outline" className="mt-auto w-full" onClick={onSignOut}>
+          <LogOut size={15} aria-hidden /> Sign out
+        </Button>
       </div>
     </div>
   );

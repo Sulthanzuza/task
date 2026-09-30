@@ -106,7 +106,7 @@ export function AuditPage() {
       {audit.isLoading ? (
         <Skeleton className="h-96 w-full" />
       ) : audit.data?.items.length ? (
-        <Card className="overflow-x-auto">
+        <Card className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <caption className="sr-only">Administrative actions</caption>
             <thead>
@@ -199,7 +199,7 @@ function Snapshot({ label, value }: { label: string; value: unknown }) {
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-ink-muted">{label}</p>
-      <pre className="overflow-x-auto rounded-lg bg-surface p-2 text-xs">
+      <pre className="relative overflow-x-auto rounded-lg bg-surface p-2 text-xs">
         {JSON.stringify(value, null, 2)}
       </pre>
     </div>

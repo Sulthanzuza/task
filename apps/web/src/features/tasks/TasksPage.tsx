@@ -219,7 +219,7 @@ export function TasksPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full min-w-[56rem] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border-subtle text-left text-xs text-ink-muted">

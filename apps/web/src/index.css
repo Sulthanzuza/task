@@ -1,59 +1,318 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:where(.dark, .dark *));
-
 /**
- * One palette, defined once. Every colour in the app comes from a token here,
- * so dark mode is a single redefinition rather than a class on every element.
+ * One palette, four themes.
+ *
+ * Every colour in the app comes from a token here. @theme declares the names so
+ * Tailwind generates the utilities; each [data-theme] block then redefines the
+ * same variables, so switching theme is one attribute on <html> rather than a
+ * class on every element.
+ *
+ * Two rules hold across all four:
+ *   - The hero surface stays dark everywhere, like the Balance card in the
+ *     reference. Its tokens are therefore fixed, not themed.
+ *   - Status and priority have their own tokens, tuned per theme to clear WCAG
+ *     AA against the surface they sit on. Colour is never the only signal:
+ *     every badge carries text or an icon as well.
  */
+
 @theme {
-  --color-canvas: oklch(98.4% 0.003 247);
-  --color-surface: oklch(100% 0 0);
-  --color-surface-muted: oklch(96.8% 0.005 247);
-  --color-border-subtle: oklch(92.3% 0.006 247);
-  --color-ink: oklch(21% 0.02 260);
-  --color-ink-muted: oklch(52% 0.02 260);
-  --color-ink-faint: oklch(65% 0.015 260);
+  /* Surfaces. Defaults are midnight; the [data-theme] blocks below restate them. */
+  --color-canvas: #071428;
+  --color-canvas-tint: #0a1b33;
+  --color-surface: #0b1e3a;
+  --color-surface-muted: #102647;
+  --color-surface-raised: #132c52;
+  --color-border-subtle: rgba(120, 200, 255, 0.14);
+  --color-border-strong: rgba(120, 200, 255, 0.26);
 
-  --color-accent: oklch(54% 0.19 262);
-  --color-accent-hover: oklch(48% 0.19 262);
-  --color-accent-soft: oklch(95% 0.03 262);
+  --color-ink: #e6f1ff;
+  --color-ink-muted: #7c93b5;
+  --color-ink-faint: #5b7095;
 
-  --color-danger: oklch(56% 0.21 25);
-  --color-danger-soft: oklch(95% 0.04 25);
-  --color-warning: oklch(70% 0.16 70);
-  --color-warning-soft: oklch(96% 0.05 80);
-  --color-success: oklch(60% 0.15 155);
-  --color-success-soft: oklch(95% 0.04 155);
-  --color-info: oklch(60% 0.12 230);
-  --color-info-soft: oklch(95% 0.03 230);
-  --color-neutral-soft: oklch(94% 0.005 247);
+  /* Accent: cyan to teal, with a slate blue behind it. */
+  --color-accent: #22d3ee;
+  --color-accent-2: #14b8a6;
+  --color-accent-hover: #38dcf2;
+  --color-accent-soft: rgba(34, 211, 238, 0.14);
+  --color-accent-ink: #04121a;
+  --color-secondary: #3e5c8f;
+  --color-secondary-soft: rgba(62, 92, 143, 0.22);
 
-  --radius-card: 0.75rem;
+  /* Feedback. */
+  --color-danger: #fb7185;
+  --color-danger-soft: rgba(251, 113, 133, 0.16);
+  --color-warning: #fbbf24;
+  --color-warning-soft: rgba(251, 191, 36, 0.16);
+  --color-success: #34d399;
+  --color-success-soft: rgba(52, 211, 153, 0.16);
+  --color-info: #60a5fa;
+  --color-info-soft: rgba(96, 165, 250, 0.16);
+  --color-neutral-soft: rgba(148, 178, 214, 0.14);
+
+  /* Status, one per workflow state. */
+  --color-status-backlog: #93a9c9;
+  --color-status-assigned: #60a5fa;
+  --color-status-progress: #22d3ee;
+  --color-status-blocked: #fb7185;
+  --color-status-review-ready: #fbbf24;
+  --color-status-review: #f59e0b;
+  --color-status-changes: #fb923c;
+  --color-status-completed: #34d399;
+  --color-status-cancelled: #6b7f9e;
+
+  /* Priority. */
+  --color-priority-low: #7c93b5;
+  --color-priority-medium: #60a5fa;
+  --color-priority-high: #fbbf24;
+  --color-priority-urgent: #fb7185;
+
+  /* Charts, in the order a series should take them. */
+  --color-chart-1: #22d3ee;
+  --color-chart-2: #14b8a6;
+  --color-chart-3: #60a5fa;
+  --color-chart-4: #a78bfa;
+  --color-chart-5: #fbbf24;
+  --color-chart-6: #fb7185;
+  --color-chart-7: #34d399;
+  --color-chart-8: #3e5c8f;
+  --color-chart-grid: rgba(120, 200, 255, 0.1);
+  --color-chart-axis: #5b7095;
+
+  /* The hero card is dark in every theme, so these never change. */
+  --color-hero-from: #0a1f3d;
+  --color-hero-to: #071428;
+  --color-hero-glow: rgba(34, 211, 238, 0.28);
+  --color-hero-ink: #e6f1ff;
+  --color-hero-ink-muted: #8fa8ca;
+  --color-hero-border: rgba(120, 200, 255, 0.18);
+
+  --radius-card: 1.5rem;
+  --radius-input: 0.75rem;
+
+  --font-sans:
+    'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.2), 0 18px 40px -18px rgba(0, 0, 0, 0.6);
 }
 
-.dark {
-  --color-canvas: oklch(17% 0.015 260);
-  --color-surface: oklch(21% 0.018 260);
-  --color-surface-muted: oklch(25% 0.02 260);
-  --color-border-subtle: oklch(30% 0.02 260);
-  --color-ink: oklch(96% 0.005 247);
-  --color-ink-muted: oklch(72% 0.015 260);
-  --color-ink-faint: oklch(58% 0.015 260);
+/* ---------------------------------------------------------------------------
+ * midnight — the default dark theme
+ * ------------------------------------------------------------------------ */
+:root,
+[data-theme='midnight'] {
+  color-scheme: dark;
+}
 
-  --color-accent: oklch(68% 0.16 262);
-  --color-accent-hover: oklch(74% 0.16 262);
-  --color-accent-soft: oklch(30% 0.06 262);
+/* ---------------------------------------------------------------------------
+ * dusk — slate blue page, pale cards
+ * ------------------------------------------------------------------------ */
+[data-theme='dusk'] {
+  color-scheme: light;
 
-  --color-danger: oklch(70% 0.17 25);
-  --color-danger-soft: oklch(31% 0.07 25);
-  --color-warning: oklch(78% 0.14 75);
-  --color-warning-soft: oklch(32% 0.06 75);
-  --color-success: oklch(72% 0.14 155);
-  --color-success-soft: oklch(30% 0.06 155);
-  --color-info: oklch(72% 0.11 230);
-  --color-info-soft: oklch(30% 0.05 230);
-  --color-neutral-soft: oklch(27% 0.012 260);
+  --color-canvas: #8c9bb6;
+  --color-canvas-tint: #97a5bd;
+  --color-surface: #eef2f8;
+  --color-surface-muted: #e2e8f2;
+  --color-surface-raised: #ffffff;
+  --color-border-subtle: rgba(27, 42, 68, 0.12);
+  --color-border-strong: rgba(27, 42, 68, 0.22);
+
+  --color-ink: #1b2a44;
+  --color-ink-muted: #4a5b78;
+  --color-ink-faint: #64748b;
+
+  /* Darkened so cyan on a pale card still clears AA for text. */
+  --color-accent: #0e7490;
+  --color-accent-2: #0f766e;
+  --color-accent-hover: #155e75;
+  --color-accent-soft: rgba(14, 116, 144, 0.12);
+  --color-accent-ink: #ffffff;
+  --color-secondary: #3e5c8f;
+  --color-secondary-soft: rgba(62, 92, 143, 0.14);
+
+  --color-danger: #be123c;
+  --color-danger-soft: rgba(190, 18, 60, 0.1);
+  --color-warning: #a16207;
+  --color-warning-soft: rgba(161, 98, 7, 0.12);
+  --color-success: #047857;
+  --color-success-soft: rgba(4, 120, 87, 0.12);
+  --color-info: #1d4ed8;
+  --color-info-soft: rgba(29, 78, 216, 0.1);
+  --color-neutral-soft: rgba(27, 42, 68, 0.08);
+
+  --color-status-backlog: #55647f;
+  --color-status-assigned: #1d4ed8;
+  --color-status-progress: #0e7490;
+  --color-status-blocked: #be123c;
+  --color-status-review-ready: #a16207;
+  --color-status-review: #92400e;
+  --color-status-changes: #c2410c;
+  --color-status-completed: #047857;
+  --color-status-cancelled: #64748b;
+
+  --color-priority-low: #64748b;
+  --color-priority-medium: #1d4ed8;
+  --color-priority-high: #a16207;
+  --color-priority-urgent: #be123c;
+
+  --color-chart-1: #0e7490;
+  --color-chart-2: #0f766e;
+  --color-chart-3: #1d4ed8;
+  --color-chart-4: #7c3aed;
+  --color-chart-5: #a16207;
+  --color-chart-6: #be123c;
+  --color-chart-7: #047857;
+  --color-chart-8: #3e5c8f;
+  --color-chart-grid: rgba(27, 42, 68, 0.1);
+  --color-chart-axis: #4a5b78;
+
+  --shadow-card: 0 1px 2px rgba(16, 28, 48, 0.08), 0 10px 26px -14px rgba(16, 28, 48, 0.4);
+  --shadow-lift: 0 2px 6px rgba(16, 28, 48, 0.12), 0 20px 42px -18px rgba(16, 28, 48, 0.45);
+}
+
+/* ---------------------------------------------------------------------------
+ * light — lavender page, white cards with a layered shadow
+ * ------------------------------------------------------------------------ */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --color-canvas: #e8e7f5;
+  --color-canvas-tint: #eeedf9;
+  --color-surface: #f7f8fc;
+  --color-surface-muted: #eceef6;
+  --color-surface-raised: #ffffff;
+  --color-border-subtle: #ffffff;
+  --color-border-strong: rgba(22, 33, 58, 0.16);
+
+  --color-ink: #16213a;
+  --color-ink-muted: #4b5a77;
+  --color-ink-faint: #6b7a96;
+
+  --color-accent: #0e7490;
+  --color-accent-2: #0f766e;
+  --color-accent-hover: #155e75;
+  --color-accent-soft: rgba(14, 116, 144, 0.1);
+  --color-accent-ink: #ffffff;
+  --color-secondary: #3e5c8f;
+  --color-secondary-soft: rgba(62, 92, 143, 0.12);
+
+  --color-danger: #be123c;
+  --color-danger-soft: rgba(190, 18, 60, 0.09);
+  --color-warning: #a16207;
+  --color-warning-soft: rgba(161, 98, 7, 0.11);
+  --color-success: #047857;
+  --color-success-soft: rgba(4, 120, 87, 0.11);
+  --color-info: #1d4ed8;
+  --color-info-soft: rgba(29, 78, 216, 0.09);
+  --color-neutral-soft: rgba(22, 33, 58, 0.07);
+
+  --color-status-backlog: #55647f;
+  --color-status-assigned: #1d4ed8;
+  --color-status-progress: #0e7490;
+  --color-status-blocked: #be123c;
+  --color-status-review-ready: #a16207;
+  --color-status-review: #92400e;
+  --color-status-changes: #c2410c;
+  --color-status-completed: #047857;
+  --color-status-cancelled: #6b7a96;
+
+  --color-priority-low: #6b7a96;
+  --color-priority-medium: #1d4ed8;
+  --color-priority-high: #a16207;
+  --color-priority-urgent: #be123c;
+
+  --color-chart-1: #0e7490;
+  --color-chart-2: #0f766e;
+  --color-chart-3: #1d4ed8;
+  --color-chart-4: #7c3aed;
+  --color-chart-5: #a16207;
+  --color-chart-6: #be123c;
+  --color-chart-7: #047857;
+  --color-chart-8: #3e5c8f;
+  --color-chart-grid: rgba(22, 33, 58, 0.08);
+  --color-chart-axis: #4b5a77;
+
+  /* The soft layered shadow the light reference leans on. */
+  --shadow-card:
+    0 1px 1px rgba(22, 33, 58, 0.04), 0 4px 10px -4px rgba(22, 33, 58, 0.08),
+    0 16px 32px -20px rgba(22, 33, 58, 0.18);
+  --shadow-lift:
+    0 2px 4px rgba(22, 33, 58, 0.06), 0 10px 20px -6px rgba(22, 33, 58, 0.12),
+    0 28px 48px -24px rgba(22, 33, 58, 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+ * violet — from the second reference
+ * ------------------------------------------------------------------------ */
+[data-theme='violet'] {
+  color-scheme: dark;
+
+  --color-canvas: #0a0910;
+  --color-canvas-tint: #130f1d;
+  --color-surface: #14121b;
+  --color-surface-muted: #1c1926;
+  --color-surface-raised: #221e2e;
+  --color-border-subtle: rgba(192, 38, 211, 0.16);
+  --color-border-strong: rgba(192, 38, 211, 0.3);
+
+  --color-ink: #f4effa;
+  --color-ink-muted: #a294b8;
+  --color-ink-faint: #7d6f93;
+
+  --color-accent: #c026d3;
+  --color-accent-2: #7c3aed;
+  --color-accent-hover: #d946ef;
+  --color-accent-soft: rgba(192, 38, 211, 0.16);
+  --color-accent-ink: #ffffff;
+  --color-secondary: #7c3aed;
+  --color-secondary-soft: rgba(124, 58, 237, 0.2);
+
+  --color-danger: #fb7185;
+  --color-danger-soft: rgba(251, 113, 133, 0.16);
+  --color-warning: #fbbf24;
+  --color-warning-soft: rgba(251, 191, 36, 0.16);
+  --color-success: #34d399;
+  --color-success-soft: rgba(52, 211, 153, 0.16);
+  --color-info: #a78bfa;
+  --color-info-soft: rgba(167, 139, 250, 0.16);
+  --color-neutral-soft: rgba(162, 148, 184, 0.14);
+
+  --color-status-backlog: #a294b8;
+  --color-status-assigned: #a78bfa;
+  --color-status-progress: #d946ef;
+  --color-status-blocked: #fb7185;
+  --color-status-review-ready: #fbbf24;
+  --color-status-review: #f59e0b;
+  --color-status-changes: #fb923c;
+  --color-status-completed: #34d399;
+  --color-status-cancelled: #7d6f93;
+
+  --color-priority-low: #a294b8;
+  --color-priority-medium: #a78bfa;
+  --color-priority-high: #fbbf24;
+  --color-priority-urgent: #fb7185;
+
+  --color-chart-1: #c026d3;
+  --color-chart-2: #7c3aed;
+  --color-chart-3: #a78bfa;
+  --color-chart-4: #22d3ee;
+  --color-chart-5: #fbbf24;
+  --color-chart-6: #fb7185;
+  --color-chart-7: #34d399;
+  --color-chart-8: #6366f1;
+  --color-chart-grid: rgba(192, 38, 211, 0.1);
+  --color-chart-axis: #7d6f93;
+
+  /* The hero borrows the violet gradient here rather than the cyan one. */
+  --color-hero-from: #1b1328;
+  --color-hero-to: #0a0910;
+  --color-hero-glow: rgba(192, 38, 211, 0.3);
+  --color-hero-border: rgba(192, 38, 211, 0.22);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(192, 38, 211, 0.3);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.45), 0 22px 46px -18px rgba(192, 38, 211, 0.4);
 }
 
 @layer base {
@@ -64,9 +323,25 @@
   body {
     background-color: var(--color-canvas);
     color: var(--color-ink);
-    font-family:
-      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    /*
+     * The subtle radial glow behind the page. Fixed rather than scrolled, so it
+     * behaves like light in the room instead of a pattern on the paper.
+     */
+    background-image: radial-gradient(
+      1200px 600px at 50% -10%,
+      var(--color-canvas-tint) 0%,
+      transparent 70%
+    );
+    background-attachment: fixed;
+  }
+
+  /* Every figure in the app is tabular, so columns of numbers line up. */
+  .tabular,
+  table td,
+  table th {
+    font-variant-numeric: tabular-nums;
   }
 
   /* A visible focus ring everywhere, because this app is used with a keyboard all day. */
@@ -77,6 +352,34 @@
 }
 
 @layer utilities {
+  /* The accent gradient, used on active pills, bars and rings. */
+  .accent-gradient {
+    background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+  }
+
+  .accent-text-gradient {
+    background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* The hero surface: dark in every theme, with a glow in one corner. */
+  .hero-surface {
+    background-color: var(--color-hero-to);
+    background-image:
+      radial-gradient(420px 220px at 85% -10%, var(--color-hero-glow) 0%, transparent 70%),
+      linear-gradient(160deg, var(--color-hero-from) 0%, var(--color-hero-to) 100%);
+    border: 1px solid var(--color-hero-border);
+    color: var(--color-hero-ink);
+  }
+
+  /* Diagonal stripes for "remaining" or "planned" quantities. */
+  .hatched {
+    background-image: repeating-linear-gradient(45deg, currentColor 0 2px, transparent 2px 6px);
+    opacity: 0.45;
+  }
+
   .skeleton {
     background: linear-gradient(
       90deg,

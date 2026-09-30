@@ -141,7 +141,7 @@ export function ImportPage() {
             </div>
           </Card>
 
-          <Card className="overflow-x-auto">
+          <Card className="relative overflow-x-auto">
             <table className="w-full text-sm">
               <caption className="sr-only">What the file would create</caption>
               <thead>

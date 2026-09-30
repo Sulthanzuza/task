@@ -1,3 +1,4 @@
+import { AlertTriangle, ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import type { BlockerType, TaskPriority, TaskStatus, UserSummary } from '@tm/shared';
 import { BLOCKER_TYPE_LABELS, PRIORITY_LABELS, STATUS_LABELS } from '@tm/shared';
 import { cn, formatDate, initials, todayIso } from '@/lib/utils';
@@ -5,49 +6,67 @@ import { cn, formatDate, initials, todayIso } from '@/lib/utils';
 /**
  * Status, priority and due date are read at a glance all day long, so each has
  * one fixed appearance used everywhere.
+ *
+ * Every one of these carries its word or an icon as well as its colour. Colour
+ * alone would be unreadable to anyone who cannot separate these hues, and
+ * unprintable in black and white.
  */
 
-const STATUS_TONE: Record<TaskStatus, string> = {
-  BACKLOG: 'bg-neutral-soft text-ink-muted',
-  ASSIGNED: 'bg-info-soft text-info',
-  IN_PROGRESS: 'bg-accent-soft text-accent',
-  BLOCKED: 'bg-danger-soft text-danger',
-  READY_FOR_REVIEW: 'bg-warning-soft text-warning',
-  IN_REVIEW: 'bg-warning-soft text-warning',
-  CHANGES_REQUESTED: 'bg-danger-soft text-danger',
-  COMPLETED: 'bg-success-soft text-success',
-  CANCELLED: 'bg-neutral-soft text-ink-faint',
+/** Status colours are their own tokens, tuned per theme to clear AA. */
+const STATUS_VAR: Record<TaskStatus, string> = {
+  BACKLOG: 'status-backlog',
+  ASSIGNED: 'status-assigned',
+  IN_PROGRESS: 'status-progress',
+  BLOCKED: 'status-blocked',
+  READY_FOR_REVIEW: 'status-review-ready',
+  IN_REVIEW: 'status-review',
+  CHANGES_REQUESTED: 'status-changes',
+  COMPLETED: 'status-completed',
+  CANCELLED: 'status-cancelled',
 };
 
 export function StatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
+  const colour = 'var(--color-' + STATUS_VAR[status] + ')';
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        STATUS_TONE[status],
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap',
         className,
       )}
+      style={{
+        color: colour,
+        backgroundColor: 'color-mix(in srgb, ' + colour + ' 16%, transparent)',
+      }}
     >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
       {STATUS_LABELS[status]}
     </span>
   );
 }
 
-const PRIORITY_TONE: Record<TaskPriority, string> = {
-  LOW: 'text-ink-faint',
-  MEDIUM: 'text-ink-muted',
-  HIGH: 'text-warning',
-  URGENT: 'text-danger',
+const PRIORITY_VAR: Record<TaskPriority, string> = {
+  LOW: 'priority-low',
+  MEDIUM: 'priority-medium',
+  HIGH: 'priority-high',
+  URGENT: 'priority-urgent',
+};
+
+/** An arrow as well as a colour, so the ranking survives a greyscale print. */
+const PRIORITY_ICON: Record<TaskPriority, typeof ArrowUp> = {
+  LOW: ArrowDown,
+  MEDIUM: Minus,
+  HIGH: ArrowUp,
+  URGENT: AlertTriangle,
 };
 
 export function PriorityBadge({ priority }: { priority: TaskPriority }) {
+  const Icon = PRIORITY_ICON[priority];
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', PRIORITY_TONE[priority])}>
-      <span
-        aria-hidden
-        className="h-1.5 w-1.5 rounded-full bg-current"
-        style={{ opacity: priority === 'LOW' ? 0.5 : 1 }}
-      />
+    <span
+      className="inline-flex items-center gap-1 text-xs font-medium"
+      style={{ color: 'var(--color-' + PRIORITY_VAR[priority] + ')' }}
+    >
+      <Icon size={12} aria-hidden />
       {PRIORITY_LABELS[priority]}
     </span>
   );
@@ -76,14 +95,22 @@ export function DueBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
         overdue && 'bg-danger-soft text-danger',
         dueToday && 'bg-warning-soft text-warning',
         !overdue && !dueToday && 'text-ink-muted',
         className,
       )}
       title={overdue ? 'Overdue' : dueToday ? 'Due today' : undefined}
+      /*
+       * The state goes in the accessible name rather than a visually hidden
+       * span. sr-only is absolutely positioned, and inside a wide scrolling
+       * table its containing block is the viewport rather than the scroller,
+       * so it escapes the clip and drags the whole page sideways.
+       */
+      aria-label={formatDate(dueDate) + (overdue ? ', overdue' : dueToday ? ', due today' : '')}
     >
+      {overdue ? <AlertTriangle size={11} aria-hidden /> : null}
       {formatDate(dueDate)}
     </span>
   );
@@ -92,7 +119,8 @@ export function DueBadge({
 export function BlockerBadge({ type }: { type: BlockerType | null }) {
   if (!type) return null;
   return (
-    <span className="inline-flex items-center rounded-md bg-danger-soft px-2 py-0.5 text-xs font-medium text-danger">
+    <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2.5 py-0.5 text-xs font-medium text-danger">
+      <AlertTriangle size={11} aria-hidden />
       {BLOCKER_TYPE_LABELS[type]}
     </span>
   );
@@ -118,12 +146,12 @@ export function ProgressBar({
         className="h-1.5 w-full min-w-10 overflow-hidden rounded-full bg-surface-muted"
       >
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-300"
+          className="accent-gradient h-full rounded-full transition-[width] duration-300"
           style={{ width: clamped + '%' }}
         />
       </div>
       {showLabel ? (
-        <span className="w-9 shrink-0 text-right text-xs tabular-nums text-ink-muted">{clamped}%</span>
+        <span className="tabular w-9 shrink-0 text-right text-xs text-ink-muted">{clamped}%</span>
       ) : null}
     </div>
   );
@@ -182,7 +210,7 @@ export function UserAvatar({
 export function LabelChip({ name, color }: { name: string; color: string }) {
   return (
     <span
-      className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium"
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
       style={{ backgroundColor: color + '22', color }}
     >
       {name}

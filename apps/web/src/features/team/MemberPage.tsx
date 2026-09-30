@@ -134,7 +134,7 @@ export function MemberPage() {
                   </Link>
                   <Link
                     to={'/tasks/' + task.key}
-                    className="min-w-40 flex-1 truncate text-sm hover:underline"
+                    className="min-w-0 flex-1 truncate text-sm hover:underline"
                   >
                     {task.title}
                   </Link>

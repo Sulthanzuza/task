@@ -37,7 +37,10 @@ function renderBlocks(text: string): ReactNode[] {
       }
       index += 1;
       blocks.push(
-        <pre key={key++} className="my-2 overflow-x-auto rounded-lg bg-surface-muted p-3 text-xs">
+        <pre
+          key={key++}
+          className="my-2 relative overflow-x-auto rounded-lg bg-surface-muted p-3 text-xs"
+        >
           <code>{body.join('\n')}</code>
         </pre>,
       );

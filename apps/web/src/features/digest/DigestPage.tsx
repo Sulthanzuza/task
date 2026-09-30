@@ -143,7 +143,7 @@ function LeadContent({ digest }: { digest: LeadDigest }) {
                 >
                   {item.key}
                 </Link>
-                <span className="min-w-40 flex-1 truncate text-sm">{item.title}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
                 <StatusBadge status={item.status} />
                 <span className="text-xs text-ink-muted">
                   {ATTENTION_REASON_LABELS[item.reason]} · {item.detail}

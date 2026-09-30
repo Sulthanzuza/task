@@ -23,6 +23,7 @@ import { HolidaysPage } from '@/features/admin/HolidaysPage';
 import { EmailPage } from '@/features/admin/EmailPage';
 import { ImportPage } from '@/features/admin/ImportPage';
 import { AuditPage } from '@/features/admin/AuditPage';
+import { DesignPage } from '@/features/design/DesignPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -182,6 +183,13 @@ export function AppRoutes() {
               </RequireLead>
             }
           />
+          {/*
+            The design system, for judging a palette change against all four
+            themes at once. import.meta.env.DEV is statically false in a
+            production build, so the page and its charts are tree-shaken out.
+          */}
+          {import.meta.env.DEV ? <Route path="/design" element={<DesignPage />} /> : null}
+
           <Route path="/settings" element={<Navigate to="/settings/notifications" replace />} />
 
           <Route path="/admin" element={<Navigate to="/admin/people" replace />} />

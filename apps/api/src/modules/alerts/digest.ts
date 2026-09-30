@@ -117,7 +117,7 @@ export async function buildDigest(userId: string, now: Date): Promise<Digest> {
   if (teamId && (leadsTeam || actor.role === 'SUPER_ADMIN')) {
     // The same calls the dashboard makes, with the same clock.
     const summary = await getSummary(actor, teamId, now);
-    const attention = await getAttention(actor, teamId, now, 10);
+    const { items: attention } = await getAttention(actor, teamId, now, 10);
 
     /*
      * The previous calendar day in the org time zone, not "the last 24 hours".

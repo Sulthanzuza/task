@@ -62,6 +62,7 @@ export function GradientBars({
   height = 200,
   valueFormat = (value: number) => String(value),
   onSelect,
+  partialLast,
 }: {
   data: Datum[];
   /** Index from which bars are "current" and take the accent gradient. */
@@ -70,8 +71,11 @@ export function GradientBars({
   height?: number;
   valueFormat?: (value: number) => string;
   onSelect?: (datum: Datum) => void;
+  /** The last bar is a week still running, so it is drawn as incomplete. */
+  partialLast?: boolean;
 }) {
   const gradientId = useId();
+  const hatchId = useId();
   const reduced = useReducedMotion();
   const from = highlightFrom ?? data.length;
 
@@ -88,19 +92,22 @@ export function GradientBars({
         <BarChart data={plotted} margin={{ top: 18, right: 4, left: -22, bottom: 0 }}>
           <defs>
             <AccentGradient id={gradientId} />
+            <HatchPattern id={hatchId} colour="var(--color-accent)" />
           </defs>
           <XAxis dataKey="label" {...AXIS} interval={0} minTickGap={2} />
           <YAxis {...AXIS} width={44} />
           <Tooltip
             cursor={{ fill: GRID_STROKE }}
-            content={({ active, payload, label }) =>
-              active && payload?.length ? (
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              const last = partialLast && String(label) === data[data.length - 1]?.label;
+              return (
                 <ChartTooltip
-                  title={String(label)}
+                  title={String(label) + (last ? ' — so far' : '')}
                   rows={[{ label: 'Value', value: valueFormat(Number(payload[0]?.value ?? 0)) }]}
                 />
-              ) : null
-            }
+              );
+            }}
           />
           <Bar
             dataKey="value"
@@ -112,8 +119,19 @@ export function GradientBars({
             {data.map((datum, index) => (
               <Cell
                 key={datum.label}
-                fill={index >= from ? 'url(#' + gradientId + ')' : 'var(--color-chart-8)'}
-                opacity={index >= from ? 1 : 0.55}
+                // The week still running is hatched, not solid: it is a count
+                // in progress, not a week that came out low.
+                fill={
+                  partialLast && index === data.length - 1
+                    ? 'url(#' + hatchId + ')'
+                    : index >= from
+                      ? 'url(#' + gradientId + ')'
+                      : 'var(--color-chart-muted)'
+                }
+                stroke={
+                  partialLast && index === data.length - 1 ? 'var(--color-accent)' : undefined
+                }
+                strokeWidth={partialLast && index === data.length - 1 ? 1 : 0}
               />
             ))}
             {/* Only the highlighted range is labelled; labelling all twelve is noise. */}
@@ -247,6 +265,12 @@ export function DonutLegend({
 // 3. Radar
 // ---------------------------------------------------------------------------
 
+/**
+ * Fewer than five points is not a radar.
+ *
+ * A three or four sided polygon says nothing a bar list does not say more
+ * plainly, and a four-point one is just a diamond whatever the numbers are.
+ */
 export function RadarShape({
   data,
   loading,
@@ -257,6 +281,10 @@ export function RadarShape({
   height?: number;
 }) {
   const reduced = useReducedMotion();
+
+  if (!loading && data.length > 0 && data.length < 5) {
+    return <BarList data={data} height={height} />;
+  }
 
   return (
     <ChartFrame
@@ -286,13 +314,42 @@ export function RadarShape({
           <Radar
             dataKey="value"
             stroke="var(--color-accent)"
+            strokeWidth={2}
             fill="var(--color-accent)"
-            fillOpacity={0.22}
+            fillOpacity={0.3}
             isAnimationActive={!reduced}
+            dot={{ r: 2.5, fill: 'var(--color-accent)', strokeWidth: 0 }}
           />
         </RadarChart>
       </ResponsiveContainer>
     </ChartFrame>
+  );
+}
+
+/** The horizontal fallback: label, bar, count. */
+export function BarList({ data, height }: { data: Datum[]; height?: number }) {
+  const highest = Math.max(1, ...data.map((datum) => datum.value));
+
+  return (
+    <div className="space-y-2.5 py-2" style={height ? { minHeight: height } : undefined}>
+      {data.map((datum, index) => (
+        <div key={datum.label} className="flex items-center gap-2 text-xs">
+          <span className="w-20 shrink-0 truncate text-ink-muted" title={datum.label}>
+            {datum.label}
+          </span>
+          <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-muted">
+            <span
+              className="block h-full rounded-full"
+              style={{
+                width: Math.round((datum.value / highest) * 100) + '%',
+                background: datum.colour ?? colourAt(index),
+              }}
+            />
+          </span>
+          <span className="tabular w-6 shrink-0 text-right font-medium">{datum.value}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -312,12 +369,15 @@ export function AreaTrend({
   seriesB,
   loading,
   height = 230,
+  partialLast,
 }: {
   data: SeriesPoint[];
   seriesA: { key: string; label: string };
   seriesB: { key: string; label: string };
   loading?: boolean;
   height?: number;
+  /** The last point is a week still running, so it is drawn as incomplete. */
+  partialLast?: boolean;
 }) {
   const reduced = useReducedMotion();
   const idA = useId();
@@ -325,6 +385,21 @@ export function AreaTrend({
 
   const [showA, setShowA] = useState(true);
   const [showB, setShowB] = useState(true);
+
+  /*
+   * The dashed tail is a second series holding only the final two points, so
+   * the solid line can stop short of the week that has not finished.
+   */
+  const plotted = data.map((point, index) => {
+    const tail = partialLast && index >= data.length - 2;
+    return {
+      ...point,
+      a: partialLast && index === data.length - 1 ? null : point.a,
+      b: partialLast && index === data.length - 1 ? null : point.b,
+      aTail: tail ? point.a : null,
+      bTail: tail ? point.b : null,
+    };
+  });
 
   return (
     <div>
@@ -345,7 +420,7 @@ export function AreaTrend({
 
       <ChartFrame loading={loading} empty={data.length === 0} height={height}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+          <AreaChart data={plotted} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
             <defs>
               <linearGradient id={idA} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
@@ -361,10 +436,12 @@ export function AreaTrend({
             <YAxis {...AXIS} width={44} />
             <Tooltip
               cursor={{ stroke: GRID_STROKE }}
-              content={({ active, payload, label }) =>
-                active && payload?.length ? (
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const last = partialLast && String(label) === data[data.length - 1]?.label;
+                return (
                   <ChartTooltip
-                    title={String(label)}
+                    title={String(label) + (last ? ' — so far' : '')}
                     rows={payload.map((entry) => ({
                       label: entry.dataKey === 'a' ? seriesA.label : seriesB.label,
                       value: Number(entry.value ?? 0),
@@ -372,8 +449,8 @@ export function AreaTrend({
                         entry.dataKey === 'a' ? 'var(--color-chart-1)' : 'var(--color-chart-4)',
                     }))}
                   />
-                ) : null
-              }
+                );
+              }}
             />
 
             {showA ? (
@@ -399,6 +476,38 @@ export function AreaTrend({
                 dot={{ r: 3, fill: 'var(--color-chart-4)', strokeWidth: 0 }}
                 activeDot={{ r: 5 }}
               />
+            ) : null}
+            {/*
+              The run into the last point is redrawn dashed: that week is still
+              going, and a solid line makes a partial count look like a drop.
+            */}
+            {partialLast && data.length >= 2 ? (
+              <>
+                {showA ? (
+                  <Line
+                    type="monotone"
+                    dataKey="aTail"
+                    stroke="var(--color-chart-1)"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ) : null}
+                {showB ? (
+                  <Line
+                    type="monotone"
+                    dataKey="bTail"
+                    stroke="var(--color-chart-4)"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ) : null}
+              </>
             ) : null}
           </AreaChart>
         </ResponsiveContainer>
@@ -638,18 +747,24 @@ export function RingGauge({
           stroke="var(--color-surface-muted)"
           strokeWidth={thickness}
         />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={'url(#' + gradientId + ')'}
-          strokeWidth={thickness}
-          strokeLinecap="round"
-          strokeDasharray={dash + ' ' + (circumference - dash)}
-          transform={'rotate(-90 ' + size / 2 + ' ' + size / 2 + ')'}
-          className={reduced ? undefined : 'transition-[stroke-dasharray] duration-700'}
-        />
+        {/*
+          Nothing is drawn at zero. A round cap on a zero-length arc renders as
+          a dot, which reads as a little bit of progress where there is none.
+        */}
+        {clamped > 0 ? (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={'url(#' + gradientId + ')'}
+            strokeWidth={thickness}
+            strokeLinecap="round"
+            strokeDasharray={dash + ' ' + (circumference - dash)}
+            transform={'rotate(-90 ' + size / 2 + ' ' + size / 2 + ')'}
+            className={reduced ? undefined : 'transition-[stroke-dasharray] duration-700'}
+          />
+        ) : null}
       </svg>
 
       <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -667,8 +782,12 @@ export function RingGauge({
 
 export interface HeatCell {
   value: number;
-  /** Greyed out and never shaded: a weekend or a holiday. */
+  /** Hatched, never shaded: a weekend or a holiday. */
   disabled?: boolean;
+  /** A warning outline: too much for one day, or due when nobody is working. */
+  over?: boolean;
+  /** Replaces the generated explanation, for "due on a holiday" and the like. */
+  note?: string;
   tooltip?: string[];
 }
 
@@ -682,7 +801,7 @@ export function Heatmap({
   rowHref,
 }: {
   rows: Array<{ id: string; label: string }>;
-  columns: Array<{ id: string; label: string; sublabel?: string }>;
+  columns: Array<{ id: string; label: string; sublabel?: string; title?: string }>;
   /** cells[rowId][columnId] */
   cells: Record<string, Record<string, HeatCell>>;
   loading?: boolean;
@@ -711,10 +830,15 @@ export function Heatmap({
               <span className="sr-only">Person</span>
             </th>
             {columns.map((column) => (
-              <th key={column.id} scope="col" className="px-0.5 text-center font-normal">
-                <span className="block text-[10px] text-ink-muted">{column.label}</span>
+              <th
+                key={column.id}
+                scope="col"
+                className="px-0.5 text-center font-normal"
+                title={column.title ?? undefined}
+              >
+                <span className="block text-[11px] text-ink-muted">{column.label}</span>
                 {column.sublabel ? (
-                  <span className="block text-[9px] text-ink-faint">{column.sublabel}</span>
+                  <span className="block text-[11px] text-ink-faint">{column.sublabel}</span>
                 ) : null}
               </th>
             ))}
@@ -723,7 +847,7 @@ export function Heatmap({
         <tbody>
           {rows.map((row) => (
             <tr key={row.id}>
-              <th scope="row" className="max-w-32 truncate pr-2 text-left font-normal">
+              <th scope="row" className="max-w-32 truncate pr-2 text-left text-[11px] font-normal">
                 {rowHref ? (
                   <a href={rowHref(row.id)} className="hover:text-accent hover:underline">
                     {row.label}
@@ -735,15 +859,15 @@ export function Heatmap({
               {columns.map((column) => {
                 const cell = cells[row.id]?.[column.id] ?? { value: 0 };
                 const intensity = cell.disabled ? 0 : Math.min(1, cell.value / highest);
-                const title = cell.disabled
-                  ? row.label + ' — ' + column.label + ': not a working day'
-                  : row.label +
-                    ' — ' +
-                    column.label +
-                    ': ' +
-                    cell.value +
-                    unit +
-                    (cell.tooltip?.length ? '\n' + cell.tooltip.join('\n') : '');
+                const title =
+                  row.label +
+                  ' — ' +
+                  column.label +
+                  ': ' +
+                  cell.value +
+                  unit +
+                  (cell.note ? ' — ' + cell.note : cell.over ? ' (more than a working day)' : '') +
+                  (cell.tooltip?.length ? '\n' + cell.tooltip.join('\n') : '');
 
                 return (
                   <td key={column.id} className="p-0">
@@ -752,12 +876,19 @@ export function Heatmap({
                       data-testid={'heat-' + row.id + '-' + column.id}
                       data-value={cell.value}
                       className={cn(
-                        'flex h-8 min-w-8 items-center justify-center rounded-md text-[10px] font-medium',
-                        cell.disabled && 'bg-surface-muted text-ink-faint opacity-50',
+                        'flex h-8 min-w-8 items-center justify-center rounded-md text-[11px] font-medium',
+                        // Hatched, so a day nobody works is obviously different
+                        // from a working day with nothing due on it.
+                        cell.disabled && 'text-ink-faint',
+                        cell.over && 'ring-1 ring-warning',
                       )}
                       style={
                         cell.disabled
-                          ? undefined
+                          ? {
+                              backgroundColor: 'var(--color-surface-muted)',
+                              backgroundImage:
+                                'repeating-linear-gradient(45deg, var(--color-border-strong) 0 1px, transparent 1px 5px)',
+                            }
                           : {
                               background:
                                 intensity === 0
@@ -770,7 +901,12 @@ export function Heatmap({
                             }
                       }
                     >
-                      {cell.disabled ? '' : cell.value > 0 ? cell.value : ''}
+                      {/*
+                        Hours show whatever the day. Work due on a Saturday is
+                        exactly what somebody needs to see, and hiding it left
+                        an outline drawn around nothing.
+                      */}
+                      {cell.value > 0 ? cell.value : ''}
                     </div>
                   </td>
                 );

@@ -1,6 +1,13 @@
 import { AlertTriangle, ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import type { BlockerType, TaskPriority, TaskStatus, UserSummary } from '@tm/shared';
-import { BLOCKER_TYPE_LABELS, PRIORITY_LABELS, STATUS_LABELS } from '@tm/shared';
+import {
+  BLOCKER_TYPE_LABELS,
+  PRIORITY_LABELS,
+  STATUS_LABELS,
+  priorityColor,
+  statusColor,
+  tintedPill,
+} from '@tm/shared';
 import { cn, formatDate, initials, todayIso } from '@/lib/utils';
 
 /**
@@ -12,44 +19,27 @@ import { cn, formatDate, initials, todayIso } from '@/lib/utils';
  * unprintable in black and white.
  */
 
-/** Status colours are their own tokens, tuned per theme to clear AA. */
-const STATUS_VAR: Record<TaskStatus, string> = {
-  BACKLOG: 'status-backlog',
-  ASSIGNED: 'status-assigned',
-  IN_PROGRESS: 'status-progress',
-  BLOCKED: 'status-blocked',
-  READY_FOR_REVIEW: 'status-review-ready',
-  IN_REVIEW: 'status-review',
-  CHANGES_REQUESTED: 'status-changes',
-  COMPLETED: 'status-completed',
-  CANCELLED: 'status-cancelled',
-};
-
+/**
+ * One pill treatment, everywhere.
+ *
+ * The colour and the tint both come from the shared map, so a status looks
+ * like the same kind of thing in every theme and on every screen, rather than
+ * some getting a background and others none.
+ */
 export function StatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
-  const colour = 'var(--color-' + STATUS_VAR[status] + ')';
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap',
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap',
         className,
       )}
-      style={{
-        color: colour,
-        backgroundColor: 'color-mix(in srgb, ' + colour + ' 16%, transparent)',
-      }}
+      style={tintedPill(statusColor(status))}
     >
       <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
       {STATUS_LABELS[status]}
     </span>
   );
 }
-
-const PRIORITY_VAR: Record<TaskPriority, string> = {
-  LOW: 'priority-low',
-  MEDIUM: 'priority-medium',
-  HIGH: 'priority-high',
-  URGENT: 'priority-urgent',
-};
 
 /** An arrow as well as a colour, so the ranking survives a greyscale print. */
 const PRIORITY_ICON: Record<TaskPriority, typeof ArrowUp> = {
@@ -59,12 +49,32 @@ const PRIORITY_ICON: Record<TaskPriority, typeof ArrowUp> = {
   URGENT: AlertTriangle,
 };
 
+/**
+ * The priority icon on its own, for rows too tight for the whole badge.
+ *
+ * Shares PRIORITY_ICON with the badge, so the arrow that means "urgent" in a
+ * list means the same thing everywhere. It is labelled, because on its own the
+ * icon is the only carrier of the meaning.
+ */
+export function PriorityIcon({ priority, size = 13 }: { priority: TaskPriority; size?: number }) {
+  const Icon = PRIORITY_ICON[priority];
+  return (
+    <Icon
+      size={size}
+      role="img"
+      aria-label={PRIORITY_LABELS[priority] + ' priority'}
+      style={{ color: priorityColor(priority) }}
+      className="shrink-0"
+    />
+  );
+}
+
 export function PriorityBadge({ priority }: { priority: TaskPriority }) {
   const Icon = PRIORITY_ICON[priority];
   return (
     <span
       className="inline-flex items-center gap-1 text-xs font-medium"
-      style={{ color: 'var(--color-' + PRIORITY_VAR[priority] + ')' }}
+      style={{ color: priorityColor(priority) }}
     >
       <Icon size={12} aria-hidden />
       {PRIORITY_LABELS[priority]}

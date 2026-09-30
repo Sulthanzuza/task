@@ -31,17 +31,28 @@ export function relativeTime(iso: string | null | undefined, now = new Date()): 
     }
     value /= size;
   }
-  return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(Math.round(value), 'year');
+  return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(
+    Math.round(value),
+    'year',
+  );
 }
 
 /** A date the way a person writes it: 28 Sep 2026. */
+/**
+ * The year appears only when it is not this one.
+ *
+ * Nearly every date on these screens is within a few weeks, and "2026" on all
+ * of them is noise that pushes the useful part of the row out of view.
+ */
 export function formatDate(date: string | null | undefined): string {
   if (!date) return '—';
   const parsed = new Date(date.length === 10 ? date + 'T00:00:00' : date);
+  const thisYear = parsed.getFullYear() === new Date().getFullYear();
+
   return new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     month: 'short',
-    year: 'numeric',
+    ...(thisYear ? {} : { year: 'numeric' }),
   }).format(parsed);
 }
 

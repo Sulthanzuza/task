@@ -74,7 +74,7 @@ const MORE: MoreItem[] = [
 
 const pillClass = (isActive: boolean) =>
   cn(
-    'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm whitespace-nowrap transition-all',
+    'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1.5 text-[13px] whitespace-nowrap transition-all',
     isActive
       ? 'accent-gradient font-medium text-[var(--color-accent-ink)] shadow-[0_6px_16px_-8px_var(--color-accent)]'
       : 'text-ink-muted hover:bg-surface-muted hover:text-ink',
@@ -103,8 +103,8 @@ export function Layout() {
             <span className="accent-gradient flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-accent-ink)]">
               <Shield size={16} aria-hidden />
             </span>
-            {/* The mark alone below 1280: the navigation needs the room. */}
-            <span className="hidden text-sm font-semibold tracking-tight min-[1280px]:block">
+            {/* The mark alone below 1366: the navigation needs the room. */}
+            <span className="hidden text-sm font-semibold tracking-tight min-[1366px]:block">
               Task Manager
             </span>
           </NavLink>
@@ -309,7 +309,8 @@ function MoreMenu({ items }: { items: MoreItem[] }) {
         className={pillClass(false)}
       >
         <Settings size={14} aria-hidden />
-        More
+        {/* The word is the first thing to go when the bar is tight. */}
+        <span className="hidden min-[1200px]:inline">More</span>
         <ChevronDown size={13} aria-hidden />
       </button>
 

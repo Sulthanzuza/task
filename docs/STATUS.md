@@ -79,6 +79,10 @@ None of these is blocking. Each is a real gap, checked against the code today.
 - **Thumbnail batching.** `Attachments.tsx` fetches each image separately so the
   access check applies to the bytes. Fine for a handful; a task with twenty images
   makes twenty requests.
+- **The dashboard team table needs a load % column, which arrives with Prompt 14.**
+  It briefly had a "Share of open work" bar, but that drew the Active count a second
+  time and said nothing new, so it was removed. What belongs there is how full each
+  person's week is, and that needs the capacity-aware workload service.
 
 Also worth knowing: a super admin on no team now gets a member digest rather than an
 error, and `buildDigest` no longer throws for them.
@@ -93,8 +97,14 @@ docker compose up -d          # Postgres 5433, Mailpit 1025 + UI 8025, MinIO 900
 pnpm install
 pnpm db:migrate               # after pulling new migrations
 pnpm db:seed                  # 7 users, password Password123!
+pnpm db:seed --demo           # adds 12 weeks of history: use this to look at the charts
 pnpm dev                      # API on 4000, web on 5174 (strict port)
 ```
+
+`--demo` adds about 180 generated tasks on top of the ordinary seed, from a fixed random
+seed and dated relative to now, so the dashboard is populated and two runs produce the
+same database. It is idempotent, it refuses production, and the end-to-end suite never
+uses it: those tests count the rows the ordinary seed creates.
 
 Verification, in the order worth running it:
 

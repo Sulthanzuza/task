@@ -16,7 +16,14 @@
  *     every badge carries text or an icon as well.
  */
 
-@theme {
+/*
+ * `static` matters. By default Tailwind emits a theme variable only where it
+ * can see a utility class using it, and these tokens are read through var()
+ * in inline styles and SVG attributes instead. Without it, most of the status
+ * colours were pruned out of the midnight defaults and resolved to nothing,
+ * so only the two that happened to survive were ever painted.
+ */
+@theme static {
   /* Surfaces. Defaults are midnight; the [data-theme] blocks below restate them. */
   --color-canvas: #071428;
   --color-canvas-tint: #0a1b33;
@@ -28,11 +35,18 @@
 
   --color-ink: #e6f1ff;
   --color-ink-muted: #7c93b5;
-  --color-ink-faint: #5b7095;
+  --color-ink-faint: #778aac;
 
   /* Accent: cyan to teal, with a slate blue behind it. */
   --color-accent: #22d3ee;
   --color-accent-2: #14b8a6;
+  /*
+   * The gradient endpoints are separate from the text accent. In violet the
+   * brand magenta is too dark to read as text on the card, but it is exactly
+   * right as a fill behind white, so the two must be free to differ.
+   */
+  --color-accent-from: #22d3ee;
+  --color-accent-to: #14b8a6;
   --color-accent-hover: #38dcf2;
   --color-accent-soft: rgba(34, 211, 238, 0.14);
   --color-accent-ink: #04121a;
@@ -53,13 +67,13 @@
   /* Status, one per workflow state. */
   --color-status-backlog: #93a9c9;
   --color-status-assigned: #60a5fa;
-  --color-status-progress: #22d3ee;
-  --color-status-blocked: #fb7185;
+  --color-status-progress: #2dd4bf;
+  --color-status-blocked: #f87171;
   --color-status-review-ready: #fbbf24;
-  --color-status-review: #f59e0b;
-  --color-status-changes: #fb923c;
+  --color-status-review: #a78bfa;
+  --color-status-changes: #f472b6;
   --color-status-completed: #34d399;
-  --color-status-cancelled: #6b7f9e;
+  --color-status-cancelled: #778aa6;
 
   /* Priority. */
   --color-priority-low: #7c93b5;
@@ -76,16 +90,21 @@
   --color-chart-6: #fb7185;
   --color-chart-7: #34d399;
   --color-chart-8: #3e5c8f;
-  --color-chart-grid: rgba(120, 200, 255, 0.1);
+  --color-chart-grid: rgba(120, 200, 255, 0.18);
   --color-chart-axis: #5b7095;
+  /* Bars outside the highlighted period: quiet, but still clearly a bar. */
+  --color-chart-muted: #3c5580;
 
   /* The hero card is dark in every theme, so these never change. */
   --color-hero-from: #0a1f3d;
   --color-hero-to: #071428;
   --color-hero-glow: rgba(34, 211, 238, 0.28);
   --color-hero-ink: #e6f1ff;
-  --color-hero-ink-muted: #8fa8ca;
+  --color-hero-ink-muted: #9db4d2;
   --color-hero-border: rgba(120, 200, 255, 0.18);
+  /* The accent used on the hero, which is always a dark surface. */
+  --color-hero-accent: #22d3ee;
+  --color-hero-accent-2: #14b8a6;
 
   --radius-card: 1.5rem;
   --radius-input: 0.75rem;
@@ -121,7 +140,7 @@
 
   --color-ink: #1b2a44;
   --color-ink-muted: #4a5b78;
-  --color-ink-faint: #64748b;
+  --color-ink-faint: #5e6d82;
 
   /* Darkened so cyan on a pale card still clears AA for text. */
   --color-accent: #0e7490;
@@ -134,8 +153,8 @@
 
   --color-danger: #be123c;
   --color-danger-soft: rgba(190, 18, 60, 0.1);
-  --color-warning: #a16207;
-  --color-warning-soft: rgba(161, 98, 7, 0.12);
+  --color-warning: #af5109;
+  --color-warning-soft: rgba(251, 191, 36, 0.24);
   --color-success: #047857;
   --color-success-soft: rgba(4, 120, 87, 0.12);
   --color-info: #1d4ed8;
@@ -144,17 +163,17 @@
 
   --color-status-backlog: #55647f;
   --color-status-assigned: #1d4ed8;
-  --color-status-progress: #0e7490;
-  --color-status-blocked: #be123c;
-  --color-status-review-ready: #a16207;
-  --color-status-review: #92400e;
-  --color-status-changes: #c2410c;
+  --color-status-progress: #0f766e;
+  --color-status-blocked: #b91c1c;
+  --color-status-review-ready: #af5109;
+  --color-status-review: #6d28d9;
+  --color-status-changes: #a21caf;
   --color-status-completed: #047857;
-  --color-status-cancelled: #64748b;
+  --color-status-cancelled: #5e6d82;
 
-  --color-priority-low: #64748b;
+  --color-priority-low: #5e6d82;
   --color-priority-medium: #1d4ed8;
-  --color-priority-high: #a16207;
+  --color-priority-high: #af5109;
   --color-priority-urgent: #be123c;
 
   --color-chart-1: #0e7490;
@@ -165,8 +184,9 @@
   --color-chart-6: #be123c;
   --color-chart-7: #047857;
   --color-chart-8: #3e5c8f;
-  --color-chart-grid: rgba(27, 42, 68, 0.1);
+  --color-chart-grid: rgba(27, 42, 68, 0.12);
   --color-chart-axis: #4a5b78;
+  --color-chart-muted: #b6c2d4;
 
   --shadow-card: 0 1px 2px rgba(16, 28, 48, 0.08), 0 10px 26px -14px rgba(16, 28, 48, 0.4);
   --shadow-lift: 0 2px 6px rgba(16, 28, 48, 0.12), 0 20px 42px -18px rgba(16, 28, 48, 0.45);
@@ -188,7 +208,7 @@
 
   --color-ink: #16213a;
   --color-ink-muted: #4b5a77;
-  --color-ink-faint: #6b7a96;
+  --color-ink-faint: #62708a;
 
   --color-accent: #0e7490;
   --color-accent-2: #0f766e;
@@ -200,8 +220,8 @@
 
   --color-danger: #be123c;
   --color-danger-soft: rgba(190, 18, 60, 0.09);
-  --color-warning: #a16207;
-  --color-warning-soft: rgba(161, 98, 7, 0.11);
+  --color-warning: #af5109;
+  --color-warning-soft: rgba(251, 191, 36, 0.22);
   --color-success: #047857;
   --color-success-soft: rgba(4, 120, 87, 0.11);
   --color-info: #1d4ed8;
@@ -210,17 +230,17 @@
 
   --color-status-backlog: #55647f;
   --color-status-assigned: #1d4ed8;
-  --color-status-progress: #0e7490;
-  --color-status-blocked: #be123c;
-  --color-status-review-ready: #a16207;
-  --color-status-review: #92400e;
-  --color-status-changes: #c2410c;
+  --color-status-progress: #0f766e;
+  --color-status-blocked: #b91c1c;
+  --color-status-review-ready: #af5109;
+  --color-status-review: #6d28d9;
+  --color-status-changes: #a21caf;
   --color-status-completed: #047857;
-  --color-status-cancelled: #6b7a96;
+  --color-status-cancelled: #62708a;
 
-  --color-priority-low: #6b7a96;
+  --color-priority-low: #62708a;
   --color-priority-medium: #1d4ed8;
-  --color-priority-high: #a16207;
+  --color-priority-high: #af5109;
   --color-priority-urgent: #be123c;
 
   --color-chart-1: #0e7490;
@@ -231,8 +251,9 @@
   --color-chart-6: #be123c;
   --color-chart-7: #047857;
   --color-chart-8: #3e5c8f;
-  --color-chart-grid: rgba(22, 33, 58, 0.08);
+  --color-chart-grid: rgba(22, 33, 58, 0.1);
   --color-chart-axis: #4b5a77;
+  --color-chart-muted: #c3cbd9;
 
   /* The soft layered shadow the light reference leans on. */
   --shadow-card:
@@ -259,11 +280,14 @@
 
   --color-ink: #f4effa;
   --color-ink-muted: #a294b8;
-  --color-ink-faint: #7d6f93;
+  --color-ink-faint: #887b9c;
 
-  --color-accent: #c026d3;
-  --color-accent-2: #7c3aed;
-  --color-accent-hover: #d946ef;
+  /* Lightened from the brand #c026d3, which reads at only 3.9:1 here. */
+  --color-accent: #d946ef;
+  --color-accent-2: #a855f7;
+  --color-accent-from: #c026d3;
+  --color-accent-to: #7c3aed;
+  --color-accent-hover: #e879f9;
   --color-accent-soft: rgba(192, 38, 211, 0.16);
   --color-accent-ink: #ffffff;
   --color-secondary: #7c3aed;
@@ -280,14 +304,14 @@
   --color-neutral-soft: rgba(162, 148, 184, 0.14);
 
   --color-status-backlog: #a294b8;
-  --color-status-assigned: #a78bfa;
-  --color-status-progress: #d946ef;
-  --color-status-blocked: #fb7185;
+  --color-status-assigned: #818cf8;
+  --color-status-progress: #2dd4bf;
+  --color-status-blocked: #f87171;
   --color-status-review-ready: #fbbf24;
-  --color-status-review: #f59e0b;
-  --color-status-changes: #fb923c;
+  --color-status-review: #38bdf8;
+  --color-status-changes: #f472b6;
   --color-status-completed: #34d399;
-  --color-status-cancelled: #7d6f93;
+  --color-status-cancelled: #887b9c;
 
   --color-priority-low: #a294b8;
   --color-priority-medium: #a78bfa;
@@ -302,14 +326,17 @@
   --color-chart-6: #fb7185;
   --color-chart-7: #34d399;
   --color-chart-8: #6366f1;
-  --color-chart-grid: rgba(192, 38, 211, 0.1);
+  --color-chart-grid: rgba(192, 38, 211, 0.18);
   --color-chart-axis: #7d6f93;
+  --color-chart-muted: #4a3f63;
 
   /* The hero borrows the violet gradient here rather than the cyan one. */
   --color-hero-from: #1b1328;
   --color-hero-to: #0a0910;
   --color-hero-glow: rgba(192, 38, 211, 0.3);
   --color-hero-border: rgba(192, 38, 211, 0.22);
+  --color-hero-accent: #e879f9;
+  --color-hero-accent-2: #a855f7;
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(192, 38, 211, 0.3);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.45), 0 22px 46px -18px rgba(192, 38, 211, 0.4);
@@ -354,23 +381,41 @@
 @layer utilities {
   /* The accent gradient, used on active pills, bars and rings. */
   .accent-gradient {
-    background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    background-image: linear-gradient(135deg, var(--color-accent-from), var(--color-accent-to));
   }
 
   .accent-text-gradient {
-    background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    background-image: linear-gradient(135deg, var(--color-accent-from), var(--color-accent-to));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 
-  /* The hero surface: dark in every theme, with a glow in one corner. */
+  /*
+   * The hero surface: dark in every theme, with a glow in one corner.
+   *
+   * Because it stays dark while the page around it may not, it carries its own
+   * ink and accent. Without this the light themes put their dark text and dark
+   * teal accent on navy, which is close to unreadable.
+   */
   .hero-surface {
     background-color: var(--color-hero-to);
     background-image:
       radial-gradient(420px 220px at 85% -10%, var(--color-hero-glow) 0%, transparent 70%),
       linear-gradient(160deg, var(--color-hero-from) 0%, var(--color-hero-to) 100%);
     border: 1px solid var(--color-hero-border);
+
+    --color-ink: var(--color-hero-ink);
+    --color-ink-muted: var(--color-hero-ink-muted);
+    --color-ink-faint: var(--color-hero-ink-muted);
+    --color-surface-muted: rgba(255, 255, 255, 0.1);
+    --color-accent: var(--color-hero-accent);
+    --color-accent-2: var(--color-hero-accent-2);
+    --color-accent-from: var(--color-hero-accent);
+    --color-accent-to: var(--color-hero-accent-2);
+    --color-success: #34d399;
+    --color-danger: #fb7185;
+
     color: var(--color-hero-ink);
   }
 

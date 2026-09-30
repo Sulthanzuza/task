@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { dashboardQuerySchema, idParamSchema } from '@tm/shared';
+import { dashboardChartsQuerySchema, dashboardQuerySchema, idParamSchema } from '@tm/shared';
+import type { DashboardChartsQuery } from '@tm/shared';
 import { authenticate, requireActor } from '../../middleware/authenticate';
 import { handler, validate } from '../../middleware/validate';
 import * as service from './service';
+import { getCharts } from './charts';
 
 export const dashboardRouter: Router = Router();
 
@@ -15,6 +17,21 @@ dashboardRouter.get(
   handler(async (req, res) => {
     const { teamId } = req.query as { teamId?: string };
     res.json(await service.getSummary(requireActor(req), teamId));
+  }),
+);
+
+/**
+ * Everything the charts need, in one round trip.
+ *
+ * Six separate calls would show six different moments and the numbers would
+ * disagree with each other on screen.
+ */
+dashboardRouter.get(
+  '/charts',
+  validate({ query: dashboardChartsQuerySchema }),
+  handler(async (req, res) => {
+    const { teamId, period } = req.query as unknown as DashboardChartsQuery;
+    res.json(await getCharts(requireActor(req), teamId, period));
   }),
 );
 
@@ -36,7 +53,7 @@ dashboardRouter.get(
   }),
   handler(async (req, res) => {
     const { teamId, limit } = req.query as unknown as { teamId?: string; limit: number };
-    res.json({ items: await service.getAttention(requireActor(req), teamId, new Date(), limit) });
+    res.json(await service.getAttention(requireActor(req), teamId, new Date(), limit));
   }),
 );
 

@@ -43,16 +43,14 @@ test('a lead lands on the dashboard and every KPI matches the API', async ({
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Team dashboard' })).toBeVisible();
 
-  const kpiRegion = page.getByRole('region', { name: 'Key numbers' });
-
+  /*
+   * Found by accessible name anywhere on the page. Two of the eight live on
+   * the hero rather than in the strip, and which card carries a figure is a
+   * layout decision this test should not be pinned to.
+   */
   for (const kpi of KPIS) {
-    const card = kpiRegion.getByRole('link').filter({
-      has: page.getByText(kpi.label, { exact: true }),
-    });
-    await expect(card, kpi.label + ' card is missing').toBeVisible();
-    await expect(card, kpi.label + ' disagrees with the API').toContainText(
-      String(summary[kpi.field]),
-    );
+    const link = page.getByRole('link', { name: kpi.label + ': ' + summary[kpi.field] });
+    await expect(link, kpi.label + ' is missing, or disagrees with the API').toBeVisible();
   }
 
   expect(problems.all()).toEqual([]);
@@ -69,18 +67,17 @@ test('each KPI card opens the task list filtered to match, and the count agrees'
 
   for (const kpi of KPIS) {
     await page.goto('/dashboard');
-    await page
-      .getByRole('region', { name: 'Key numbers' })
-      .getByRole('link')
-      .filter({ has: page.getByText(kpi.label, { exact: true }) })
-      .click();
+    // By accessible name, wherever the figure happens to be shown.
+    await page.getByRole('link', { name: kpi.label + ': ' + summary[kpi.field] }).click();
 
     await expect(page).toHaveURL(/\/tasks\?/);
 
     // The link must carry the filter the card promises.
     const url = new URL(page.url());
     for (const [key, value] of Object.entries(kpi.query)) {
-      expect(url.searchParams.get(key), kpi.label + ' is missing the ' + key + ' filter').toBe(value);
+      expect(url.searchParams.get(key), kpi.label + ' is missing the ' + key + ' filter').toBe(
+        value,
+      );
     }
 
     const expected = summary[kpi.field];
@@ -98,4 +95,56 @@ test('each KPI card opens the task list filtered to match, and the count agrees'
       }
     }
   }
+});
+
+test('the hero figures are the same numbers the summary reports', async ({
+  page,
+  api,
+  problems,
+}) => {
+  const client = await apiAs(api, USERS.lead);
+  const summary = await client.get<DashboardSummary>('/dashboard/summary');
+
+  await signIn(page, USERS.lead);
+  await expect(page).toHaveURL(/\/dashboard$/);
+
+  // The hero carries both of the figures the strip no longer repeats.
+  await expect(page.getByRole('link', { name: 'Active: ' + summary.active })).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Done this week: ' + summary.completedThisWeek }),
+  ).toBeVisible();
+
+  // And says what it is comparing, rather than a bare arrow.
+  await expect(page.getByText(/vs same time last week/)).toBeVisible();
+
+  expect(problems.all()).toEqual([]);
+});
+
+test('the due-load heatmap lists the tasks behind a cell', async ({ page, api, problems }) => {
+  const lead = await apiAs(api, USERS.lead);
+  const charts = await lead.get<{
+    dueLoad: {
+      cells: Array<{ userId: string; date: string; hours: number; tasks: Array<{ key: string }> }>;
+    };
+  }>('/dashboard/charts');
+
+  const cell = charts.dueLoad.cells.find((entry) => entry.tasks.length > 0);
+  test.skip(!cell, 'no work is due in the next ten days in this seed');
+
+  await signIn(page, USERS.lead);
+  await page.goto('/dashboard');
+
+  const target = page.getByTestId('heat-' + cell?.userId + '-' + cell?.date);
+  await expect(target).toBeVisible();
+
+  // The tooltip names every task the API counted into that cell.
+  const title = await target.getAttribute('title');
+  for (const task of cell?.tasks ?? []) {
+    expect(title, 'the tooltip must name ' + task.key).toContain(task.key);
+  }
+
+  // And the number shown is the hours the API reported.
+  await expect(target).toHaveAttribute('data-value', String(cell?.hours));
+
+  expect(problems.all()).toEqual([]);
 });

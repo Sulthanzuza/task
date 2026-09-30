@@ -182,3 +182,34 @@ test('the login screen is captured too', async ({ page, problems }) => {
 
   expect(problems.all()).toEqual([]);
 });
+
+test('the top bar fits without clipping at every desktop width', async ({ page }) => {
+  await signIn(page, USERS.lead);
+
+  for (const width of [1280, 1366, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/dashboard');
+    await expect(page.getByRole('main').getByText('Team dashboard').first()).toBeVisible();
+    await settle(page);
+
+    await expectNoHorizontalScroll(page, 'the dashboard at ' + width + 'px');
+
+    /*
+     * Nothing in the bar may be cut off. A navigation item whose text is
+     * wider than the box it sits in has lost a word, and "Mor" is not a
+     * destination anybody recognises.
+     */
+    const clipped = await page.evaluate(() => {
+      const bar = document.querySelector('header');
+      if (!bar) return [];
+      return Array.from(bar.querySelectorAll<HTMLElement>('a, button'))
+        .filter((el) => el.offsetParent !== null && el.scrollWidth > el.clientWidth + 1)
+        .map(
+          (el) =>
+            (el.textContent ?? '').trim() + ' (' + el.scrollWidth + ' > ' + el.clientWidth + ')',
+        );
+    });
+
+    expect(clipped, 'clipped controls in the top bar at ' + width + 'px').toEqual([]);
+  }
+});

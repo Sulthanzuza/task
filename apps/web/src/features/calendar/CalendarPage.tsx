@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import type { TaskPriority, TaskSummary } from '@tm/shared';
-import { PRIORITY_LABELS } from '@tm/shared';
+import type { TaskSummary } from '@tm/shared';
+import { priorityColor, tintedPill, PRIORITY_LABELS } from '@tm/shared';
 import { useTaskList } from '@/features/tasks/api';
 import { useProjects, useUsers } from '@/features/team/api';
 import { useDashboardSummary } from '@/features/dashboard/api';
@@ -20,13 +20,6 @@ import { cn } from '@/lib/utils';
  */
 
 type ViewMode = 'month' | 'week';
-
-const PRIORITY_TONE: Record<TaskPriority, string> = {
-  LOW: 'bg-neutral-soft text-ink-muted',
-  MEDIUM: 'bg-info-soft text-info',
-  HIGH: 'bg-warning-soft text-warning',
-  URGENT: 'bg-danger-soft text-danger',
-};
 
 /** Plain calendar arithmetic on YYYY-MM-DD strings; no time zone involved. */
 function addDays(date: string, days: number): string {
@@ -112,7 +105,12 @@ export function CalendarPage() {
 
   function shift(direction: -1 | 1) {
     if (!anchor) return;
-    setParam('date', view === 'week' ? addDays(anchor, direction * 7) : addDays(startOfMonth(anchor), direction * 32).slice(0, 8) + '01');
+    setParam(
+      'date',
+      view === 'week'
+        ? addDays(anchor, direction * 7)
+        : addDays(startOfMonth(anchor), direction * 32).slice(0, 8) + '01',
+    );
   }
 
   if (!range || !today) {
@@ -136,7 +134,9 @@ export function CalendarPage() {
           <Button variant="ghost" size="icon" aria-label="Previous" onClick={() => shift(-1)}>
             <ChevronLeft size={16} />
           </Button>
-          <span className="min-w-36 text-center text-sm font-medium">{monthLabel(anchor ?? today)}</span>
+          <span className="min-w-36 text-center text-sm font-medium">
+            {monthLabel(anchor ?? today)}
+          </span>
           <Button variant="ghost" size="icon" aria-label="Next" onClick={() => shift(1)}>
             <ChevronRight size={16} />
           </Button>
@@ -236,11 +236,13 @@ export function CalendarPage() {
                       key={task.id}
                       to={'/tasks/' + task.key}
                       data-task-key={task.key}
-                      title={task.key + ' ' + task.title + ' (' + PRIORITY_LABELS[task.priority] + ')'}
-                      className={cn(
-                        'block truncate rounded px-1.5 py-0.5 text-[11px] hover:underline',
-                        PRIORITY_TONE[task.priority],
-                      )}
+                      title={
+                        task.key + ' ' + task.title + ' (' + PRIORITY_LABELS[task.priority] + ')'
+                      }
+                      // Coloured by priority from the shared map, so a chip
+                      // here means the same as a badge anywhere else.
+                      style={tintedPill(priorityColor(task.priority))}
+                      className="block truncate rounded-full border px-2 py-0.5 text-[11px] hover:underline"
                     >
                       {task.key} {task.title}
                     </Link>

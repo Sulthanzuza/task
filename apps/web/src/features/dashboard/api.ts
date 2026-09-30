@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
   AttentionItem,
+  DashboardCharts,
+  DashboardPeriod,
   DashboardSummary,
   MemberActivityEntry,
   MemberRow,
@@ -18,6 +20,25 @@ export function useDashboardSummary(teamId: string | undefined, enabled = true) 
   });
 }
 
+/**
+ * Every chart on the dashboard, in one request.
+ *
+ * Six separate calls would each see a slightly different moment, and the
+ * figures would then disagree with each other on the same screen.
+ */
+export function useDashboardCharts(
+  teamId: string | undefined,
+  period: DashboardPeriod,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.dashboard.charts(teamId, period),
+    queryFn: ({ signal }) =>
+      api.get<DashboardCharts>('/dashboard/charts' + toQuery({ teamId, period }), signal),
+    enabled,
+  });
+}
+
 export function useDashboardMembers(teamId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.dashboard.members(teamId),
@@ -31,8 +52,8 @@ export function useAttention(teamId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.dashboard.attention(teamId),
     queryFn: ({ signal }) =>
-      api.get<{ items: AttentionItem[] }>(
-        '/dashboard/attention' + toQuery({ teamId, limit: 10 }),
+      api.get<{ items: AttentionItem[]; total: number }>(
+        '/dashboard/attention' + toQuery({ teamId, limit: 8 }),
         signal,
       ),
     enabled,

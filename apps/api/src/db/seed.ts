@@ -108,7 +108,11 @@ async function seedUsers(): Promise<Map<string, string>> {
 async function seedTeam(userIds: Map<string, string>): Promise<string> {
   const leadId = userIds.get('sulthan@example.com');
 
-  const existing = await db.select().from(teams).where(eq(teams.name, 'Product Engineering')).limit(1);
+  const existing = await db
+    .select()
+    .from(teams)
+    .where(eq(teams.name, 'Product Engineering'))
+    .limit(1);
   let teamId = existing[0]?.id;
 
   if (!teamId) {
@@ -118,7 +122,10 @@ async function seedTeam(userIds: Map<string, string>): Promise<string> {
       .returning({ id: teams.id });
     teamId = created?.id;
   } else {
-    await db.update(teams).set({ leadId: leadId ?? null }).where(eq(teams.id, teamId));
+    await db
+      .update(teams)
+      .set({ leadId: leadId ?? null })
+      .where(eq(teams.id, teamId));
   }
 
   if (!teamId) throw new Error('Could not create the team');
@@ -219,7 +226,10 @@ async function seedSecondTeam(
         .returning({ id: tasks.id });
 
       if (task) {
-        await db.insert(taskWatchers).values({ taskId: task.id, userId: leadId }).onConflictDoNothing();
+        await db
+          .insert(taskWatchers)
+          .values({ taskId: task.id, userId: leadId })
+          .onConflictDoNothing();
         await db.insert(taskActivity).values({
           taskId: task.id,
           actorId: leadId,
@@ -263,12 +273,20 @@ async function seedLabels(projectIds: Map<string, string>): Promise<Map<string, 
     { name: 'tech-debt', color: '#7c3aed', projectId: null },
     { name: 'invoicing', color: '#059669', projectId: erp ?? null },
   ]) {
-    const [row] = await db.insert(labels).values(label).onConflictDoNothing().returning({ id: labels.id });
+    const [row] = await db
+      .insert(labels)
+      .values(label)
+      .onConflictDoNothing()
+      .returning({ id: labels.id });
 
     if (row) {
       ids.set(label.name, row.id);
     } else {
-      const [existing] = await db.select({ id: labels.id }).from(labels).where(eq(labels.name, label.name)).limit(1);
+      const [existing] = await db
+        .select({ id: labels.id })
+        .from(labels)
+        .where(eq(labels.name, label.name))
+        .limit(1);
       if (existing) ids.set(label.name, existing.id);
     }
   }
@@ -302,27 +320,266 @@ const SULTHAN = 'sulthan@example.com';
 
 /** Spread across every status, with overdue, due-today, blocked and in-review examples. */
 const SEED_TASKS: SeedTask[] = [
-  { project: 'ERP', title: 'Fix invoice rounding on multi-currency orders', status: 'IN_PROGRESS', priority: 'URGENT', assignee: RAHUL, reviewer: SULTHAN, progress: 45, dueOffset: -3, estimatedHours: 8, lastActivityHoursAgo: 2, labels: ['bug', 'invoicing'] },
-  { project: 'ERP', title: 'Add UAE VAT breakdown to the invoice PDF', status: 'IN_PROGRESS', priority: 'HIGH', assignee: RAHUL, reviewer: SULTHAN, progress: 20, dueOffset: 0, estimatedHours: 6, lastActivityHoursAgo: 40, labels: ['feature', 'invoicing'] },
-  { project: 'ERP', title: 'Stock ledger reconciliation job', status: 'BLOCKED', priority: 'HIGH', assignee: ARUN, reviewer: SULTHAN, progress: 30, dueOffset: -1, estimatedHours: 12, lastActivityHoursAgo: 30, blockedReason: 'Waiting on the warehouse team to confirm the opening balances', blockerType: 'WAITING_ON_PERSON', blockedHoursAgo: 30 },
-  { project: 'ERP', title: 'Purchase order approval workflow', status: 'READY_FOR_REVIEW', priority: 'MEDIUM', assignee: ARUN, reviewer: SULTHAN, progress: 95, dueOffset: 2, estimatedHours: 16, lastActivityHoursAgo: 26 },
-  { project: 'ERP', title: 'Migrate reports to the new query layer', status: 'IN_REVIEW', priority: 'MEDIUM', assignee: FAISAL, reviewer: RAHUL, progress: 90, dueOffset: 1, estimatedHours: 20, lastActivityHoursAgo: 5, labels: ['tech-debt'] },
-  { project: 'ERP', title: 'Credit note cancellation leaves orphan rows', status: 'CHANGES_REQUESTED', priority: 'HIGH', assignee: FAISAL, reviewer: SULTHAN, progress: 70, dueOffset: -2, estimatedHours: 5, lastActivityHoursAgo: 8, labels: ['bug'] },
-  { project: 'ERP', title: 'Bulk import for supplier master data', status: 'ASSIGNED', priority: 'LOW', assignee: AKHIL, reviewer: null, progress: 0, dueOffset: 5, estimatedHours: 10, lastActivityHoursAgo: 12 },
-  { project: 'ERP', title: 'Retire the legacy tax table', status: 'BACKLOG', priority: 'LOW', assignee: null, reviewer: null, progress: 0, dueOffset: null, estimatedHours: null, lastActivityHoursAgo: 72, labels: ['tech-debt'] },
-  { project: 'ERP', title: 'Warehouse barcode scanning screen', status: 'COMPLETED', priority: 'MEDIUM', assignee: RAHUL, reviewer: SULTHAN, progress: 100, dueOffset: -4, estimatedHours: 14, lastActivityHoursAgo: 48, completedDaysAgo: 2 },
-  { project: 'ERP', title: 'Duplicate GRN entries under load', status: 'COMPLETED', priority: 'URGENT', assignee: ARUN, reviewer: SULTHAN, progress: 100, dueOffset: -6, estimatedHours: 6, lastActivityHoursAgo: 96, completedDaysAgo: 4, labels: ['bug'] },
-  { project: 'ERP', title: 'Drop the unused pricing experiment', status: 'CANCELLED', priority: 'LOW', assignee: AKHIL, reviewer: null, progress: 10, dueOffset: -8, estimatedHours: 3, lastActivityHoursAgo: 120 },
+  {
+    project: 'ERP',
+    title: 'Fix invoice rounding on multi-currency orders',
+    status: 'IN_PROGRESS',
+    priority: 'URGENT',
+    assignee: RAHUL,
+    reviewer: SULTHAN,
+    progress: 45,
+    dueOffset: -3,
+    estimatedHours: 8,
+    lastActivityHoursAgo: 2,
+    labels: ['bug', 'invoicing'],
+  },
+  {
+    project: 'ERP',
+    title: 'Add UAE VAT breakdown to the invoice PDF',
+    status: 'IN_PROGRESS',
+    priority: 'HIGH',
+    assignee: RAHUL,
+    reviewer: SULTHAN,
+    progress: 20,
+    dueOffset: 0,
+    estimatedHours: 6,
+    lastActivityHoursAgo: 40,
+    labels: ['feature', 'invoicing'],
+  },
+  {
+    project: 'ERP',
+    title: 'Stock ledger reconciliation job',
+    status: 'BLOCKED',
+    priority: 'HIGH',
+    assignee: ARUN,
+    reviewer: SULTHAN,
+    progress: 30,
+    dueOffset: -1,
+    estimatedHours: 12,
+    lastActivityHoursAgo: 30,
+    blockedReason: 'Waiting on the warehouse team to confirm the opening balances',
+    blockerType: 'WAITING_ON_PERSON',
+    blockedHoursAgo: 30,
+  },
+  {
+    project: 'ERP',
+    title: 'Purchase order approval workflow',
+    status: 'READY_FOR_REVIEW',
+    priority: 'MEDIUM',
+    assignee: ARUN,
+    reviewer: SULTHAN,
+    progress: 95,
+    dueOffset: 2,
+    estimatedHours: 16,
+    lastActivityHoursAgo: 26,
+  },
+  {
+    project: 'ERP',
+    title: 'Migrate reports to the new query layer',
+    status: 'IN_REVIEW',
+    priority: 'MEDIUM',
+    assignee: FAISAL,
+    reviewer: RAHUL,
+    progress: 90,
+    dueOffset: 1,
+    estimatedHours: 20,
+    lastActivityHoursAgo: 5,
+    labels: ['tech-debt'],
+  },
+  {
+    project: 'ERP',
+    title: 'Credit note cancellation leaves orphan rows',
+    status: 'CHANGES_REQUESTED',
+    priority: 'HIGH',
+    assignee: FAISAL,
+    reviewer: SULTHAN,
+    progress: 70,
+    dueOffset: -2,
+    estimatedHours: 5,
+    lastActivityHoursAgo: 8,
+    labels: ['bug'],
+  },
+  {
+    project: 'ERP',
+    title: 'Bulk import for supplier master data',
+    status: 'ASSIGNED',
+    priority: 'LOW',
+    assignee: AKHIL,
+    reviewer: null,
+    progress: 0,
+    dueOffset: 5,
+    estimatedHours: 10,
+    lastActivityHoursAgo: 12,
+  },
+  {
+    project: 'ERP',
+    title: 'Retire the legacy tax table',
+    status: 'BACKLOG',
+    priority: 'LOW',
+    assignee: null,
+    reviewer: null,
+    progress: 0,
+    dueOffset: null,
+    estimatedHours: null,
+    lastActivityHoursAgo: 72,
+    labels: ['tech-debt'],
+  },
+  {
+    project: 'ERP',
+    title: 'Warehouse barcode scanning screen',
+    status: 'COMPLETED',
+    priority: 'MEDIUM',
+    assignee: RAHUL,
+    reviewer: SULTHAN,
+    progress: 100,
+    dueOffset: -4,
+    estimatedHours: 14,
+    lastActivityHoursAgo: 48,
+    completedDaysAgo: 2,
+  },
+  {
+    project: 'ERP',
+    title: 'Duplicate GRN entries under load',
+    status: 'COMPLETED',
+    priority: 'URGENT',
+    assignee: ARUN,
+    reviewer: SULTHAN,
+    progress: 100,
+    dueOffset: -6,
+    estimatedHours: 6,
+    lastActivityHoursAgo: 96,
+    completedDaysAgo: 4,
+    labels: ['bug'],
+  },
+  {
+    project: 'ERP',
+    title: 'Drop the unused pricing experiment',
+    status: 'CANCELLED',
+    priority: 'LOW',
+    assignee: AKHIL,
+    reviewer: null,
+    progress: 10,
+    dueOffset: -8,
+    estimatedHours: 3,
+    lastActivityHoursAgo: 120,
+  },
 
-  { project: 'CRM', title: 'Customer portal single sign-on', status: 'IN_PROGRESS', priority: 'HIGH', assignee: AKHIL, reviewer: SULTHAN, progress: 55, dueOffset: 0, estimatedHours: 18, lastActivityHoursAgo: 1, labels: ['feature'] },
-  { project: 'CRM', title: 'Pipeline stage drag and drop is slow', status: 'IN_PROGRESS', priority: 'MEDIUM', assignee: FAISAL, reviewer: ARUN, progress: 35, dueOffset: 3, estimatedHours: 8, lastActivityHoursAgo: 50, labels: ['bug'] },
-  { project: 'CRM', title: 'Lead deduplication rules', status: 'BLOCKED', priority: 'MEDIUM', assignee: RAHUL, reviewer: null, progress: 15, dueOffset: 4, estimatedHours: 10, lastActivityHoursAgo: 60, blockedReason: 'Client has not signed off on the matching rules', blockerType: 'WAITING_ON_CLIENT', blockedHoursAgo: 60 },
-  { project: 'CRM', title: 'Email templates for the follow-up sequence', status: 'READY_FOR_REVIEW', priority: 'LOW', assignee: ARUN, reviewer: AKHIL, progress: 100, dueOffset: 1, estimatedHours: 4, lastActivityHoursAgo: 3 },
-  { project: 'CRM', title: 'Activity feed pagination', status: 'ASSIGNED', priority: 'MEDIUM', assignee: FAISAL, reviewer: null, progress: 0, dueOffset: 7, estimatedHours: 6, lastActivityHoursAgo: 20 },
-  { project: 'CRM', title: 'Contact merge loses custom fields', status: 'ASSIGNED', priority: 'URGENT', assignee: RAHUL, reviewer: SULTHAN, progress: 0, dueOffset: -1, estimatedHours: 5, lastActivityHoursAgo: 28, labels: ['bug'] },
-  { project: 'CRM', title: 'Quarterly pipeline export', status: 'BACKLOG', priority: 'LOW', assignee: null, reviewer: null, progress: 0, dueOffset: null, estimatedHours: 4, lastActivityHoursAgo: 200 },
-  { project: 'CRM', title: 'Deal value currency conversion', status: 'COMPLETED', priority: 'HIGH', assignee: AKHIL, reviewer: SULTHAN, progress: 100, dueOffset: -2, estimatedHours: 7, lastActivityHoursAgo: 30, completedDaysAgo: 1 },
-  { project: 'CRM', title: 'Remove the unused webhook retry queue', status: 'CANCELLED', priority: 'LOW', assignee: null, reviewer: null, progress: 0, dueOffset: null, estimatedHours: 2, lastActivityHoursAgo: 300, labels: ['tech-debt'] },
+  {
+    project: 'CRM',
+    title: 'Customer portal single sign-on',
+    status: 'IN_PROGRESS',
+    priority: 'HIGH',
+    assignee: AKHIL,
+    reviewer: SULTHAN,
+    progress: 55,
+    dueOffset: 0,
+    estimatedHours: 18,
+    lastActivityHoursAgo: 1,
+    labels: ['feature'],
+  },
+  {
+    project: 'CRM',
+    title: 'Pipeline stage drag and drop is slow',
+    status: 'IN_PROGRESS',
+    priority: 'MEDIUM',
+    assignee: FAISAL,
+    reviewer: ARUN,
+    progress: 35,
+    dueOffset: 3,
+    estimatedHours: 8,
+    lastActivityHoursAgo: 50,
+    labels: ['bug'],
+  },
+  {
+    project: 'CRM',
+    title: 'Lead deduplication rules',
+    status: 'BLOCKED',
+    priority: 'MEDIUM',
+    assignee: RAHUL,
+    reviewer: null,
+    progress: 15,
+    dueOffset: 4,
+    estimatedHours: 10,
+    lastActivityHoursAgo: 60,
+    blockedReason: 'Client has not signed off on the matching rules',
+    blockerType: 'WAITING_ON_CLIENT',
+    blockedHoursAgo: 60,
+  },
+  {
+    project: 'CRM',
+    title: 'Email templates for the follow-up sequence',
+    status: 'READY_FOR_REVIEW',
+    priority: 'LOW',
+    assignee: ARUN,
+    reviewer: AKHIL,
+    progress: 100,
+    dueOffset: 1,
+    estimatedHours: 4,
+    lastActivityHoursAgo: 3,
+  },
+  {
+    project: 'CRM',
+    title: 'Activity feed pagination',
+    status: 'ASSIGNED',
+    priority: 'MEDIUM',
+    assignee: FAISAL,
+    reviewer: null,
+    progress: 0,
+    dueOffset: 7,
+    estimatedHours: 6,
+    lastActivityHoursAgo: 20,
+  },
+  {
+    project: 'CRM',
+    title: 'Contact merge loses custom fields',
+    status: 'ASSIGNED',
+    priority: 'URGENT',
+    assignee: RAHUL,
+    reviewer: SULTHAN,
+    progress: 0,
+    dueOffset: -1,
+    estimatedHours: 5,
+    lastActivityHoursAgo: 28,
+    labels: ['bug'],
+  },
+  {
+    project: 'CRM',
+    title: 'Quarterly pipeline export',
+    status: 'BACKLOG',
+    priority: 'LOW',
+    assignee: null,
+    reviewer: null,
+    progress: 0,
+    dueOffset: null,
+    estimatedHours: 4,
+    lastActivityHoursAgo: 200,
+  },
+  {
+    project: 'CRM',
+    title: 'Deal value currency conversion',
+    status: 'COMPLETED',
+    priority: 'HIGH',
+    assignee: AKHIL,
+    reviewer: SULTHAN,
+    progress: 100,
+    dueOffset: -2,
+    estimatedHours: 7,
+    lastActivityHoursAgo: 30,
+    completedDaysAgo: 1,
+  },
+  {
+    project: 'CRM',
+    title: 'Remove the unused webhook retry queue',
+    status: 'CANCELLED',
+    priority: 'LOW',
+    assignee: null,
+    reviewer: null,
+    progress: 0,
+    dueOffset: null,
+    estimatedHours: 2,
+    lastActivityHoursAgo: 300,
+    labels: ['tech-debt'],
+  },
 ];
 
 async function seedTasks(
@@ -356,8 +613,8 @@ async function seedTasks(
 
     if (!counter) continue;
 
-    const assigneeId = seed.assignee ? userIds.get(seed.assignee) ?? null : null;
-    const reviewerId = seed.reviewer ? userIds.get(seed.reviewer) ?? null : null;
+    const assigneeId = seed.assignee ? (userIds.get(seed.assignee) ?? null) : null;
+    const reviewerId = seed.reviewer ? (userIds.get(seed.reviewer) ?? null) : null;
     const lastActivityAt = hoursAgo(seed.lastActivityHoursAgo);
 
     const [task] = await db
@@ -405,8 +662,18 @@ async function seedTasks(
     }
 
     // A believable history, so the timeline is not empty on a fresh install.
-    const history: Array<{ action: string; field?: string; oldValue?: unknown; newValue?: unknown; at: Date }> = [
-      { action: 'task.created', newValue: { title: seed.title, status: 'BACKLOG' }, at: hoursAgo(seed.lastActivityHoursAgo + 72) },
+    const history: Array<{
+      action: string;
+      field?: string;
+      oldValue?: unknown;
+      newValue?: unknown;
+      at: Date;
+    }> = [
+      {
+        action: 'task.created',
+        newValue: { title: seed.title, status: 'BACKLOG' },
+        at: hoursAgo(seed.lastActivityHoursAgo + 72),
+      },
     ];
 
     if (assigneeId) {
@@ -501,11 +768,20 @@ async function main(): Promise<void> {
   const createdTasks = await seedTasks(projectIds, userIds, labelIds);
   const secondTeam = await seedSecondTeam(userIds, adminId);
 
+  /*
+   * --demo adds twelve weeks of generated history on top. It is never run by
+   * the tests, which count the rows above and would break if the number moved.
+   */
+  const demo = process.argv.includes('--demo')
+    ? await (await import('./demo')).seedDemo(NOW)
+    : null;
+
   logger.info(
     {
       users: userIds.size,
       projects: projectIds.size + 1,
       tasksCreated: createdTasks,
+      demoTasks: demo?.created ?? 0,
       secondTeamId: secondTeam.teamId,
       timezone: TZ,
     },
@@ -517,7 +793,8 @@ async function main(): Promise<void> {
   );
 }
 
-const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const invokedDirectly =
+  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 
 if (invokedDirectly) {
   main()

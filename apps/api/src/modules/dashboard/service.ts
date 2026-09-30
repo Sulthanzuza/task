@@ -41,7 +41,7 @@ import { teamMemberIds, usersByIdList } from '../users/service';
  * "now" is a parameter so tests can fix the clock and assert exact numbers.
  */
 
-function requireTeam(actor: Actor, teamId: string | undefined): string {
+export function requireTeam(actor: Actor, teamId: string | undefined): string {
   if (teamId) {
     authorize(actor, 'dashboard.view', { kind: 'team', teamId });
     return teamId;
@@ -159,12 +159,18 @@ export async function getMemberRows(
  * The "needs your attention" list. Each entry carries the reason and a magnitude,
  * so the UI can show a chip and the order is defensible rather than arbitrary.
  */
+/**
+ * The attention list, and how long it really is.
+ *
+ * The count is the whole list, not the page: "10 in all" taken from a capped
+ * array tells a lead the problem is smaller than it is.
+ */
 export async function getAttention(
   actor: Actor,
   teamId: string | undefined,
   now = new Date(),
   limit = 25,
-): Promise<AttentionItem[]> {
+): Promise<{ items: AttentionItem[]; total: number }> {
   const scopedTeamId = requireTeam(actor, teamId);
   const { settings, calendar } = await getOrgContext();
 
@@ -242,7 +248,7 @@ export async function getAttention(
     return b.magnitude - a.magnitude;
   });
 
-  return items.slice(0, limit);
+  return { items: items.slice(0, limit), total: items.length };
 }
 
 interface ClassifyInput {

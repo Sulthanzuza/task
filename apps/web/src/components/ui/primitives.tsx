@@ -148,14 +148,27 @@ export function Card({
   );
 }
 
-/** The dark gradient card from the reference. Dark in every theme, on purpose. */
-export function HeroCard({ className, children }: { className?: string; children: ReactNode }) {
+/**
+ * The dark gradient card from the reference. Dark in every theme, on purpose.
+ *
+ * Callers pass data-theme="midnight" so the tokens inside resolve against a
+ * dark surface: without it, the light themes put dark grey text on navy.
+ */
+export function HeroCard({
+  className,
+  children,
+  ...rest
+}: { className?: string; children: ReactNode } & Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'className' | 'children'
+>) {
   return (
     <div
       className={cn(
         'hero-surface rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]',
         className,
       )}
+      {...rest}
     >
       {children}
     </div>

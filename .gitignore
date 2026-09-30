@@ -19,3 +19,6 @@ apps/web/e2e/.smoke-artifacts/
 apps/web/e2e/.smoke-report/
 backups/
 .env.production
+
+# Ad-hoc review captures, not a repeatable artefact.
+apps/web/e2e/.shots/

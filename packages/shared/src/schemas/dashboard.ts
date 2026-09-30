@@ -83,3 +83,113 @@ export const memberStatsSchema = z.object({
   lastActivityAt: z.string().nullable(),
 });
 export type MemberStats = z.infer<typeof memberStatsSchema>;
+
+/**
+ * Everything the dashboard's charts need, in one round trip.
+ *
+ * Six datasets rather than six requests: a dashboard that fires six calls
+ * shows six different moments, and the numbers then disagree with each other
+ * on screen.
+ */
+
+export const DASHBOARD_PERIODS = ['week', 'month', 'quarter'] as const;
+export const dashboardPeriodSchema = z.enum(DASHBOARD_PERIODS);
+export type DashboardPeriod = z.infer<typeof dashboardPeriodSchema>;
+
+export const weeklyPointSchema = z.object({
+  /** Monday of the week, in the organisation's time zone. */
+  weekStart: dateOnlySchema,
+  label: z.string(),
+  created: z.number().int(),
+  completed: z.number().int(),
+  overdue: z.number().int(),
+});
+export type WeeklyPoint = z.infer<typeof weeklyPointSchema>;
+
+export const countSliceSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  count: z.number().int(),
+});
+export type CountSlice = z.infer<typeof countSliceSchema>;
+
+export const projectProgressSchema = z.object({
+  projectId: uuidSchema,
+  key: z.string(),
+  name: z.string(),
+  done: z.number().int(),
+  total: z.number().int(),
+  open: z.number().int(),
+  overdue: z.number().int(),
+  dueThisWeek: z.number().int(),
+});
+export type ProjectProgress = z.infer<typeof projectProgressSchema>;
+
+export const dueLoadCellSchema = z.object({
+  userId: uuidSchema,
+  date: dateOnlySchema,
+  hours: z.number(),
+  tasks: z.array(z.object({ key: z.string(), title: z.string(), hours: z.number() })),
+});
+export type DueLoadCell = z.infer<typeof dueLoadCellSchema>;
+
+export const dueLoadDaySchema = z.object({
+  date: dateOnlySchema,
+  label: z.string(),
+  weekday: z.string(),
+  /** A weekend or a holiday: hatched, never shaded. */
+  working: z.boolean(),
+  /** Named when the day is a holiday, so the grid can say which one. */
+  holiday: z.string().nullable(),
+});
+export type DueLoadDay = z.infer<typeof dueLoadDaySchema>;
+
+export const dashboardChartsSchema = z.object({
+  teamId: uuidSchema,
+  period: dashboardPeriodSchema,
+  asOfDate: dateOnlySchema,
+  timezone: z.string(),
+  /** How many trailing weekly bars belong to the chosen period. */
+  highlightWeeks: z.number().int(),
+  /**
+   * Share of recently completed work that met its due date, 0 to 1, or null
+   * when nothing finished had a due date. A fact about the work, counted the
+   * same way the member page counts it; never a ranking of people.
+   */
+  onTimeRate: z.number().nullable(),
+  /** Completed in the current and the previous week, for the change figure. */
+  completedThisWeek: z.number().int(),
+  completedLastWeek: z.number().int(),
+  /**
+   * The part of this week that has actually happened, against the same part of
+   * last week. Comparing three days against seven makes every Wednesday look
+   * like a collapse.
+   */
+  weekToDate: z.object({
+    throughWeekday: z.string(),
+    created: z.number().int(),
+    completed: z.number().int(),
+    createdLastWeek: z.number().int(),
+    completedLastWeek: z.number().int(),
+  }),
+  /** Hours in a working day, for marking an overloaded cell. */
+  workHoursPerDay: z.number(),
+  weekly: z.array(weeklyPointSchema),
+  statusBreakdown: z.array(countSliceSchema),
+  priorityMix: z.array(countSliceSchema),
+  labelMix: z.array(countSliceSchema),
+  projects: z.array(projectProgressSchema),
+  dueLoad: z.object({
+    days: z.array(dueLoadDaySchema),
+    people: z.array(userSummarySchema),
+    cells: z.array(dueLoadCellSchema),
+  }),
+});
+export type DashboardCharts = z.infer<typeof dashboardChartsSchema>;
+
+export const dashboardChartsQuerySchema = z.object({
+  teamId: uuidSchema.optional(),
+  /** A month by default: a single week selects only the week still running. */
+  period: dashboardPeriodSchema.default('month'),
+});
+export type DashboardChartsQuery = z.infer<typeof dashboardChartsQuerySchema>;

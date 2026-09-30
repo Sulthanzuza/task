@@ -39,6 +39,8 @@ export const queryKeys = {
     summary: (teamId?: string) => ['dashboard', 'summary', teamId ?? 'mine'] as const,
     members: (teamId?: string) => ['dashboard', 'members', teamId ?? 'mine'] as const,
     attention: (teamId?: string) => ['dashboard', 'attention', teamId ?? 'mine'] as const,
+    charts: (teamId: string | undefined, period: string) =>
+      ['dashboard', 'charts', teamId ?? 'mine', period] as const,
   },
 
   member: {

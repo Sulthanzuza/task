@@ -72,6 +72,12 @@ export default defineConfig({
   reporter: [['list'], ['html', { outputFolder: './.report', open: 'never' }]],
 
   use: {
+    /*
+     * Animation off for the whole suite. Chart libraries draw over several
+     * hundred milliseconds, and a screenshot taken during that shows a line
+     * that stops partway; the kit already honours this setting.
+     */
+    reducedMotion: 'reduce',
     baseURL: E2E_BASE_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

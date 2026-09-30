@@ -30,7 +30,11 @@ interface PeriodValue {
 const PeriodContext = createContext<PeriodValue | null>(null);
 
 export function PeriodProvider({ children }: { children: ReactNode }) {
-  const [period, setPeriod] = useState<Period>('week');
+  /*
+   * A month by default. A week selects a single bar, and that bar is the one
+   * still running, so nothing on the throughput chart carried the accent.
+   */
+  const [period, setPeriod] = useState<Period>('month');
   const value = useMemo(() => ({ period, setPeriod }), [period]);
   return <PeriodContext.Provider value={value}>{children}</PeriodContext.Provider>;
 }

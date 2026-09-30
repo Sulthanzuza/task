@@ -35,6 +35,7 @@ Members update their own tasks. The system shows facts and evidence; it never co
 14. When done: run typecheck, lint, tests; report what changed and what is left.
 15. A feature is DONE only when it has its API, its UI, and a test. Report anything missing
     one of these as PARTIAL, never as done.
+16. Read docs/STATUS.md at the start of every session; update it at the end of every prompt.
 
 ## Glossary
 Task key = project key + number (ERP-125). Open = status not COMPLETED or CANCELLED.

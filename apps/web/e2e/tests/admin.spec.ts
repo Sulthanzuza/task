@@ -43,7 +43,9 @@ test('an invited colleague sets a password from the email and signs in', async (
   expect(link, 'the email must carry a link to set a password').not.toBeNull();
 
   // Follow it the way they would, in a session that has never signed in.
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Sign out lives in the account menu, which the avatar opens.
+  await page.getByRole('button', { name: /^Account:/ }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/login/);
 
   await page.goto(link?.[0] as string);
@@ -58,7 +60,8 @@ test('an invited colleague sets a password from the email and signs in', async (
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await page.waitForURL((url) => !url.pathname.startsWith('/login'));
-  await expect(page.getByText(name).first()).toBeVisible();
+  // Who is signed in is on the account control, whatever the window width.
+  await expect(page.getByRole('button', { name: 'Account: ' + name })).toBeVisible();
 });
 
 test('a lead cannot open the people screen', async ({ page, problems }) => {

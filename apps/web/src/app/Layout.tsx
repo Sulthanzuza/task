@@ -81,7 +81,7 @@ const pillClass = (isActive: boolean) =>
   );
 
 export function Layout() {
-  const { user, signOut, isLead, isAdmin } = useAuth();
+  const { signOut, isLead, isAdmin } = useAuth();
 
   // One socket for the whole signed-in session, opened here rather than per
   // screen so navigating does not reconnect.
@@ -103,12 +103,8 @@ export function Layout() {
             <span className="accent-gradient flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-accent-ink)]">
               <Shield size={16} aria-hidden />
             </span>
-            {/*
-              The wordmark yields to the navigation between 900 and 1400px.
-              A complete set of destinations is worth more than repeating the
-              name of the app the person is already inside.
-            */}
-            <span className="text-sm font-semibold tracking-tight max-[900px]:hidden min-[900px]:max-[1400px]:hidden">
+            {/* The mark alone below 1280: the navigation needs the room. */}
+            <span className="hidden text-sm font-semibold tracking-tight min-[1280px]:block">
               Task Manager
             </span>
           </NavLink>
@@ -129,12 +125,7 @@ export function Layout() {
           >
             {items.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => pillClass(isActive)}>
-                {/*
-                  Below 1400px the icons go and the labels stay: the label is
-                  what identifies the destination, and the space buys back the
-                  signed-in name on the right.
-                */}
-                <item.icon size={14} aria-hidden className="hidden min-[1400px]:inline" />
+                <item.icon size={14} aria-hidden />
                 {item.label}
               </NavLink>
             ))}
@@ -155,27 +146,11 @@ export function Layout() {
             <NotificationBell />
             <ThemeSwitch />
 
-            <div className="ml-1 hidden shrink-0 items-center gap-2 sm:flex">
-              <NavLink to={'/team/' + (user?.id ?? '')} className="flex items-center gap-2">
-                <UserAvatar user={user ? { ...user, isActive: true } : null} />
-                <span className="hidden leading-tight min-[1000px]:block">
-                  <span className="block max-w-32 truncate text-xs font-medium">{user?.name}</span>
-                  <span className="block text-[11px] text-ink-faint">
-                    {user ? ROLE_LABELS[user.role] : ''}
-                  </span>
-                </span>
-              </NavLink>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Sign out"
-                onClick={() => {
-                  void signOut().then(() => navigate('/login'));
-                }}
-              >
-                <LogOut size={16} />
-              </Button>
-            </div>
+            <AccountMenu
+              onSignOut={() => {
+                void signOut().then(() => navigate('/login'));
+              }}
+            />
 
             <Button
               variant="ghost"
@@ -204,6 +179,98 @@ export function Layout() {
             void signOut().then(() => navigate('/login'));
           }}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The account menu.
+ *
+ * Below 1440px the name and role come off the bar to leave the navigation
+ * whole, so the menu carries them at its top: an avatar on its own does not
+ * tell you which account you are signed in to, and on a shared machine that
+ * matters.
+ */
+function AccountMenu({ onSignOut }: { onSignOut(): void }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative ml-1 hidden shrink-0 sm:block">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={'Account: ' + (user?.name ?? '')}
+        onClick={() => setOpen((shown) => !shown)}
+        className="flex items-center gap-2 rounded-full p-0.5 transition-colors hover:bg-surface-muted"
+      >
+        <UserAvatar user={user ? { ...user, isActive: true } : null} />
+        <span className="hidden leading-tight min-[1440px]:block">
+          <span className="block max-w-32 truncate text-xs font-medium">{user?.name}</span>
+          <span className="block text-[11px] text-ink-faint">
+            {user ? ROLE_LABELS[user.role] : ''}
+          </span>
+        </span>
+        <ChevronDown size={13} aria-hidden className="mr-1 text-ink-faint" />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Account"
+          className="absolute right-0 z-50 mt-2 w-56 rounded-2xl border border-border-subtle bg-surface p-1.5 shadow-[var(--shadow-lift)]"
+        >
+          <div className="border-b border-border-subtle px-3 pt-1.5 pb-2.5">
+            <p className="truncate text-sm font-medium">{user?.name}</p>
+            <p className="truncate text-xs text-ink-faint">{user?.email}</p>
+            <p className="mt-0.5 text-[11px] text-ink-faint">
+              {user ? ROLE_LABELS[user.role] : ''}
+            </p>
+          </div>
+
+          <NavLink
+            to={'/team/' + (user?.id ?? '')}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="mt-1 block rounded-xl px-3 py-2 text-sm text-ink-muted transition-colors hover:bg-surface-muted"
+          >
+            My page
+          </NavLink>
+
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onSignOut();
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-ink-muted transition-colors hover:bg-surface-muted"
+          >
+            <LogOut size={14} aria-hidden />
+            Sign out
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -241,7 +308,7 @@ function MoreMenu({ items }: { items: MoreItem[] }) {
         onClick={() => setOpen((shown) => !shown)}
         className={pillClass(false)}
       >
-        <Settings size={14} aria-hidden className="hidden min-[1400px]:inline" />
+        <Settings size={14} aria-hidden />
         More
         <ChevronDown size={13} aria-hidden />
       </button>

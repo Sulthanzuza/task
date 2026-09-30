@@ -16,7 +16,8 @@ test('a reload keeps the session, because the refresh cookie restores it', async
 
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Team dashboard' })).toBeVisible();
-  await expect(page.getByText(USERS.lead.name).first()).toBeVisible();
+  // Who is signed in is on the account control, whatever the window width.
+  await expect(page.getByRole('button', { name: 'Account: ' + USERS.lead.name })).toBeVisible();
 
   expect(problems.all()).toEqual([]);
 });
@@ -39,7 +40,9 @@ test('logout returns to login, and Back does not show a protected page', async (
   await signIn(page, USERS.lead);
   await expect(page).toHaveURL(/\/dashboard$/);
 
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Sign out lives in the account menu, which the avatar opens.
+  await page.getByRole('button', { name: /^Account:/ }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login$/);
 
   // Going back must not reveal the dashboard: the guard re-runs and the refresh

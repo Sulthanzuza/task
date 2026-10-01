@@ -345,3 +345,41 @@ test('My Tasks shows enough of a title to recognise it', async ({ page }) => {
   expect(measured.every((row) => row.ellipsis === 'ellipsis')).toBe(true);
   expect(measured.every((row) => row.titled)).toBe(true);
 });
+
+/**
+ * Every priority label readable, at both widths.
+ *
+ * The segmented control sat in half of a two-column grid, so "Low" was
+ * clipped to a letter and a half. Nothing failed: a clipped label is still
+ * a label as far as the DOM is concerned, which is why this measures the
+ * text against the box it is in.
+ */
+test('all four priority labels fit in the create drawer', async ({ page }) => {
+  await signIn(page, USERS.lead);
+
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/tasks');
+    await page.getByRole('button', { name: /New task/i }).click();
+
+    const drawer = page.getByRole('dialog', { name: 'New task' });
+    await expect(drawer).toBeVisible();
+
+    const clipped = await drawer.getByRole('radiogroup', { name: 'Priority' }).evaluate((group) =>
+      Array.from(group.querySelectorAll<HTMLElement>('[role="radio"]'))
+        .filter((el) => el.scrollWidth > el.clientWidth + 1)
+        .map(
+          (el) =>
+            (el.textContent ?? '').trim() + ' (' + el.scrollWidth + ' > ' + el.clientWidth + ')',
+        ),
+    );
+
+    expect(clipped, 'clipped priority labels at ' + width + 'px').toEqual([]);
+
+    for (const label of ['Low', 'Medium', 'High', 'Urgent']) {
+      await expect(drawer.getByRole('radio', { name: label })).toBeVisible();
+    }
+
+    await drawer.getByRole('button', { name: 'Cancel' }).first().click();
+  }
+});

@@ -51,6 +51,29 @@ There is deliberately no unauthenticated "create the first admin" page: that is
 a race with whoever finds the deployment first. Everyone else is invited from
 **Settings → People**, which emails them a link to set their own password.
 
+### Seeds do not run here
+
+There is no seed step in a production deploy, and the scripts enforce it
+rather than relying on nobody typing them. `pnpm db:seed` and
+`pnpm db:seed --demo` both refuse to run when `NODE_ENV=production`: the demo
+seed would add roughly two hundred invented tasks to a real team's board, and
+there is no undo for that beyond a restore.
+
+The only thing that writes to a fresh production database is the `migrate`
+service, and then the one administrator you create by hand above.
+
+### Fonts are served from here
+
+The interface is set in Plus Jakarta Sans, and the file is in the image
+(`apps/web/public/fonts`, served at `/fonts/`). Nothing is fetched from Google
+at runtime, so the application needs no outbound network access to render, and
+no `font-src` or `style-src` allowance for a third party.
+
+The file name has no content hash in it, so Nginx caches `/fonts/` for thirty
+days rather than the year it gives `/assets/`: long enough that nobody
+refetches it, short enough that replacing the file reaches people without a
+rename.
+
 ### TLS
 
 ```bash
@@ -104,9 +127,14 @@ headers. Do this before inviting anybody.
 | --- | --- | --- |
 | `api` | `GET /api/v1/ready` | Database **and** job queue reachable |
 | `api` | `GET /api/v1/health` | Process alive, database reachable |
-| `worker` | `GET :4001/health` | Worker process alive |
+| `worker` | `GET :$WORKER_HEALTH_PORT/health` | Worker process alive (4001 in the compose file) |
 | `web` | `GET /healthz` | Nginx serving |
 | `postgres` | `pg_isready` | Accepting connections |
+
+The worker's port comes from `WORKER_HEALTH_PORT`. It is set in
+`docker-compose.prod.yml` and in `.env.production.example`; the worker serves
+no health endpoint at all if it is unset, and the watchdog then has nothing to
+check.
 
 `restart: unless-stopped` only restarts a container that **exits**. A container
 that is running but failing its health check would otherwise sit there

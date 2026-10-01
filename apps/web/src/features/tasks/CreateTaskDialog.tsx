@@ -293,7 +293,12 @@ function CreateTaskForm({
               />
             </div>
 
-            <div>
+            {/*
+              Full width, because four labelled segments do not fit half of
+              a drawer: "Low" was clipped to a letter and a half. Below
+              420px they wrap to two rows rather than shrinking further.
+            */}
+            <div className="col-span-2">
               <Label>Priority</Label>
               {/*
                 Four choices, all of them short, and the one that matters is
@@ -309,7 +314,7 @@ function CreateTaskForm({
                  * loses the contrast the tokens were tuned to give it on a
                  * card: axe measured 4.42:1 on the one that was.
                  */
-                className="flex gap-1 rounded-[var(--radius-input)] border border-border-subtle bg-surface p-1"
+                className="grid grid-cols-2 gap-1 rounded-[var(--radius-input)] border border-border-subtle bg-surface p-1 min-[420px]:grid-cols-4"
               >
                 {PRIORITY_ORDER.map((option) => {
                   const active = priority === option;
@@ -322,7 +327,7 @@ function CreateTaskForm({
                       onClick={() => setValue('priority', option)}
                       style={active ? tintedPill(priorityColor(option)) : undefined}
                       className={cn(
-                        'flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors',
+                        'flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
                         active ? 'border' : 'border-transparent text-ink-muted hover:text-ink',
                       )}
                     >

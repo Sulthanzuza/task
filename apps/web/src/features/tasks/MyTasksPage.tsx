@@ -283,7 +283,8 @@ function TaskRow({ task }: { task: TaskSummary }) {
          * 185px, which cut words mid-letter. 240 is the floor, and the page
          * is wider now so there is something to give it.
          */
-        'md:grid-cols-[78px_minmax(240px,1fr)_96px_124px_80px_120px] md:items-center md:gap-y-0',
+        // gap-x-4 at md: at 3 the status pill and the date badge touched.
+        'md:grid-cols-[78px_minmax(240px,1fr)_96px_132px_84px_120px] md:items-center md:gap-x-4 md:gap-y-0',
       )}
     >
       <Link
@@ -291,8 +292,13 @@ function TaskRow({ task }: { task: TaskSummary }) {
         title={task.title}
         className="order-1 min-w-0 text-sm hover:underline md:order-2 md:truncate"
       >
-        {/* Two lines before it gives up, on a phone only. */}
-        <span className="line-clamp-2 md:line-clamp-none">{task.title}</span>
+        {/*
+          max-md: so the clamp exists only on a phone. line-clamp-none left
+          the span a block with overflow:visible, which escaped the link's
+          clip entirely: the title was cut mid-letter with no ellipsis,
+          because text-overflow cannot reach into a block child.
+        */}
+        <span className="max-md:line-clamp-2">{task.title}</span>
       </Link>
 
       <div className="order-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 md:order-1 md:contents">

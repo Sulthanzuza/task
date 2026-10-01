@@ -2,7 +2,9 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-01. Branch `master`, head `2c6ec0c` plus the third review round below.
+Last updated: 2026-10-01. Branch `master`, tagged **v1.0.0-rc1**.
+
+Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
 ## Built, by prompt
 
@@ -44,7 +46,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `5269072` | The design system applied to every remaining screen (below) |
 | `a23a195` | The fixes from the first screenshot review (below) |
 | `2c6ec0c` | The second review round (below) |
-| _this one_ | The third review round, and the font (below) |
+| `e04853f` | The third review round, and the font (below) |
+| _this one_ | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
 
 ### The design system, applied (three design prompts)
 
@@ -99,6 +102,30 @@ What those two found, all fixed in the app rather than in the test:
 - `aria-expanded` on the mention textarea is not allowed on a textbox; the open state
   moved to a live region.
 - The logo link had no accessible name below 1366, where the wordmark is hidden.
+
+### Release prep
+
+Three last fixes, then the tag.
+
+- **Due dates are counted in working days, not calendar days.** Nudging a
+  weekend date onto the next working day piled the work up: with a Thursday
+  today, a holiday on the Friday and the weekend after it, every offset from
+  one to three landed on the same Monday, and the heat map showed one person
+  with 46 hours due on it and nothing either side. `addWorkingDays` counts in
+  working days, so nothing can land on a day nobody works and the spacing is
+  even however the holidays fall. Measured after the change: 0 weekend or
+  holiday due dates out of 188, and the busiest person-day down to 36 hours
+  and spread across the window. The ordinary seed nudges in the same
+  direction as its offset, so a task seeded three days overdue stays overdue.
+- **The priority control clipped "Low".** Four labelled segments do not fit
+  half of a two-column drawer. It spans the full width now and wraps to two
+  rows below 420px; `task-screens.spec.ts` measures each segment's text
+  against its box at 1280 and 375.
+- **My Tasks titles were still clipped mid-letter.** `line-clamp-none` left
+  the span a block with `overflow: visible`, which escaped the link's clip
+  entirely, and `text-overflow` cannot reach into a block child. The clamp is
+  `max-md:` now, so above that breakpoint the span is a plain inline and the
+  link's `truncate` does what it says.
 
 ### The second review round
 
@@ -285,7 +312,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
 | `apps/api` integration | 20 | 376 |
-| `apps/web` end-to-end | 13 | 57 |
+| `apps/web` end-to-end | 13 | 58 |
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.

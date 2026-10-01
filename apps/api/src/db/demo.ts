@@ -164,19 +164,37 @@ function pick<T>(random: () => number, list: readonly T[]): T {
  * rather than sit flat.
  */
 /**
- * Nudge a date onto a working day.
+ * A due date the given number of *working* days out, not calendar days.
  *
- * Nothing is due on a Sunday, so demo data that puts work there reads as
- * generated the moment anybody looks at a calendar. Forward rather than
- * back, because a deadline that moves earlier is a different promise.
+ * Counting in calendar days and then nudging off the weekend piles the work
+ * up: with a Thursday today, a holiday on Friday and the weekend after it,
+ * every offset from one to three lands on the same Monday, and the heat map
+ * showed one person with 46 hours due on it and nothing on either side.
+ *
+ * Counting in working days spreads by construction. Nothing can land on a
+ * day nobody works, and the spacing is even however the holidays fall.
  */
-function nextWorkingDay(date: string, calendar: WorkCalendar): string {
-  let candidate = date;
-  // A week is enough for any run of weekend plus holidays.
-  for (let i = 0; i < 9 && !isWorkingDay(candidate, calendar); i += 1) {
-    candidate = addDays(candidate, 1);
+function addWorkingDays(from: string, count: number, calendar: WorkCalendar): string {
+  const step = count >= 0 ? 1 : -1;
+  let remaining = Math.abs(count);
+  let date = from;
+
+  // Bounded: a run of non-working days cannot outlast this.
+  for (let guard = 0; guard < 400 && remaining > 0; guard += 1) {
+    date = addDays(date, step);
+    if (isWorkingDay(date, calendar)) remaining -= 1;
   }
-  return candidate;
+
+  /*
+   * Zero means today, which may itself be a holiday. A task due "today" on a
+   * day nobody works still belongs on the next working day, not on the
+   * holiday.
+   */
+  for (let guard = 0; guard < 9 && !isWorkingDay(date, calendar); guard += 1) {
+    date = addDays(date, step);
+  }
+
+  return date;
 }
 
 function planTasks(now: Date, timezone: string, calendar: WorkCalendar): Plan[] {
@@ -285,7 +303,7 @@ function planTasks(now: Date, timezone: string, calendar: WorkCalendar): Plan[] 
         title: base.title,
         status: cancelled ? 'CANCELLED' : 'COMPLETED',
         progress: cancelled ? Math.floor(random() * 60) : 100,
-        dueDate: nextWorkingDay(addDays(today, dueOffset), calendar),
+        dueDate: addWorkingDays(today, dueOffset, calendar),
         completedAt: cancelled ? null : completedAt,
         blockerType: null,
         lastActivityAt: completedAt,
@@ -347,7 +365,7 @@ function planTasks(now: Date, timezone: string, calendar: WorkCalendar): Plan[] 
       title: base.title,
       status,
       progress,
-      dueDate: nextWorkingDay(addDays(today, dueOffset), calendar),
+      dueDate: addWorkingDays(today, dueOffset, calendar),
       completedAt: null,
       blockerType,
       lastActivityAt: lastActivityAt < createdAt ? createdAt : lastActivityAt,
@@ -671,7 +689,7 @@ async function seedShowcaseTask(ctx: {
       assigneeId,
       reviewerId,
       progress: 60,
-      dueDate: nextWorkingDay(addDays(toDateOnly(ctx.now, ctx.timezone), 4), ctx.calendar),
+      dueDate: addWorkingDays(toDateOnly(ctx.now, ctx.timezone), 4, ctx.calendar),
       estimatedMinutes: 6 * 60,
       createdAt: at(0, 9),
       updatedAt: at(4, 16),

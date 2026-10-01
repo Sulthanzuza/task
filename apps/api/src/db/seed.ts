@@ -20,7 +20,7 @@ import {
 import { env } from '../config/env';
 import { hashPassword } from '../lib/crypto';
 import { logger } from '../lib/logger';
-import { addDays, toDateOnly } from '../lib/date-utils';
+import { addDays, isWorkingDay, toDateOnly, type WorkCalendar } from '../lib/date-utils';
 
 /**
  * Idempotent seed: running it twice leaves the same data, so it is safe to re-run
@@ -31,8 +31,45 @@ const NOW = new Date();
 const TZ = env.SEED_TIMEZONE;
 const TODAY = toDateOnly(NOW, TZ);
 
+/**
+ * An offset from today, nudged onto a working day.
+ *
+ * Nothing falls due on a Saturday here either, or the due-load heat map
+ * shows hours on a day nobody works. The nudge keeps the direction, so a
+ * task seeded three days overdue is still overdue and one seeded two days
+ * out is still ahead: the tests that count overdue work depend on that, and
+ * so does anybody reading the screen.
+ *
+ * Today itself is left alone. A task due today is due today whatever day of
+ * the week it is.
+ */
+/**
+ * The same calendar this file is about to write into org_settings.
+ *
+ * Declared here rather than read back, because the dates are computed while
+ * the rows are being built and the settings may not be in the database yet.
+ * The two must agree; they are a few lines apart for that reason.
+ */
+const SEED_CALENDAR: WorkCalendar = {
+  timezone: TZ,
+  weekendDays: [0, 6],
+  holidays: [TODAY.slice(0, 4) + '-10-02', TODAY.slice(0, 4) + '-12-25'],
+  weekStartsOn: 1,
+};
+
 function daysFromToday(offset: number): string {
-  return addDays(TODAY, offset);
+  const date = addDays(TODAY, offset);
+  if (offset === 0 || isWorkingDay(date, SEED_CALENDAR)) return date;
+
+  const step = offset > 0 ? 1 : -1;
+  let candidate = date;
+  for (let i = 0; i < 9; i += 1) {
+    candidate = addDays(candidate, step);
+    // Never cross today: that would flip overdue into upcoming.
+    if (step < 0 && candidate >= TODAY) return date;
+    if (isWorkingDay(candidate, SEED_CALENDAR)) return candidate;
+  }
+  return date;
 }
 
 function hoursAgo(hours: number): Date {

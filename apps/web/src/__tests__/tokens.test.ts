@@ -137,6 +137,33 @@ function tokens(theme: string): Record<string, string> {
   return found;
 }
 
+/**
+ * The tokens as they resolve inside .hero-surface.
+ *
+ * That block redefines a handful of variables so the card can stay dark in a
+ * light theme. Several point at --color-hero-*, so they are followed here
+ * the way the browser would.
+ */
+function heroTokens(palette: Record<string, string>): Record<string, string> {
+  const start = CSS.indexOf('.hero-surface {');
+  if (start === -1) throw new Error('No .hero-surface block');
+  const body = CSS.slice(start, CSS.indexOf('\n  }', start));
+
+  const resolved: Record<string, string> = { 'hero-to': palette['hero-to'] as string };
+
+  for (const [, name, value] of body.matchAll(
+    /--color-([a-z0-9-]+):\s*(#[0-9a-fA-F]{6}|var\(--color-([a-z0-9-]+)\)|rgba?\([^)]*\))/g,
+  )) {
+    const key = name as string;
+    const raw = (value as string).trim();
+    const indirect = /^var\(--color-([a-z0-9-]+)\)$/.exec(raw);
+    const literal = indirect ? palette[indirect[1] as string] : raw;
+    if (literal && literal.startsWith('#')) resolved[key] = literal;
+  }
+
+  return resolved;
+}
+
 function channels(hex: string): [number, number, number] {
   return [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255) as [
     number,
@@ -302,6 +329,29 @@ describe.each(THEMES)('the %s theme', (theme) => {
     });
 
     expect(failures, 'ink on the heat ramp').toEqual([]);
+  });
+
+  it('keeps the hero figures readable on the hero, not on the card', () => {
+    /*
+     * The hero is dark in every theme, and it redefines the tokens inside
+     * itself so a number on it is not coloured for a white card. This checks
+     * that every colour it redefines actually clears against the hero's own
+     * background: in light, "Due today" was a dark brown-amber on navy
+     * because --color-warning was not one of them.
+     */
+    const hero = heroTokens(palette);
+    const behind = hero['hero-to'] as string;
+
+    const failures = ['ink', 'ink-muted', 'accent', 'success', 'danger', 'warning', 'info'].flatMap(
+      (name) => {
+        const colour = hero[name];
+        if (!colour) return [name + ' is not redefined inside the hero'];
+        const ratio = contrast(colour, behind);
+        return ratio < 4.5 ? [name + ' ' + colour + ' at ' + ratio.toFixed(2) + ':1'] : [];
+      },
+    );
+
+    expect(failures, 'against the hero background ' + behind).toEqual([]);
   });
 
   it('clears 4.5:1 for the ink colours on a muted surface too', () => {

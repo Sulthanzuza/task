@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type {
+  ActivityAction,
   AttentionItem,
   DashboardSummary,
   MemberActivityEntry,
@@ -475,7 +476,8 @@ export async function getMemberActivity(
             isActive: Boolean(row.actor_active),
           }
         : null,
-      action: String(row.action),
+      // Written from the ACTIVITY_ACTIONS literals; see the tasks service.
+      action: String(row.action) as ActivityAction,
       field: row.field === null ? null : String(row.field),
       oldValue: row.old_value ?? null,
       newValue: row.new_value ?? null,

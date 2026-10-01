@@ -16,13 +16,25 @@ import { apiAs, expect, signIn, test, USERS } from '../fixtures';
 
 const THEMES = ['midnight', 'dusk', 'light', 'violet'] as const;
 
+/**
+ * Choose the theme the way a person does, before the page loads.
+ *
+ * Poking data-theme onto <html> changed the paint but not the provider's
+ * state, so the control kept showing whichever theme React still believed
+ * was current: a lit sun on a midnight screenshot. Writing the key the
+ * control writes and letting the app read it on mount means the whole
+ * picture agrees.
+ *
+ * Set before navigating rather than followed by a reload: the access token
+ * lives in memory, so every reload costs a refresh round trip, and doing
+ * that once per capture took the suite from six minutes to twenty.
+ */
 async function setTheme(page: Page, theme: string) {
   await page.evaluate((value) => {
-    document.documentElement.setAttribute('data-theme', value);
     try {
       localStorage.setItem('tm-theme', value);
     } catch {
-      // Storage being unavailable must not stop the check.
+      // Storage being unavailable must not stop the run.
     }
   }, theme);
 }
@@ -92,8 +104,8 @@ test('every main screen passes axe in all four themes', async ({ page, api }) =>
 
   for (const theme of THEMES) {
     for (const screen of screens) {
-      await page.goto(screen.path);
       await setTheme(page, theme);
+      await page.goto(screen.path);
       await page.getByRole('main').waitFor();
       found.push(...(await scan(page, screen.name + ' in ' + theme)));
     }
@@ -104,10 +116,12 @@ test('every main screen passes axe in all four themes', async ({ page, api }) =>
 
 test('the login screen passes axe in all four themes', async ({ page }) => {
   const found: string[] = [];
+  // localStorage needs an origin, and about:blank has none.
+  await page.goto('/login');
 
   for (const theme of THEMES) {
-    await page.goto('/login');
     await setTheme(page, theme);
+    await page.goto('/login');
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     found.push(...(await scan(page, 'login in ' + theme)));
   }
@@ -115,33 +129,53 @@ test('the login screen passes axe in all four themes', async ({ page }) => {
   expect(found).toEqual([]);
 });
 
-test('open dialogs and menus pass axe', async ({ page, api }) => {
+test('open dialogs and menus pass axe', async ({ browser, api }) => {
   const client = await apiAs(api, USERS.lead);
   const tasks = await client.get<{ items: Array<{ key: string }> }>('/tasks?limit=1');
   const taskKey = tasks.items[0]?.key ?? 'ERP-1';
 
-  await signIn(page, USERS.lead);
   const found: string[] = [];
 
   for (const theme of THEMES) {
+    /*
+     * Signed in per theme, not once.
+     *
+     * The access token lives eight seconds in this environment, on purpose,
+     * so the refresh path is genuinely exercised. An axe scan blocks the
+     * page's main thread for several seconds at a time, which delays the
+     * refresh timer past its grace window and ends the session. That is an
+     * artefact of a deliberately tiny TTL meeting a synthetic freeze, not
+     * something a person can do, and it has its own tests in session.spec.
+     *
+     * A fresh context rather than signing in again: clearing the cookie
+     * leaves the running page holding a live session, so /login bounces
+     * straight back to the dashboard and there is no form to fill in.
+     */
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      reducedMotion: 'reduce',
+    });
+    const page = await context.newPage();
+    await signIn(page, USERS.lead);
+
     // The notification dropdown.
-    await page.goto('/dashboard');
     await setTheme(page, theme);
+    await page.goto('/dashboard');
     await page.getByTestId('notification-bell').click();
     found.push(...(await scan(page, 'notification dropdown in ' + theme)));
     await page.keyboard.press('Escape');
 
     // The create-task drawer.
-    await page.goto('/tasks');
     await setTheme(page, theme);
+    await page.goto('/tasks');
     await page.getByRole('button', { name: /New task/i }).click();
     await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible();
     found.push(...(await scan(page, 'create drawer in ' + theme)));
     await page.getByRole('button', { name: 'Cancel' }).first().click();
 
     // A confirm dialog, from the one screen every lead can reach.
-    await page.goto('/admin/projects');
     await setTheme(page, theme);
+    await page.goto('/admin/projects');
     const archive = page.getByRole('button', { name: 'Archive' }).first();
     if (await archive.isVisible().catch(() => false)) {
       await archive.click();
@@ -151,8 +185,8 @@ test('open dialogs and menus pass axe', async ({ page, api }) => {
     }
 
     // A transition dialog, which asks for a reason before it will proceed.
-    await page.goto('/tasks/' + taskKey);
     await setTheme(page, theme);
+    await page.goto('/tasks/' + taskKey);
     const block = page.getByRole('button', { name: /^Block/ }).first();
     if (await block.isVisible().catch(() => false)) {
       await block.click();
@@ -160,6 +194,8 @@ test('open dialogs and menus pass axe', async ({ page, api }) => {
       found.push(...(await scan(page, 'transition dialog in ' + theme)));
       await page.getByRole('button', { name: 'Cancel' }).first().click();
     }
+
+    await context.close();
   }
 
   expect(found).toEqual([]);

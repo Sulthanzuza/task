@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import type { TaskDetail } from '@tm/shared';
 import { apiAs, expect, signIn, test, USERS } from '../fixtures';
-import { E2E_FIXED_TIME } from '../playwright.config';
+import { apiTime } from '../playwright.config';
 
 /**
  * The set a person actually reviews.
@@ -24,20 +24,33 @@ const WIDTHS = [1280, 375] as const;
 
 test.describe.configure({ timeout: 900_000 });
 
+/**
+ * Choose the theme the way a person does, before the page loads.
+ *
+ * Poking data-theme onto <html> changed the paint but not the provider's
+ * state, so the control kept showing whichever theme React still believed
+ * was current: a lit sun on a midnight screenshot. Writing the key the
+ * control writes and letting the app read it on mount means the whole
+ * picture agrees.
+ *
+ * Set before navigating rather than followed by a reload: the access token
+ * lives in memory, so every reload costs a refresh round trip, and doing
+ * that once per capture took the suite from six minutes to twenty.
+ */
 async function applyTheme(page: Page, theme: string) {
   await page.evaluate((value) => {
-    document.documentElement.setAttribute('data-theme', value);
     try {
       localStorage.setItem('tm-theme', value);
     } catch {
-      // Storage being unavailable must not stop the capture.
+      // Storage being unavailable must not stop the run.
     }
   }, theme);
 }
 
 /** Freeze the browser's clock before anything renders a relative time. */
 async function freezeClock(page: Page) {
-  await page.clock.setFixedTime(new Date(E2E_FIXED_TIME));
+  // The API's clock, so "how long ago" agrees with when the data was made.
+  await page.clock.setFixedTime(new Date(await apiTime()));
 }
 
 async function settle(page: Page): Promise<void> {
@@ -80,16 +93,18 @@ async function capture(page: Page, name: string, theme: string, width: number): 
 }
 
 /**
- * A single-pixel PNG, so the attachment list has a real thumbnail in it.
+ * A real 96x96 PNG, not a placeholder.
  *
- * Written as bytes rather than read from a fixture file: the point is to
- * exercise the upload path and show the image tile, and a file on disk would
- * be one more thing to keep.
+ * The previous one was a single flat pixel: a valid file, but it rendered as
+ * nothing, so the attachment row looked broken rather than full. This one
+ * has visible content, which is the point of showing a thumbnail at all.
  */
 const PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAWklEQVR42u3QMQEAAAjDMMC/56EB' +
-    'HkkFtJMFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-    'AAAAAAAAAAAAeBpbXAABc0+3VwAAAABJRU5ErkJggg==',
+  'iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAIAAABt+uBvAAAArklEQVR42u3QMQ0AIRREwd+f' +
+    'BwpknH8H+EADDqABDi6TvHqTnXjSq06BABAgQIAAAQIESIAAAQIECBAgQAIECBAgQIAAARIg' +
+    'QIAAAQK0v1zqMECAAAECBAgQIECAAAECBAgQIECAAN0ONOsYIECAAAECBAgQIECAAAECBAgQ' +
+    'IECATgY67RggQIAAAQIECBAgQIAAAQIECBAgQIBWAP31GCBAgAABAgQIECBAgL7caVAonWku' +
+    'eAOeAAAAAElFTkSuQmCC',
   'base64',
 );
 
@@ -107,7 +122,13 @@ async function buildShowcaseTask(api: APIRequestContext): Promise<string> {
 
   const people = await lead.get<{ items: Array<{ id: string; name: string }> }>('/users');
   const rahul = people.items.find((person) => person.name === USERS.member.name);
-  const nisha = people.items.find((person) => person.name === USERS.otherLead.name);
+  // Anyone but the assignee. Nisha if this lead can see her, otherwise
+  // whoever else is there: an empty Reviewer makes the screenshot look like
+  // the field does not work.
+  const reviewer =
+    people.items.find((person) => person.name === USERS.otherLead.name) ??
+    people.items.find((person) => person.name === USERS.lead.name) ??
+    people.items.find((person) => person.name !== USERS.member.name);
 
   const projects = await lead.get<{ items: Array<{ id: string; key: string }> }>('/projects');
   const project = projects.items[0];
@@ -130,8 +151,8 @@ async function buildShowcaseTask(api: APIRequestContext): Promise<string> {
       'go-live date rather than just the finance workstream.',
     priority: 'HIGH',
     assigneeId: rahul.id,
-    reviewerId: nisha?.id ?? null,
-    dueDate: new Date(new Date(E2E_FIXED_TIME).getTime() + 4 * 86_400_000)
+    reviewerId: reviewer?.id ?? null,
+    dueDate: new Date(new Date(await apiTime()).getTime() + 4 * 86_400_000)
       .toISOString()
       .slice(0, 10),
     estimatedHours: 6,
@@ -206,8 +227,8 @@ async function shoot(page: Page, screens: Array<{ name: string; path: string; re
 
     for (const theme of THEMES) {
       for (const screen of screens) {
-        await page.goto(screen.path);
         await applyTheme(page, theme);
+        await page.goto(screen.path);
         await expect(page.getByRole('main').getByText(screen.ready).first()).toBeVisible();
         await settle(page);
         await capture(page, screen.name, theme, width);
@@ -258,23 +279,23 @@ test('the open and dragging states', async ({ browser }) => {
   await signIn(page, USERS.lead);
 
   for (const theme of THEMES) {
-    await page.goto('/dashboard');
     await applyTheme(page, theme);
+    await page.goto('/dashboard');
     await page.getByTestId('notification-bell').click();
     await settle(page);
     await capture(page, 'notification-dropdown', theme, 1280);
     await page.keyboard.press('Escape');
 
-    await page.goto('/tasks');
     await applyTheme(page, theme);
+    await page.goto('/tasks');
     await page.getByRole('button', { name: /New task/i }).click();
     await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible();
     await settle(page);
     await capture(page, 'create-dialog', theme, 1280);
     await page.getByRole('button', { name: 'Cancel' }).first().click();
 
-    await page.goto('/board');
     await applyTheme(page, theme);
+    await page.goto('/board');
     const card = page.locator('[data-task-key]').first();
     await expect(card).toBeVisible();
     await settle(page);

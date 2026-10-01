@@ -259,7 +259,9 @@ function Column({
       data-status={status}
       data-droppable="true"
       className={cn(
-        'flex w-64 shrink-0 flex-col rounded-[var(--radius-card)] border backdrop-blur-sm transition-colors',
+        // min-h-0 so the card list below can be the thing that scrolls;
+        // without it a flex child refuses to shrink past its content.
+        'flex max-h-full w-64 min-h-0 shrink-0 flex-col rounded-[var(--radius-card)] border backdrop-blur-sm transition-colors',
         'bg-surface/60',
         isOver && !rejects && 'border-accent bg-accent-soft/40',
         isOver && rejects && 'border-danger bg-danger-soft/40',
@@ -267,7 +269,8 @@ function Column({
         rejects && 'opacity-60',
       )}
     >
-      <header className="flex items-center gap-2 px-3 py-2.5">
+      {/* shrink-0, so the header stays put while its cards scroll under it. */}
+      <header className="flex shrink-0 items-center gap-2 px-3 py-2.5">
         <span
           aria-hidden
           className="h-2 w-2 shrink-0 rounded-full"
@@ -283,7 +286,7 @@ function Column({
         {rejects ? <Ban size={13} className="text-danger" aria-label="Not allowed here" /> : null}
       </header>
 
-      <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain px-2 pb-2">
         {tasks.map((task) => (
           <DraggableCard key={task.id} task={task} />
         ))}
@@ -344,10 +347,17 @@ function ColumnStrip({ children }: { children: ReactNode }) {
 
   return (
     <div className="relative">
+      {/*
+        The strip is as tall as what is left of the window, and each column
+        scrolls inside it. With the page growing to fit the tallest column, a
+        busy In progress made the board 4,300px tall: every other column
+        header scrolled away, and the buttons for moving sideways ended up
+        somewhere around the fold.
+      */}
       <div
         ref={ref}
         onScroll={measure}
-        className="relative flex max-w-full flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-3"
+        className="relative flex max-h-[calc(100vh-11rem)] max-w-full flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-3"
       >
         {children}
       </div>

@@ -545,8 +545,19 @@
     --color-accent-2: var(--color-hero-accent-2);
     --color-accent-from: var(--color-hero-accent);
     --color-accent-to: var(--color-hero-accent-2);
+    /*
+     * The status colours too, not only the ink and the accent.
+     *
+     * The hero is dark in all four themes, so a number inside it that reads
+     * --color-warning picked up the page theme's amber: in light that is a
+     * dark brown-amber tuned for a white card, and it landed on navy. These
+     * are the dark-surface versions, and the token test checks them against
+     * --color-hero-to rather than against the card.
+     */
     --color-success: #34d399;
     --color-danger: #fb7185;
+    --color-warning: #fbbf24;
+    --color-info: #60a5fa;
 
     color: var(--color-hero-ink);
   }

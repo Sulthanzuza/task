@@ -21,8 +21,8 @@ import {
   ProgressBar,
   StatusBadge,
   UserAvatar,
+  RelativeTime,
 } from '@/components/common/badges';
-import { relativeTime } from '@/lib/utils';
 
 /**
  * A member opens their own page and sees exactly what their lead sees about them.
@@ -86,8 +86,7 @@ export function MemberPage() {
             {isSelf ? <span className="ml-2 text-sm font-normal text-ink-faint">(you)</span> : null}
           </h1>
           <p className="text-sm text-ink-muted">
-            Last update{' '}
-            {stats.data.lastActivityAt ? relativeTime(stats.data.lastActivityAt) : 'never'}
+            Last update <RelativeTime iso={stats.data.lastActivityAt} />
           </p>
         </div>
       </header>
@@ -235,7 +234,7 @@ function RecentActivity({ userId }: { userId: string | undefined }) {
                 <span className="text-ink-muted">{describeActivity(entry)}</span>
                 <span className="min-w-0 flex-1 truncate text-ink-faint">{entry.task.title}</span>
                 <time dateTime={entry.createdAt} className="shrink-0 text-xs text-ink-faint">
-                  {relativeTime(entry.createdAt)}
+                  <RelativeTime iso={entry.createdAt} />
                 </time>
               </li>
             ))}

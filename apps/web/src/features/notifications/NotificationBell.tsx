@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
-import { relativeTime } from '@/lib/utils';
+import { RelativeTime } from '@/components/common/badges';
 import {
   notificationHref,
   useMarkAllRead,
@@ -130,7 +130,7 @@ export function NotificationBell() {
                             </span>
                           ) : null}
                           <span className="mt-0.5 block text-[11px] text-ink-faint">
-                            {relativeTime(notification.createdAt)}
+                            <RelativeTime iso={notification.createdAt} />
                           </span>
                         </span>
                       </span>

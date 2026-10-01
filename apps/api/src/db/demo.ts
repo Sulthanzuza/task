@@ -45,8 +45,14 @@ function makeRandom(seed: number): () => number {
 const SEED = 20260930;
 const WEEKS = 12;
 
-/** Marks every task this file creates, so a re-run can recognise its own work. */
-const DEMO_MARKER = '[demo]';
+/**
+ * Marks every task this file creates, so a re-run can recognise its own work.
+ *
+ * It lives on the created-activity row rather than in the title. It used to
+ * be a "[demo]" suffix, which meant every title on every screen announced
+ * that the data was fake and ate the width a real title needed.
+ */
+const DEMO_MARKER = { demo: true } as const;
 
 const SUBJECTS = [
   'Reconcile supplier ledger for',
@@ -64,6 +70,26 @@ const SUBJECTS = [
   'Add a regression test for',
   'Split the batch job behind',
   'Rework permissions around',
+];
+
+/**
+ * A third word, so there are enough combinations to go round.
+ *
+ * Fifteen verbs and twelve nouns is 180 titles for about 200 tasks, and the
+ * old code papered over the shortfall by sticking the task's index on the
+ * end: "Add pagination to the tax report 161". Three lists give well over a
+ * thousand, drawn without replacement, so every title is unique and none of
+ * them has a number glued to it.
+ */
+const QUALIFIERS = [
+  '',
+  ' for the EU rollout',
+  ' before the quarter close',
+  ' on the mobile layout',
+  ' in the nightly run',
+  ' for large accounts',
+  ' after the migration',
+  ' in the reconciliation step',
 ];
 
 const OBJECTS = [
@@ -149,6 +175,28 @@ function planTasks(now: Date, timezone: string): Plan[] {
   // Monday-based, so a Wednesday is three days into the week.
   const daysElapsed = (weekday + 6) % 7;
 
+  /*
+   * Every combination, shuffled once with the same seeded generator, then
+   * handed out in order. Drawing at random would repeat long before the
+   * list ran out, and a repeated title in a list of tasks reads as a bug.
+   */
+  const titlePool: string[] = [];
+  for (const subject of SUBJECTS) {
+    for (const object of OBJECTS) {
+      for (const qualifier of QUALIFIERS) titlePool.push(subject + ' ' + object + qualifier);
+    }
+  }
+  for (let i = titlePool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [titlePool[i], titlePool[j]] = [titlePool[j] as string, titlePool[i] as string];
+  }
+  let titleAt = 0;
+  const nextTitle = (): string => {
+    const title = titlePool[titleAt % titlePool.length] as string;
+    titleAt += 1;
+    return title;
+  };
+
   const common = (createdAt: Date) => {
     const chosenLabels: string[] = [];
     if (random() < 0.85) chosenLabels.push(pick(random, LABEL_NAMES));
@@ -157,7 +205,7 @@ function planTasks(now: Date, timezone: string): Plan[] {
       if (!chosenLabels.includes(second)) chosenLabels.push(second);
     }
     return {
-      title: pick(random, SUBJECTS) + ' ' + pick(random, OBJECTS) + ' ' + DEMO_MARKER,
+      title: nextTitle(),
       project: (random() < 0.55 ? 'ERP' : 'CRM') as Plan['project'],
       assignee: pick(random, MEMBERS),
       reviewer: random() < 0.6 ? 'sulthan@example.com' : null,
@@ -210,7 +258,7 @@ function planTasks(now: Date, timezone: string): Plan[] {
 
       plans.push({
         ...base,
-        title: base.title + ' ' + plans.length,
+        title: base.title,
         status: cancelled ? 'CANCELLED' : 'COMPLETED',
         progress: cancelled ? Math.floor(random() * 60) : 100,
         dueDate: addDays(today, dueOffset),
@@ -272,7 +320,7 @@ function planTasks(now: Date, timezone: string): Plan[] {
 
     plans.push({
       ...base,
-      title: base.title + ' ' + plans.length,
+      title: base.title,
       status,
       progress,
       dueDate: addDays(today, dueOffset),
@@ -351,8 +399,8 @@ export async function seedDemo(now = new Date()): Promise<DemoResult> {
 
   const [already] = await db
     .select({ n: sql<number>`count(*)::int` })
-    .from(tasks)
-    .where(sql`${tasks.title} LIKE ${'%' + DEMO_MARKER + '%'}`);
+    .from(taskActivity)
+    .where(sql`${taskActivity.meta} @> ${JSON.stringify(DEMO_MARKER)}::jsonb`);
 
   if ((already?.n ?? 0) > 0) {
     logger.info({ existing: already?.n }, 'Demo data is already present; nothing to add.');
@@ -435,11 +483,14 @@ export async function seedDemo(now = new Date()): Promise<DemoResult> {
       field?: string;
       oldValue?: unknown;
       newValue?: unknown;
+      meta?: Record<string, unknown>;
       at: Date;
     }> = [
       {
         action: 'task.created',
         newValue: { title: plan.title, status: 'BACKLOG' },
+        // The only trace that this row was generated, and nobody reads it.
+        meta: DEMO_MARKER,
         at: plan.createdAt,
       },
     ];
@@ -502,6 +553,7 @@ export async function seedDemo(now = new Date()): Promise<DemoResult> {
         field: entry.field ?? null,
         oldValue: entry.oldValue === undefined ? null : entry.oldValue,
         newValue: entry.newValue === undefined ? null : entry.newValue,
+        meta: entry.meta ?? null,
         createdAt: entry.at,
       })),
     );

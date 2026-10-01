@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import type { TaskSummary } from '@tm/shared';
 import { apiAs, expect, signIn, test, USERS } from '../fixtures';
-import { E2E_FIXED_TIME } from '../playwright.config';
+import { apiTime } from '../playwright.config';
 
 /**
  * Capture every main screen in all four themes and both widths, and prove the
@@ -36,7 +36,19 @@ async function capture(
   options: { fullPage?: boolean } = {},
 ): Promise<void> {
   const file = name + '-' + theme + '-' + width + '.png';
-  const image = await page.screenshot({ fullPage: options.fullPage ?? false });
+  const image = await page.screenshot({
+    fullPage: options.fullPage ?? false,
+    /*
+     * Cover the relative times. The clock is frozen, but the data is not:
+     * the e2e database is rebuilt on every run, so a row created at 12:04
+     * and one created at 12:07 differ by a pixel in "3 minutes ago". These
+     * are the one thing in a committed screenshot that is not about the
+     * design, and masking them is what makes the rest diffable. The mask
+     * keeps Playwright's loud default colour, so nobody mistakes a covered
+     * timestamp for a rendering fault.
+     */
+    mask: [page.locator('[data-time]')],
+  });
   await mkdir(COMMITTED, { recursive: true });
   await writeFile(join(COMMITTED, file), image);
 }
@@ -46,26 +58,34 @@ async function capture(
  *
  * Every screen carries a relative time somewhere, and those moved between
  * runs, so re-running the capture produced a diff on pages nothing had
- * touched. See E2E_FIXED_TIME for why it is today rather than a fixed date.
+ * touched. The instant comes from the API, so the data's age is honest.
  */
 async function freezeClock(page: Page) {
-  await page.clock.setFixedTime(new Date(E2E_FIXED_TIME));
+  // The API's clock, so "how long ago" agrees with when the data was made.
+  await page.clock.setFixedTime(new Date(await apiTime()));
 }
 
 const THEMES = ['midnight', 'dusk', 'light', 'violet'] as const;
-type Theme = (typeof THEMES)[number];
 
 /**
- * Set the theme the way the app does: the attribute on <html> is what the
- * tokens key off, and the stored value is what survives a navigation.
+ * Choose the theme the way a person does, before the page loads.
+ *
+ * Poking data-theme onto <html> changed the paint but not the provider's
+ * state, so the control kept showing whichever theme React still believed
+ * was current: a lit sun on a midnight screenshot. Writing the key the
+ * control writes and letting the app read it on mount means the whole
+ * picture agrees.
+ *
+ * Set before navigating rather than followed by a reload: the access token
+ * lives in memory, so every reload costs a refresh round trip, and doing
+ * that once per capture took the suite from six minutes to twenty.
  */
-async function applyTheme(page: Page, theme: Theme) {
+async function applyTheme(page: Page, theme: string) {
   await page.evaluate((value) => {
-    document.documentElement.setAttribute('data-theme', value);
     try {
       localStorage.setItem('tm-theme', value);
     } catch {
-      // Storage being unavailable must not stop the screenshot.
+      // Storage being unavailable must not stop the run.
     }
   }, theme);
 }
@@ -207,8 +227,8 @@ test('capture every screen in all four themes, at desktop and phone width', asyn
 
     for (const theme of THEMES) {
       for (const screen of screens) {
-        await page.goto(screen.path);
         await applyTheme(page, theme);
+        await page.goto(screen.path);
         /*
          * Scoped to the page body. The navigation pills carry these words too
          * and are hidden at phone width, so an unscoped match finds a hidden
@@ -233,12 +253,14 @@ test('capture every screen in all four themes, at desktop and phone width', asyn
 
 test('the login screen is captured too', async ({ page, problems }) => {
   await freezeClock(page);
+  // localStorage needs an origin, and about:blank has none.
+  await page.goto('/login');
 
   for (const viewport of VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     for (const theme of THEMES) {
-      await page.goto('/login');
       await applyTheme(page, theme);
+      await page.goto('/login');
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await settle(page);
       await capture(page, 'login', theme, viewport.width, { fullPage: true });
@@ -262,16 +284,16 @@ test('capture the open and dragging states', async ({ page }) => {
 
   for (const theme of THEMES) {
     // The notification dropdown.
-    await page.goto('/dashboard');
     await applyTheme(page, theme);
+    await page.goto('/dashboard');
     await page.getByTestId('notification-bell').click();
     await settle(page);
     await capture(page, 'notification-dropdown', theme, 1280);
     await page.keyboard.press('Escape');
 
     // A dialog over a dimmed page.
-    await page.goto('/tasks');
     await applyTheme(page, theme);
+    await page.goto('/tasks');
     await page.getByRole('button', { name: /New task/i }).click();
     await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible();
     await settle(page);
@@ -282,8 +304,8 @@ test('capture the open and dragging states', async ({ page }) => {
      * A card held above the board. The drag overlay carries the accent glow,
      * and a page at rest never shows it.
      */
-    await page.goto('/board');
     await applyTheme(page, theme);
+    await page.goto('/board');
     const card = page.locator('[data-task-key]').first();
     await expect(card).toBeVisible();
     await settle(page);

@@ -15,9 +15,9 @@ import {
   ProgressBar,
   StatusBadge,
   UserAvatar,
+  RelativeTime,
 } from '@/components/common/badges';
 import { DataTable, type Column } from '@/components/common/table';
-import { relativeTime } from '@/lib/utils';
 
 /**
  * Filters live in the URL, so a filtered view can be bookmarked, shared in chat,
@@ -291,7 +291,7 @@ export function TasksPage() {
                     />
                   </td>
                   <td className="px-3 py-2.5 text-xs whitespace-nowrap text-ink-muted">
-                    {relativeTime(task.lastActivityAt)}
+                    <RelativeTime iso={task.lastActivityAt} />
                   </td>
                 </tr>
               ))}

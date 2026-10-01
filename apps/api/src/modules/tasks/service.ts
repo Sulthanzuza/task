@@ -5,6 +5,7 @@ import type {
   TaskStatus,
   CreateTaskInput,
   ListTasksQuery,
+  ActivityAction,
   TaskDetail,
   TaskSummary,
   TimelineEntry,
@@ -352,7 +353,9 @@ export async function getTimeline(actor: Actor, idOrKey: string): Promise<Timeli
       kind: 'activity',
       id: String(a.id),
       actor: toUserSummary(a.actorId ? people.get(a.actorId) : null),
-      action: a.action,
+      // The column is text; every writer uses a literal from ACTIVITY_ACTIONS,
+      // and the unit test over that list is what keeps it true.
+      action: a.action as ActivityAction,
       field: a.field,
       oldValue: a.oldValue,
       newValue: a.newValue,

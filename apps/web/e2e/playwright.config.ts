@@ -16,27 +16,44 @@ export const E2E_API_URL = 'http://localhost:' + E2E_API_PORT;
 
 /** A separate database, dropped and rebuilt before every run. */
 /**
- * One instant for the whole run: today at 09:30 in the organisation's zone.
+ * One instant for the whole run, read from the API.
  *
- * Every screenshot used to show "2 hours ago" somewhere, and that number
- * moved between runs, so a capture of an unchanged page still came out as a
- * diff. Freezing the browser's clock stops that.
+ * Every screen carries a relative time somewhere, and those moved between
+ * runs, so re-running the capture produced a diff on pages nothing had
+ * touched. Freezing the browser's clock fixes that.
  *
- * It is today rather than a date written down here on purpose. The API has
- * its own clock, and nothing can freeze that from out here; pinning the
- * browser to a date the server does not agree with would make every screen
- * say a task is three weeks overdue. Today at a fixed time of day is the
- * furthest the two can be held together, and it makes two runs on the same
- * day identical, which is what the diffs were about.
+ * It has to be the *API's* clock, not a time written down here. The server
+ * stamps the data; the browser renders "how long ago". Freeze the browser
+ * three hours behind the server and every row it just created reads "in 3
+ * hours". So the harness asks /health what time it is and pins the browser
+ * to that.
+ *
+ * Resolved once, lazily, because the config is loaded before the server
+ * exists.
  */
-export const E2E_FIXED_TIME = (() => {
+let fixedTime: Promise<string> | null = null;
+
+export function apiTime(): Promise<string> {
+  fixedTime ??= fetch(E2E_API_URL + '/api/v1/health')
+    .then((response) => response.json() as Promise<{ time?: string }>)
+    .then((body) => body.time ?? new Date().toISOString())
+    .catch(() => new Date().toISOString());
+  return fixedTime;
+}
+
+/**
+ * The seed's reference instant, which the API process reads from its
+ * environment. It cannot come from the API, which is not running yet when
+ * this is computed, so it is today at 09:30 in the organisation's zone and
+ * the demo data is dated from it.
+ */
+export const E2E_SEED_TIME = (() => {
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-  // 09:30 in Asia/Kolkata, written as the instant it is.
   return today + 'T04:00:00.000Z';
 })();
 
@@ -76,7 +93,7 @@ const apiEnv = {
   SEED_TIMEZONE: 'Asia/Kolkata',
   // Read by db:prepare-e2e, so the demo data is dated from the same instant
   // the browser's clock is frozen at.
-  E2E_FIXED_TIME: E2E_FIXED_TIME,
+  E2E_FIXED_TIME: E2E_SEED_TIME,
   E2E_DEMO: '',
   SEED_PASSWORD: 'Password123!',
   // The suite checks that email really arrives, so the queue runs and the

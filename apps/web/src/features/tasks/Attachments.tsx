@@ -298,6 +298,12 @@ export function Attachments({
 /** An image shows itself; everything else gets an icon that says what it is. */
 function Thumbnail({ attachment }: { attachment: Attachment }) {
   const [source, setSource] = useState<string | null>(null);
+  /*
+   * A fetch that fails already falls through to the icon. This covers the
+   * other half: bytes that arrive and then will not decode, where the <img>
+   * rendered as an empty box with no hint of what the file even was.
+   */
+  const [broken, setBroken] = useState(false);
   const isImage = attachment.mimeType.startsWith('image/');
 
   /*
@@ -319,6 +325,8 @@ function Thumbnail({ attachment }: { attachment: Attachment }) {
         }
         url = created;
         setSource(created);
+        // New bytes get another chance to decode.
+        setBroken(false);
       })
       // A thumbnail that will not load is not worth an error message; the
       // icon stands in for it.
@@ -330,11 +338,12 @@ function Thumbnail({ attachment }: { attachment: Attachment }) {
     };
   }, [attachment, isImage]);
 
-  if (isImage && source) {
+  if (isImage && source && !broken) {
     return (
       <img
         src={source}
         alt={attachment.fileName}
+        onError={() => setBroken(true)}
         className="h-10 w-10 shrink-0 rounded-md object-cover"
       />
     );

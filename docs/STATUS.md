@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-01. Branch `master`, head `5269072` plus the review fixes below.
+Last updated: 2026-10-01. Branch `master`, head `a23a195` plus the second review round below.
 
 ## Built, by prompt
 
@@ -42,7 +42,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `30ad223` | Responsive top bar: pill icons down to 900px, identity into the account menu |
 | `a5313f0` | Dashboard redesign, the chart set, and `pnpm db:seed --demo` |
 | `5269072` | The design system applied to every remaining screen (below) |
-| _this one_ | The fixes from the screenshot review (below) |
+| `a23a195` | The fixes from the first screenshot review (below) |
+| _this one_ | The second review round (below) |
 
 ### The design system, applied (three design prompts)
 
@@ -120,12 +121,13 @@ These are decided, not oversights. Do not "fix" them without asking.
   because the review set runs against the demo seed, and twelve weeks of generated
   history would break every test that counts the rows the ordinary seed creates. Both
   name files `<screen>-<theme>-<width>.png`.
-- **Both runs freeze the browser clock at today 09:30 in the org zone.** Every screen
+- **Both runs freeze the browser clock to the API's `/health` time.** Every screen
   carries a relative time somewhere, so re-running the capture produced a diff on pages
-  nothing had touched. It is *today* rather than a fixed date because the API has its
-  own clock and nothing can freeze that from outside: pinning the browser to a date the
-  server disagrees with would make every screen claim the work is weeks overdue. Two
-  runs on the same day are now identical, which is what the diffs were about.
+  nothing had touched. The instant has to come from the API, because the server stamps
+  the data and the browser renders "how long ago": freezing the browser three hours
+  behind the server made every row it had just created read "in 3 hours". The committed
+  set additionally masks `[data-time]` elements, because the database is rebuilt each
+  run and two rows written three minutes apart differ by a pixel.
 - **The review set is captured per role.** Member screens (My Tasks, task detail,
   board) as Rahul, lead screens as Sulthan, because a member sees different controls
   and shooting everything as a lead hides half of the product.
@@ -156,6 +158,10 @@ None of these is blocking. Each is a real gap, checked against the code today.
 - **Infinite scroll.** The task list has a "Load more" button
   (`TasksPage.tsx`). The query is already an infinite query, so this is a scroll
   sentinel, not a rewrite.
+- **The font comes from Google Fonts.** `index.html` loads Plus Jakarta Sans from a
+  CDN, so a DNS blip fails nineteen end-to-end tests at once: the console error trips
+  the `problems` fixture. Self-hosting the font would make the suite independent of the
+  network.
 - **Thumbnail batching.** `Attachments.tsx` fetches each image separately so the
   access check applies to the bytes. Fine for a handful; a task with twenty images
   makes twenty requests.
@@ -209,7 +215,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
-| `apps/web` unit (tokens and contrast) | 1 | 37 |
+| `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
 | `apps/api` integration | 20 | 376 |
 | `apps/web` end-to-end | 13 | 56 |
 

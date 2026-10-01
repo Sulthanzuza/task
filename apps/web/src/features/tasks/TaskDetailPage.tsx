@@ -40,10 +40,12 @@ import {
   PriorityBadge,
   StatusBadge,
   UserAvatar,
+  RelativeTime,
 } from '@/components/common/badges';
-import { formatDate, formatDateTime, formatHours, relativeTime } from '@/lib/utils';
+import { formatDate, formatDateTime, formatHours } from '@/lib/utils';
 import { TransitionDialog } from './TransitionDialog';
 import { PersonPicker } from './PersonPicker';
+import { describeActivity } from './activityText';
 
 export function TaskDetailPage() {
   const { key } = useParams<{ key: string }>();
@@ -205,7 +207,7 @@ function TaskHeader({ task }: { task: TaskDetail }) {
           <div className="flex flex-wrap items-center gap-2">
             <BlockerBadge type={task.blockerType} />
             <span className="text-xs text-danger">
-              Blocked {task.blockedAt ? relativeTime(task.blockedAt) : ''}
+              Blocked {task.blockedAt ? <RelativeTime iso={task.blockedAt} /> : null}
             </span>
           </div>
           <p className="mt-1.5 text-sm text-ink">{task.blockedReason}</p>
@@ -827,7 +829,9 @@ function FieldsCard({ task }: { task: TaskDetail }) {
       {task.startDate ? <Field label="Start">{formatDate(task.startDate)}</Field> : null}
       <DueDateField task={task} />
       <EstimateField task={task} />
-      <Field label="Last update">{relativeTime(task.lastActivityAt)}</Field>
+      <Field label="Last update">
+        <RelativeTime iso={task.lastActivityAt} />
+      </Field>
       {task.completedAt ? (
         <Field label="Completed">{formatDateTime(task.completedAt)}</Field>
       ) : null}
@@ -888,52 +892,6 @@ function activityColour(action: string): string {
   return 'var(--color-border-strong)';
 }
 
-/** Activity rows are rendered as sentences, so the history reads like a story. */
-function describe(entry: Extract<TimelineEntry, { kind: 'activity' }>): string {
-  const who = entry.actor?.name ?? 'The system';
-  const from = entry.oldValue;
-  const to = entry.newValue;
-
-  switch (entry.action) {
-    case 'task.created':
-      return who + ' created this task';
-    case 'task.transitioned':
-      return (
-        who +
-        ' moved it from ' +
-        STATUS_LABELS[from as TaskStatus] +
-        ' to ' +
-        STATUS_LABELS[to as TaskStatus]
-      );
-    case 'task.progress':
-      return who + ' changed progress from ' + String(from) + '% to ' + String(to) + '%';
-    case 'task.assigned':
-      return to ? who + ' changed the assignee' : who + ' removed the assignee';
-    case 'task.reviewer_changed':
-      return who + ' changed the reviewer';
-    case 'task.updated':
-      return who + ' changed ' + (entry.field ?? 'a field');
-    case 'task.watcher_added':
-      return who + ' started watching';
-    case 'task.watcher_removed':
-      return who + ' stopped watching';
-    case 'task.dependency_added':
-      return who + ' added a dependency';
-    case 'task.dependency_removed':
-      return who + ' removed a dependency';
-    case 'task.deleted':
-      return who + ' deleted this task';
-    case 'comment.created':
-      return '';
-    case 'comment.edited':
-      return who + ' edited a comment';
-    case 'comment.deleted':
-      return who + ' deleted a comment';
-    default:
-      return who + ' ' + entry.action;
-  }
-}
-
 function TimelineCard({
   taskKey,
   entries,
@@ -978,7 +936,11 @@ function TimelineCard({
                 >
                   <p className="text-xs text-ink-muted">
                     <span className="font-medium text-ink">{entry.author.name}</span>{' '}
-                    {isPendingComment(entry.id) ? 'sending…' : relativeTime(entry.createdAt)}
+                    {isPendingComment(entry.id) ? (
+                      'sending…'
+                    ) : (
+                      <RelativeTime iso={entry.createdAt} />
+                    )}
                     {entry.editedAt ? ' · edited' : ''}
                   </p>
                   <div className="mt-1">
@@ -1001,10 +963,8 @@ function TimelineCard({
                   className="relative z-10 mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-surface"
                   style={{ background: activityColour(entry.action) }}
                 />
-                <span className="flex-1">{describe(entry)}</span>
-                <time dateTime={entry.createdAt} className="shrink-0 text-ink-faint">
-                  {relativeTime(entry.createdAt)}
-                </time>
+                <span className="flex-1">{describeActivity(entry)}</span>
+                <RelativeTime iso={entry.createdAt} className="shrink-0 text-ink-faint" />
               </li>
             ),
           )}

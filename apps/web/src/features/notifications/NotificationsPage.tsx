@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
-import { cn, relativeTime } from '@/lib/utils';
+import { RelativeTime } from '@/components/common/badges';
+import { cn } from '@/lib/utils';
 import { notificationHref, useMarkAllRead, useMarkRead, useNotifications } from './api';
 
 export function NotificationsPage() {
@@ -76,7 +77,7 @@ export function NotificationsPage() {
                 </div>
 
                 <p className="text-[11px] whitespace-nowrap text-ink-faint sm:text-right">
-                  {relativeTime(notification.createdAt)}
+                  <RelativeTime iso={notification.createdAt} />
                 </p>
 
                 {!notification.readAt ? (

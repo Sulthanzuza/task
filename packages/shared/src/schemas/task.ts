@@ -197,12 +197,40 @@ export const addDependencySchema = z.object({
 });
 export type AddDependencyInput = z.infer<typeof addDependencySchema>;
 
+/** Activity action names. Kept as a closed list so the UI can render every one as a sentence. */
+export const ACTIVITY_ACTIONS = [
+  'task.created',
+  'task.updated',
+  'task.transitioned',
+  'task.assigned',
+  'task.reviewer_changed',
+  'task.progress',
+  'task.deleted',
+  'task.restored',
+  'task.label_added',
+  'task.label_removed',
+  'task.imported',
+  'task.dependency_added',
+  'task.dependency_removed',
+  'task.watcher_added',
+  'task.watcher_removed',
+  'comment.created',
+  'comment.edited',
+  'comment.deleted',
+  'attachment.created',
+  'attachment.deleted',
+] as const;
+export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
+
 /** Timeline: activity rows and comments merged, oldest first. */
 export const activityEntrySchema = z.object({
   kind: z.literal('activity'),
   id: z.string(),
   actor: userSummarySchema.nullable(),
-  action: z.string(),
+  // The closed list, not a free string: the UI renders every one of these as
+  // a sentence, and a switch over a string can only fall through to printing
+  // the action name at somebody.
+  action: z.enum(ACTIVITY_ACTIONS),
   field: z.string().nullable(),
   oldValue: z.unknown().nullable(),
   newValue: z.unknown().nullable(),
@@ -229,30 +257,6 @@ export const timelineEntrySchema = z.discriminatedUnion('kind', [
   commentEntrySchema,
 ]);
 export type TimelineEntry = z.infer<typeof timelineEntrySchema>;
-
-/** Activity action names. Kept as a closed list so the UI can render every one as a sentence. */
-export const ACTIVITY_ACTIONS = [
-  'task.created',
-  'task.updated',
-  'task.transitioned',
-  'task.assigned',
-  'task.reviewer_changed',
-  'task.progress',
-  'task.deleted',
-  'task.restored',
-  'task.label_added',
-  'task.label_removed',
-  'task.dependency_added',
-  'task.dependency_removed',
-  'task.watcher_added',
-  'task.watcher_removed',
-  'comment.created',
-  'comment.edited',
-  'comment.deleted',
-  'attachment.created',
-  'attachment.deleted',
-] as const;
-export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number];
 
 /**
  * Per-column counts for the board.

@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
-import type { TaskSummary } from '@tm/shared';
+import type { TaskStatus, TaskSummary } from '@tm/shared';
+import { canTransition } from '@tm/shared';
 import { useTaskList, useTransitionTask } from './api';
+import { useAuth } from '@/features/auth/AuthContext';
 import {
   Button,
   Card,
@@ -183,7 +185,8 @@ function MyDay({
         tone: 'warning',
       },
       { label: 'Overdue', value: overdue, to: '/tasks?assigneeId=me&overdue=true', tone: 'danger' },
-      { label: 'In review', value: reviews.length, to: '/tasks?reviewerId=me' },
+      // The same words as the section below it, which is the list it opens.
+      { label: 'Waiting on you', value: reviews.length, to: '/tasks?reviewerId=me' },
     ];
 
   return (
@@ -213,48 +216,79 @@ function MyDay({
   );
 }
 
-/** Quick actions come from the workflow, so a member sees only what they may do. */
+/**
+ * Quick actions come from the workflow, so a member sees only what they may
+ * do, and Blocked gets one too: it is the row most likely to need moving.
+ */
+function quickActionFor(task: TaskSummary): { label: string; to: TaskStatus } | null {
+  const options: Array<{ label: string; to: TaskStatus }> = [
+    { label: 'Start', to: 'IN_PROGRESS' },
+    { label: 'Submit for review', to: 'READY_FOR_REVIEW' },
+  ];
+
+  if (task.status === 'ASSIGNED') return options[0] as { label: string; to: TaskStatus };
+  if (task.status === 'IN_PROGRESS') return options[1] as { label: string; to: TaskStatus };
+  if (task.status === 'CHANGES_REQUESTED' || task.status === 'BLOCKED') {
+    return { label: 'Resume', to: 'IN_PROGRESS' };
+  }
+  return null;
+}
+
+/**
+ * One row, two shapes.
+ *
+ * From md it is six fixed tracks, and the action track is there whether or
+ * not the row has an action: with `auto` the columns re-measured per row, so
+ * a row without a button put its due date where the row above put its
+ * status, and nothing lined up down the page. The title takes the 1fr track
+ * so it gets the space left over rather than a share of it.
+ *
+ * On a phone the title has its own full-width line and may run to two before
+ * it truncates, because one line of a truncated title is often just the
+ * project noun.
+ */
 function TaskRow({ task }: { task: TaskSummary }) {
   const transition = useTransitionTask(task.id);
+  const { user } = useAuth();
 
+  const candidate = quickActionFor(task);
+
+  /*
+   * Offered only if the workflow would accept it from this person: a button
+   * that always fails is worse than no button. The relationships are the
+   * ones the browser can actually know. isTeamLeadOfProject is left false
+   * because a TaskSummary carries no team, and on this screen it does not
+   * matter: every row here is the reader's own work, so being the assignee
+   * is the relationship the rules are looking at.
+   */
   const quickAction =
-    task.status === 'ASSIGNED'
-      ? { label: 'Start', to: 'IN_PROGRESS' as const }
-      : task.status === 'IN_PROGRESS'
-        ? { label: 'Submit for review', to: 'READY_FOR_REVIEW' as const }
-        : task.status === 'CHANGES_REQUESTED'
-          ? { label: 'Resume', to: 'IN_PROGRESS' as const }
-          : null;
+    candidate &&
+    user &&
+    canTransition(task.status, candidate.to, {
+      role: user.role,
+      isAssignee: task.assignee?.id === user.id,
+      isReviewer: task.reviewer?.id === user.id,
+      isTeamLeadOfProject: false,
+    }).ok
+      ? candidate
+      : null;
 
   return (
-    /*
-     * Two shapes, not one that wraps.
-     *
-     * From md it is fixed columns, so the eye runs down one. On a phone the
-     * title gets a line of its own at full width and everything else sits on
-     * a second line underneath, because wrapping a six-column row produced a
-     * title squeezed into whatever was left beside a progress bar.
-     */
     <li
       className={cn(
         'grid grid-cols-1 gap-x-3 gap-y-2 px-4 py-3',
-        'md:grid-cols-[78px_minmax(0,1fr)_96px_auto_80px_auto] md:items-center md:gap-y-0',
+        'md:grid-cols-[78px_minmax(0,1fr)_104px_132px_84px_132px] md:items-center md:gap-y-0',
       )}
     >
-      {/* First on a phone, second on a wide screen. */}
       <Link
         to={'/tasks/' + task.key}
         title={task.title}
-        className="order-1 min-w-0 truncate text-sm hover:underline md:order-2"
+        className="order-1 min-w-0 text-sm hover:underline md:order-2 md:truncate"
       >
-        {task.title}
+        {/* Two lines before it gives up, on a phone only. */}
+        <span className="line-clamp-2 md:line-clamp-none">{task.title}</span>
       </Link>
 
-      {/*
-        Wrapping is allowed below md. The key, the bar, the status, the date
-        and an action do not fit 343px on one line, and the alternative is a
-        page that scrolls sideways.
-      */}
       <div className="order-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 md:order-1 md:contents">
         <span className="flex shrink-0 items-center gap-1.5">
           <PriorityIcon priority={task.priority} />
@@ -281,21 +315,21 @@ function TaskRow({ task }: { task: TaskSummary }) {
         </span>
 
         {/*
-          The action stays on the row at 375 rather than moving into a menu:
-          there is at most one of them, and a single button fits where a
-          three-dot menu plus its sheet would not be any smaller.
+          The track exists even when the row has no action, so every row's
+          columns start in the same place.
         */}
-        {quickAction ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto shrink-0 md:order-6 md:ml-0"
-            disabled={transition.isPending}
-            onClick={() => transition.mutate({ to: quickAction.to })}
-          >
-            {quickAction.label}
-          </Button>
-        ) : null}
+        <span className="ml-auto shrink-0 md:order-6 md:ml-0 md:justify-self-end">
+          {quickAction ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={transition.isPending}
+              onClick={() => transition.mutate({ to: quickAction.to })}
+            >
+              {quickAction.label}
+            </Button>
+          ) : null}
+        </span>
       </div>
     </li>
   );

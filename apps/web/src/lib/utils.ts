@@ -5,10 +5,29 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-/** "2 hours ago", "in 3 days". Short, because it appears in dense tables. */
+/**
+ * How long ago something happened, as close to the client's clock as it can
+ * honestly get.
+ *
+ * Everything this formats has already happened: a comment was posted, a task
+ * was updated. So it must never say "in 4 hours". It did, because the
+ * server's clock and the browser's are two different clocks, and a device
+ * running a few minutes slow is enough on its own.
+ *
+ * Anything within SOON_SECONDS ahead of the browser is treated as just
+ * happening, which is what it is. Further ahead than that is a real future
+ * date, such as a due date, and is phrased as one.
+ */
+const SOON_SECONDS = 5 * 60;
+
 export function relativeTime(iso: string | null | undefined, now = new Date()): string {
   if (!iso) return 'never';
   const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'never';
+
+  const ahead = (then - now.getTime()) / 1000;
+  if (ahead > 0 && ahead <= SOON_SECONDS) return 'just now';
+
   const seconds = Math.round((then - now.getTime()) / 1000);
 
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [

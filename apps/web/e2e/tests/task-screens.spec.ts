@@ -65,22 +65,35 @@ test('a PDF uploads, shows on the task, in the timeline and in another tab', asy
       buffer: tinyPdf(),
     });
 
-    // On the task itself, with its size and who put it there.
-    await expect(page.getByText('specification.pdf')).toBeVisible();
+    /*
+     * Scoped to the attachments panel. The timeline now names the file too
+     * ("Sulthan attached specification.pdf"), so an unscoped match finds
+     * both and cannot say which one it meant.
+     */
+    const panel = page.getByRole('region', { name: /Attachments/ });
+    await expect(panel.getByText('specification.pdf')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Delete' }).first()).toBeVisible();
 
     // And in the history, because attaching is a change to the task.
-    await expect(page.getByText('attached', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('attached specification.pdf')).toBeVisible();
 
     // The other tab catches up on its own, without a reload.
-    await expect(other.getByText('specification.pdf')).toBeVisible({ timeout: 15_000 });
+    await expect(
+      other.getByRole('region', { name: /Attachments/ }).getByText('specification.pdf'),
+    ).toBeVisible({ timeout: 15_000 });
 
     // Deleting asks first.
     await page.getByRole('button', { name: 'Delete' }).first().click();
     await expect(page.getByRole('dialog')).toContainText('cannot be recovered');
     await page.getByTestId('confirm-action').click();
 
-    await expect(page.getByText('specification.pdf')).toHaveCount(0);
+    /*
+     * Gone from the list, not from the history. The timeline keeps "attached
+     * specification.pdf" and gains "removed specification.pdf", which is the
+     * point of an audit trail.
+     */
+    await expect(panel.getByText('specification.pdf')).toHaveCount(0);
+    await expect(page.getByText('removed specification.pdf')).toBeVisible();
   } finally {
     await context.close();
   }

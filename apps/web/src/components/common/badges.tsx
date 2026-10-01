@@ -8,7 +8,7 @@ import {
   statusColor,
   tintedPill,
 } from '@tm/shared';
-import { cn, formatDate, initials, todayIso } from '@/lib/utils';
+import { cn, formatDate, initials, relativeTime, todayIso } from '@/lib/utils';
 
 /**
  * Status, priority and due date are read at a glance all day long, so each has
@@ -164,6 +164,27 @@ export function DueBadge({
   );
 }
 
+/**
+ * A relative time, marked so a screenshot can cover it.
+ *
+ * "2 hours ago" is correct and useless to a byte comparison: it changes
+ * every run. data-time is what the capture masks, and the machine-readable
+ * instant stays in dateTime where it belongs anyway.
+ */
+export function RelativeTime({
+  iso,
+  className,
+}: {
+  iso: string | null | undefined;
+  className?: string;
+}) {
+  return (
+    <time data-time dateTime={iso ?? undefined} className={className}>
+      {relativeTime(iso)}
+    </time>
+  );
+}
+
 export function BlockerBadge({ type }: { type: BlockerType | null }) {
   if (!type) return null;
   return (
@@ -232,10 +253,17 @@ export function UserAvatar({
   user,
   size = 'md',
   showName = false,
+  nameOnly,
 }: {
   user: UserSummary | null;
   size?: 'sm' | 'md';
   showName?: boolean;
+  /**
+   * 'first' shows the given name only, for columns too narrow for both but
+   * far too wide for a single initial. The full name stays in the title, so
+   * two people sharing a first name are still tellable apart on hover.
+   */
+  nameOnly?: 'first';
 }) {
   if (!user) {
     return <span className="text-xs text-ink-faint">Unassigned</span>;
@@ -259,7 +287,11 @@ export function UserAvatar({
           initials(user.name)
         )}
       </span>
-      {showName ? <span className="truncate text-sm text-ink">{user.name}</span> : null}
+      {showName ? (
+        <span title={user.name} className="truncate text-sm text-ink">
+          {nameOnly === 'first' ? (user.name.split(/\s+/)[0] ?? user.name) : user.name}
+        </span>
+      ) : null}
     </span>
   );
 }

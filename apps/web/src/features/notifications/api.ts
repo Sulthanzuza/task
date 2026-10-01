@@ -8,6 +8,8 @@ export interface NotificationView {
   body: string | null;
   taskId: string | null;
   taskKey: string | null;
+  /** Who did the thing, so several updates to one task can be summarised. */
+  actorName: string | null;
   /** Where this notification goes. Taskless ones carry their own destination. */
   link: string | null;
   readAt: string | null;

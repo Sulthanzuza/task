@@ -701,13 +701,17 @@ function Attention({
                    * wraps instead.
                    */
                   'flex flex-wrap gap-y-1.5',
-                  'md:grid md:grid-cols-[24px_56px_minmax(0,1fr)_auto_64px_72px_auto] md:gap-y-0',
+                  // 92px: the icon plus "ERP-1234" without wrapping. At 56px
+                  // the key broke after the hyphen once the icon arrived.
+                  'md:grid md:grid-cols-[24px_92px_minmax(0,1fr)_auto_64px_72px_auto] md:gap-y-0',
                 )}
               >
                 <UserAvatar user={item.assignee} size="sm" />
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1.5 whitespace-nowrap">
                   <PriorityIcon priority={item.priority} />
-                  <span className="font-mono text-xs text-ink-faint">{item.key}</span>
+                  <span className="font-mono text-xs whitespace-nowrap text-ink-faint">
+                    {item.key}
+                  </span>
                 </span>
                 <span className="truncate text-sm" title={item.title}>
                   {item.title}

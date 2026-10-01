@@ -154,3 +154,20 @@ export const WEEKDAY_NAMES = [
   'Friday',
   'Saturday',
 ] as const;
+
+/**
+ * The scheduling calendar, for anybody signed in.
+ *
+ * Which days the organisation does not work is not administrative detail: a
+ * calendar that shades a Sunday like a Tuesday, or a task that falls due on
+ * a public holiday with no hint of it, is wrong on everyone's screen. The
+ * settings themselves stay behind org.manage; this is the part the product
+ * needs in order to draw a week correctly.
+ */
+export const workCalendarSchema = z.object({
+  /** 0 = Sunday ... 6 = Saturday. */
+  weekendDays: z.array(z.number().int().min(0).max(6)),
+  weekStartsOn: z.number().int().min(0).max(6),
+  holidays: z.array(z.object({ date: z.string(), name: z.string() })),
+});
+export type WorkCalendarView = z.infer<typeof workCalendarSchema>;

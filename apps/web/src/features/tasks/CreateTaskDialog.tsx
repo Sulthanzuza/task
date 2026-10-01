@@ -4,11 +4,13 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { UserSummary } from '@tm/shared';
 import type { z } from 'zod';
-import { Paperclip, Plus, Search, X } from 'lucide-react';
+import { Paperclip, Plus, Search, Upload, X } from 'lucide-react';
 import {
   createTaskSchema,
-  TASK_PRIORITIES,
   PRIORITY_LABELS,
+  PRIORITY_ORDER,
+  priorityColor,
+  tintedPill,
   type CreateTaskInput,
   type Label as TaskLabel,
   type TaskSummary,
@@ -26,12 +28,13 @@ import {
   FieldError,
   Input,
   Label,
-  Select,
   Spinner,
   Textarea,
 } from '@/components/ui/primitives';
+import { PriorityIcon } from '@/components/common/badges';
 import { cn } from '@/lib/utils';
 import { PersonPicker } from './PersonPicker';
+import { OptionPicker } from '@/components/ui/OptionPicker';
 
 /**
  * Uses the same Zod schema the API validates with, so the two agree by construction.
@@ -117,6 +120,7 @@ function CreateTaskForm({
    * render, which the React Compiler cannot memoize, so it gives up on the
    * whole component.
    */
+  const priority = useWatch({ control, name: 'priority' });
   const assigneeId = useWatch({ control, name: 'assigneeId' });
   const reviewerId = useWatch({ control, name: 'reviewerId' });
 
@@ -201,18 +205,17 @@ function CreateTaskForm({
 
         <form onSubmit={onSubmit} noValidate className="space-y-3.5">
           <div>
-            <Label htmlFor="project">Project</Label>
-            <Select
-              id="project"
+            <Label>Project</Label>
+            {/* The drawer's own styling, not the operating system's. */}
+            <OptionPicker
+              label="Project"
               value={projectId}
-              onChange={(e) => setChosenProjectId(e.currentTarget.value)}
-            >
-              {projects.data?.items.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.key} — {project.name}
-                </option>
-              ))}
-            </Select>
+              onChange={setChosenProjectId}
+              options={(projects.data?.items ?? []).map((project) => ({
+                value: project.id,
+                label: project.key + ' — ' + project.name,
+              }))}
+            />
           </div>
 
           <div>
@@ -291,14 +294,44 @@ function CreateTaskForm({
             </div>
 
             <div>
-              <Label htmlFor="priority">Priority</Label>
-              <Select id="priority" {...register('priority')}>
-                {TASK_PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>
-                    {PRIORITY_LABELS[priority]}
-                  </option>
-                ))}
-              </Select>
+              <Label>Priority</Label>
+              {/*
+                Four choices, all of them short, and the one that matters is
+                picked by eye on its colour. A dropdown hides three of them
+                behind a click for no gain.
+              */}
+              <div
+                role="radiogroup"
+                aria-label="Priority"
+                /*
+                 * The track is the card colour, not surface-muted. A tinted
+                 * pill on a tinted surface stacks two tints, and the text
+                 * loses the contrast the tokens were tuned to give it on a
+                 * card: axe measured 4.42:1 on the one that was.
+                 */
+                className="flex gap-1 rounded-[var(--radius-input)] border border-border-subtle bg-surface p-1"
+              >
+                {PRIORITY_ORDER.map((option) => {
+                  const active = priority === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setValue('priority', option)}
+                      style={active ? tintedPill(priorityColor(option)) : undefined}
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors',
+                        active ? 'border' : 'border-transparent text-ink-muted hover:text-ink',
+                      )}
+                    >
+                      <PriorityIcon priority={option} size={12} />
+                      {PRIORITY_LABELS[option]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div>
@@ -568,6 +601,8 @@ function DependencyPicker({
 
 /** Files chosen now, uploaded once the task exists. */
 function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: File[]): void }) {
+  const [over, setOver] = useState(false);
+
   return (
     <div>
       <Label htmlFor="new-task-files">Attachments</Label>
@@ -591,17 +626,44 @@ function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: Fi
         </ul>
       ) : null}
 
+      {/*
+        The same drop zone as the task page, rather than the browser's own
+        "Choose File" button, which is the one control on this form that
+        looks like a different application.
+      */}
+      <label
+        htmlFor="new-task-files"
+        onDragOver={(event) => {
+          event.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setOver(false);
+          onChange([...files, ...Array.from(event.dataTransfer.files)]);
+        }}
+        className={cn(
+          'flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-left transition-colors',
+          over ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-border-strong',
+        )}
+      >
+        <Upload size={14} aria-hidden className={over ? 'text-accent' : 'text-ink-faint'} />
+        <span className="text-xs text-ink-faint">
+          Drop files here, or choose them. Uploaded once the task has been created.
+        </span>
+      </label>
+
       <input
         id="new-task-files"
         type="file"
         multiple
-        className="block w-full text-xs text-ink-muted file:mr-3 file:rounded-lg file:border-0 file:bg-surface-muted file:px-3 file:py-1.5 file:text-xs"
+        className="sr-only"
         onChange={(event) => {
           onChange([...files, ...Array.from(event.target.files ?? [])]);
           event.target.value = '';
         }}
       />
-      <p className="mt-1 text-xs text-ink-faint">Uploaded once the task has been created.</p>
     </div>
   );
 }

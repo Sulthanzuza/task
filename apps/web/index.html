@@ -6,14 +6,20 @@
     <meta name="color-scheme" content="light dark" />
 
     <!--
-      Plus Jakarta Sans. Preconnected because the font is on the critical path:
-      the whole interface is set in it, so a late swap is a visible reflow.
+      Plus Jakarta Sans, served from here rather than from a CDN.
+      
+      The whole interface is set in it, so it is on the critical path, and a
+      request to another origin on that path is a dependency on somebody
+      else's DNS. One blip failed nineteen end-to-end tests at once. The
+      latin subset of the variable font is 27KB; preloaded, because a late
+      swap is a visible reflow.
     -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/plus-jakarta-sans-latin.woff2"
+      crossorigin
     />
 
     <!--

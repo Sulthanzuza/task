@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
 import { RelativeTime } from '@/components/common/badges';
+import { groupNotifications, summarise, type NotificationGroup } from './grouping';
 import {
   notificationHref,
   useMarkAllRead,
@@ -48,8 +49,15 @@ export function NotificationBell() {
 
   const count = unread.data?.unread ?? 0;
 
-  function openNotification(notification: NotificationView) {
-    if (!notification.readAt) markRead.mutate(notification.id);
+  /*
+   * Opening a group clears all of it. Leaving the other three unread after
+   * somebody has gone and looked at the task is just a number that will not
+   * go down.
+   */
+  function openNotification(notification: NotificationView, group?: NotificationGroup) {
+    for (const item of group?.items ?? [notification]) {
+      if (!item.readAt) markRead.mutate(item.id);
+    }
     setOpen(false);
     navigate(notificationHref(notification));
   }
@@ -100,21 +108,21 @@ export function NotificationBell() {
               </div>
             ) : list.data?.items.length ? (
               <ul className="divide-y divide-border-subtle">
-                {list.data.items.map((notification) => (
-                  <li key={notification.id}>
+                {groupNotifications(list.data.items).map((group) => (
+                  <li key={group.id}>
                     <button
                       type="button"
                       data-testid="notification-item"
-                      onClick={() => openNotification(notification)}
+                      onClick={() => openNotification(group.latest, group)}
                       className={
                         'block w-full px-3 py-2.5 text-left transition-colors hover:bg-surface-muted ' +
-                        (notification.readAt ? 'opacity-60' : '')
+                        (group.unread === 0 ? 'opacity-60' : '')
                       }
                     >
                       <span className="flex items-start gap-2">
-                        {!notification.readAt ? (
+                        {group.unread > 0 ? (
                           <span
-                            aria-label="Unread"
+                            aria-label={group.unread + ' unread'}
                             className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
                           />
                         ) : (
@@ -122,15 +130,13 @@ export function NotificationBell() {
                         )}
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-medium">
-                            {notification.title}
+                            {group.latest.title}
                           </span>
-                          {notification.body ? (
-                            <span className="block truncate text-xs text-ink-muted">
-                              {notification.body}
-                            </span>
-                          ) : null}
+                          <span className="block truncate text-xs text-ink-muted">
+                            {summarise(group)}
+                          </span>
                           <span className="mt-0.5 block text-[11px] text-ink-faint">
-                            <RelativeTime iso={notification.createdAt} />
+                            <RelativeTime iso={group.latest.createdAt} />
                           </span>
                         </span>
                       </span>

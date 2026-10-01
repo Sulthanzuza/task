@@ -43,6 +43,11 @@ export const queryKeys = {
       ['dashboard', 'charts', teamId ?? 'mine', period] as const,
   },
 
+  org: {
+    /** Weekends and holidays. Everyone reads it; it changes a few times a year. */
+    calendar: () => ['org', 'calendar'] as const,
+  },
+
   member: {
     stats: (userId: string) => ['member', 'stats', userId] as const,
     activity: (userId: string) => ['member', 'activity', userId] as const,

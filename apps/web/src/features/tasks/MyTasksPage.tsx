@@ -88,7 +88,7 @@ export function MyTasksPage() {
 
   if (mine.isLoading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-3 px-4 py-6">
+      <div className="mx-auto max-w-[1100px] space-y-3 px-4 py-6">
         <Skeleton className="h-8 w-40" />
         {[0, 1, 2].map((i) => (
           <Skeleton key={i} className="h-20 w-full" />
@@ -110,7 +110,7 @@ export function MyTasksPage() {
   }).filter((entry) => entry.tasks.length > 0);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-[1100px] space-y-6 px-4 py-6 sm:px-6">
       <header>
         <h1 className="text-xl font-semibold tracking-tight">My tasks</h1>
         <p className="mt-1 text-sm text-ink-muted">
@@ -277,7 +277,13 @@ function TaskRow({ task }: { task: TaskSummary }) {
     <li
       className={cn(
         'grid grid-cols-1 gap-x-3 gap-y-2 px-4 py-3',
-        'md:grid-cols-[78px_minmax(0,1fr)_104px_132px_84px_132px] md:items-center md:gap-y-0',
+        /*
+         * minmax(240px, 1fr) for the title: with minmax(0, 1fr) the other
+         * five tracks took what they wanted first and left the title about
+         * 185px, which cut words mid-letter. 240 is the floor, and the page
+         * is wider now so there is something to give it.
+         */
+        'md:grid-cols-[78px_minmax(240px,1fr)_96px_124px_80px_120px] md:items-center md:gap-y-0',
       )}
     >
       <Link
@@ -298,7 +304,12 @@ function TaskRow({ task }: { task: TaskSummary }) {
         </span>
 
         <span className="min-w-16 flex-1 md:order-3 md:flex-none">
-          <ProgressBar value={task.progress} showLabel label={task.key + ' progress'} />
+          {/*
+            No number beside the bar. It cost a track's worth of width to
+            repeat what the bar already shows, and it is still announced:
+            ProgressBar puts the percentage in aria-valuetext.
+          */}
+          <ProgressBar value={task.progress} label={task.key + ' progress'} />
         </span>
 
         <span className="shrink-0 md:order-4">

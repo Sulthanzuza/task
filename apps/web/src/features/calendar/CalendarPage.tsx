@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { TaskSummary } from '@tm/shared';
@@ -8,6 +8,8 @@ import { useProjects, useUsers } from '@/features/team/api';
 import { useDashboardSummary } from '@/features/dashboard/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { Button, Card, Select, Skeleton } from '@/components/ui/primitives';
+import { PriorityIcon, StatusBadge } from '@/components/common/badges';
+import { nonWorkingDay, useWorkCalendar } from './api';
 import { cn } from '@/lib/utils';
 
 /**
@@ -54,6 +56,10 @@ function monthLabel(date: string): string {
 
 export function CalendarPage() {
   const [params, setParams] = useSearchParams();
+  // null until somebody taps a day; today is the default, resolved below
+  // once the organisation's today is known.
+  const [picked, setPicked] = useState<string | null>(null);
+  const workCalendar = useWorkCalendar();
   const { primaryTeamId } = useAuth();
   const projects = useProjects();
   const people = useUsers();
@@ -124,6 +130,16 @@ export function CalendarPage() {
 
   const days = Array.from({ length: range.days }, (_, i) => addDays(range.from, i));
   const currentMonth = (anchor ?? today).slice(0, 7);
+
+  // Today, until somebody taps another day.
+  const selected = picked ?? today;
+  const selectedTasks = byDate.get(selected) ?? [];
+  const selectedHoliday = nonWorkingDay(selected, workCalendar.data).holiday;
+  const selectedLabel = new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(selected + 'T00:00:00'));
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
@@ -204,17 +220,40 @@ export function CalendarPage() {
             const dayTasks = byDate.get(date) ?? [];
             const isToday = date === today;
             const outside = view === 'month' && date.slice(0, 7) !== currentMonth;
+            const { weekend, holiday } = nonWorkingDay(date, workCalendar.data);
+            const resting = weekend || holiday !== null;
+            const picked = date === selected;
 
             return (
-              <div
+              <button
+                type="button"
                 key={date}
                 data-date={date}
                 data-today={isToday ? 'true' : undefined}
+                aria-pressed={picked}
+                onClick={() => setPicked(date)}
                 className={cn(
-                  'min-h-24 border-r border-b border-border-subtle p-1.5 last:border-r-0',
-                  outside && 'bg-surface-muted/40',
+                  'min-h-24 border-r border-b border-border-subtle p-1.5 text-left last:border-r-0',
+                  outside && 'opacity-60',
                   view === 'week' && 'min-h-64',
+                  // Below 640 a cell is barely wider than a thumb.
+                  'max-sm:min-h-14',
+                  picked && 'ring-2 ring-accent ring-inset sm:ring-0',
                 )}
+                /*
+                 * Hatched, exactly as the heat map does it: a day nobody
+                 * works is obviously different from a working day with
+                 * nothing due on it, and a flat tint reads as the latter.
+                 */
+                style={
+                  resting
+                    ? {
+                        backgroundImage:
+                          'repeating-linear-gradient(45deg, var(--color-border-subtle) 0 1px, transparent 1px 6px)',
+                      }
+                    : undefined
+                }
+                title={holiday ?? undefined}
               >
                 <div className="mb-1 flex items-center gap-1">
                   <span
@@ -229,16 +268,40 @@ export function CalendarPage() {
                     {Number(date.slice(8, 10))}
                   </span>
                   {dayTasks.length > 0 ? (
-                    <span className="text-[10px] text-ink-faint">{dayTasks.length}</span>
+                    <span className="tabular text-[10px] text-ink-faint">{dayTasks.length}</span>
                   ) : null}
                 </div>
 
-                <div className="space-y-1">
+                {/* The holiday's name, where there is room for it. */}
+                {holiday ? (
+                  <p className="mb-1 hidden truncate text-[10px] text-ink-faint sm:block">
+                    {holiday}
+                  </p>
+                ) : null}
+
+                {/*
+                  A dot per task below 640. A chip shrunk to a single letter
+                  tells you nothing; a row of coloured dots and a count tells
+                  you how heavy the day is, which is what a month view is for.
+                */}
+                <div className="flex flex-wrap gap-1 sm:hidden">
+                  {dayTasks.slice(0, 6).map((task) => (
+                    <span
+                      key={task.id}
+                      aria-hidden
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: priorityColor(task.priority) }}
+                    />
+                  ))}
+                </div>
+
+                <div className="hidden space-y-1 sm:block">
                   {dayTasks.slice(0, view === 'week' ? 20 : 3).map((task) => (
                     <Link
                       key={task.id}
                       to={'/tasks/' + task.key}
                       data-task-key={task.key}
+                      onClick={(event) => event.stopPropagation()}
                       title={
                         task.key + ' ' + task.title + ' (' + PRIORITY_LABELS[task.priority] + ')'
                       }
@@ -253,16 +316,51 @@ export function CalendarPage() {
                   {view === 'month' && dayTasks.length > 3 ? (
                     <Link
                       to={'/tasks?dueFrom=' + date + '&dueTo=' + date}
+                      onClick={(event) => event.stopPropagation()}
                       className="block px-1.5 text-[10px] text-ink-muted hover:underline"
                     >
                       {dayTasks.length - 3} more
                     </Link>
                   ) : null}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+      </Card>
+
+      {/*
+        The chosen day, in full, under the grid. On a phone the cells can
+        only carry dots, so this is where the day is actually read; above
+        640 the cells already list their tasks and this would repeat them.
+      */}
+      <Card className="sm:hidden">
+        <h2 className="mb-2 text-sm font-semibold">
+          {selectedLabel}
+          {selectedHoliday ? (
+            <span className="ml-2 text-xs font-normal text-ink-faint">{selectedHoliday}</span>
+          ) : null}
+        </h2>
+
+        {selectedTasks.length === 0 ? (
+          <p className="text-xs text-ink-faint">Nothing due.</p>
+        ) : (
+          <ul className="space-y-2">
+            {selectedTasks.map((task) => (
+              <li key={task.id}>
+                <Link
+                  to={'/tasks/' + task.key}
+                  className="flex items-center gap-2 rounded-lg border border-border-subtle px-2.5 py-2"
+                >
+                  <PriorityIcon priority={task.priority} size={12} />
+                  <span className="font-mono text-[11px] text-accent">{task.key}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
+                  <StatusBadge status={task.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );

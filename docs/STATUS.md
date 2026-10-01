@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-01. Branch `master`, head `a23a195` plus the second review round below.
+Last updated: 2026-10-01. Branch `master`, head `2c6ec0c` plus the third review round below.
 
 ## Built, by prompt
 
@@ -43,7 +43,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `a5313f0` | Dashboard redesign, the chart set, and `pnpm db:seed --demo` |
 | `5269072` | The design system applied to every remaining screen (below) |
 | `a23a195` | The fixes from the first screenshot review (below) |
-| _this one_ | The second review round (below) |
+| `2c6ec0c` | The second review round (below) |
+| _this one_ | The third review round, and the font (below) |
 
 ### The design system, applied (three design prompts)
 
@@ -98,6 +99,77 @@ What those two found, all fixed in the app rather than in the test:
 - `aria-expanded` on the mention textarea is not allowed on a textbox; the open state
   moved to a live region.
 - The logo link had no accessible name below 1366, where the wordmark is hidden.
+
+### The second review round
+
+Thirteen more items. The ones that were covering something up:
+
+- **Relative times read as the future.** "in 4 hours" on a comment posted an hour ago.
+  Two separate causes, both fixed. In the app, `relativeTime` never phrases a past event
+  as the future: anything up to five minutes ahead of the browser is "just now", because
+  the server's clock and the browser's are two different clocks and a device running
+  slow is enough on its own. In the harness, the browser's clock is frozen to the API's
+  `/health` time, so "how long ago" agrees with when the row was actually written.
+- **The timeline printed database values at people**: "Sulthan attachment.created".
+  `describeActivity` is an exhaustive switch over `ACTIVITY_ACTIONS` with no `default`,
+  so a new action stops the build until it has words, and `activityEntrySchema.action`
+  is the closed enum rather than `z.string()`. A unit test walks the list in case the
+  type is ever widened back. `task.imported` turned out to be written by the import
+  service and missing from the "closed" list entirely.
+- **Hero figures used the page theme's colours.** The hero is dark in all four themes,
+  so "Due today" in light was a dark brown-amber on navy. `.hero-surface` redefines
+  `warning` and `info` as well as `success` and `danger`, and the token test measures
+  the hero's colours against the hero's own background.
+- **The theme control showed the wrong theme.** Setting `data-theme` on `<html>`
+  repaints but tells the provider nothing, so the control kept showing whatever React
+  still believed: a lit sun on a midnight screenshot. All three specs write the key the
+  control writes, before navigating.
+- **My Tasks columns did not line up at 1280.** The tracks were `auto`, so each row
+  measured itself and a row with no action button put its due date where the row above
+  put its status.
+
+Also: Resume on blocked rows where the workflow allows it, "Waiting on you" instead of
+"In review", board columns that scroll inside the viewport so every column header stays
+visible, avatar plus first name in the task list, and a thumbnail that falls back to the
+file-type icon when the bytes will not decode. Demo titles no longer end in
+"[demo] 161": they are drawn without replacement from a shuffled pool, and the marker
+that makes the seed idempotent moved to `meta` on the created activity row.
+
+### The third review round
+
+The last UI pass before deployment. Eight items; what is worth knowing later:
+
+- **Plus Jakarta Sans is served from `apps/web/public/fonts`**, not from Google. The
+  whole interface is set in it, so it is on the critical path, and a request to another
+  origin on that path is a dependency on somebody else's DNS: one blip failed nineteen
+  end-to-end tests at once. The latin subset of the variable font is 27KB, preloaded,
+  `font-display: swap`. There was no CSP allowance to remove: the API's policy never
+  listed Google, because the API does not serve the page.
+- **My Tasks titles were cut mid-letter.** The fixed tracks added in round two left the
+  title about 185px. The page is 1100px wide now and the title track has a 240px floor;
+  `task-screens.spec.ts` measures how many characters actually fit and fails under
+  forty. The percentage beside the progress bar is gone: it cost a track to repeat what
+  the bar shows, and it is still in the aria-label.
+- **The calendar knows which days are working days.** A new `GET /org/calendar` returns
+  the weekend days and the holidays to anybody signed in; `/org/settings` stays behind
+  `org.manage` because it also carries mail and digest configuration. Non-working days
+  are hatched exactly as the heat map hatches them, with the holiday's name in the cell.
+- **The calendar below 640px is a dot per task and a count**, with the chosen day listed
+  in full underneath and today chosen by default. Chips shrunk to single letters at that
+  width, which is a worse answer than not showing them.
+- **A tinted pill may not sit on a tinted surface.** The new segmented priority control
+  put one on `surface-muted`, which stacks two tints and cost the text the contrast the
+  tokens give it on a card: axe measured 4.42:1. The track is the card colour now. Worth
+  remembering, because the tokens cannot fix this one; the geometry has to.
+- **Unread notifications for one task collapse into a line** ("4 updates from Rahul"),
+  expandable, and marking the group read marks all of them. `actorName` was already
+  stored on the notification; the list simply never passed it on. Read notifications are
+  left alone: reordering a pile somebody has already been through helps nobody.
+- The create drawer's project select, priority select and file input are the
+  application's own controls now, not the operating system's.
+- The demo seed puts due dates on working days, and the task the detail screenshot is
+  taken of is seeded with its history spread across the last five working days. Posting
+  that through the API stamped every row with the same second.
 
 ## Accepted deviations
 
@@ -158,10 +230,6 @@ None of these is blocking. Each is a real gap, checked against the code today.
 - **Infinite scroll.** The task list has a "Load more" button
   (`TasksPage.tsx`). The query is already an infinite query, so this is a scroll
   sentinel, not a rewrite.
-- **The font comes from Google Fonts.** `index.html` loads Plus Jakarta Sans from a
-  CDN, so a DNS blip fails nineteen end-to-end tests at once: the console error trips
-  the `problems` fixture. Self-hosting the font would make the suite independent of the
-  network.
 - **Thumbnail batching.** `Attachments.tsx` fetches each image separately so the
   access check applies to the bytes. Fine for a handful; a task with twenty images
   makes twenty requests.
@@ -217,7 +285,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
 | `apps/api` integration | 20 | 376 |
-| `apps/web` end-to-end | 13 | 56 |
+| `apps/web` end-to-end | 13 | 57 |
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.

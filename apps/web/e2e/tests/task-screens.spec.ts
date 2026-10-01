@@ -181,7 +181,12 @@ test('a task created with a label and a dependency shows both', async ({ page, a
   const drawer = page.getByRole('dialog', { name: 'New task' });
 
   // The same project the blocker lives in, so the dependency is one it can have.
-  await drawer.getByLabel('Project').selectOption({ label: 'ERP — ERP Platform' });
+  /*
+   * A picker now, not a native select: the operating system's dropdown was
+   * the one control on this form that ignored the theme.
+   */
+  await drawer.getByRole('button', { name: /^Project:/ }).click();
+  await page.getByRole('option', { name: 'ERP — ERP Platform' }).click();
   await drawer.getByLabel('Title').fill('Everything at once');
 
   // Markdown, written and previewed.
@@ -284,4 +289,59 @@ test('the task list header never covers the first row', async ({ page }) => {
     'the header should stick under the top bar, not somewhere inside the card',
   ).toBeLessThanOrEqual(2);
   expect(scrolled!.headerBottom).toBeGreaterThan(scrolled!.headerTop);
+});
+
+/**
+ * A title on My Tasks must be readable, not a stub.
+ *
+ * The fixed grid tracks left the title about 185px, which cut words
+ * mid-letter with no ellipsis. The track has a floor now, and this is what
+ * says so: a full-page screenshot showed the damage but nothing failed.
+ */
+test('My Tasks shows enough of a title to recognise it', async ({ page }) => {
+  await signIn(page, USERS.member);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/my-tasks');
+  await expect(page.getByRole('main').getByText('My tasks').first()).toBeVisible();
+
+  const measured = await page.evaluate(() => {
+    const links = Array.from(
+      document.querySelectorAll<HTMLElement>('li a[href^="/tasks/"]'),
+    ).filter((el) => (el.textContent ?? '').length > 12);
+
+    return links.map((el) => {
+      const style = getComputedStyle(el);
+      /*
+       * Characters that actually fit, not characters in the string: the
+       * element is clipped, so its width over the average glyph width is
+       * the honest number.
+       */
+      const probe = document.createElement('span');
+      probe.style.font = style.font;
+      probe.style.position = 'absolute';
+      probe.style.visibility = 'hidden';
+      probe.style.whiteSpace = 'pre';
+      probe.textContent = (el.textContent ?? '').slice(0, 40);
+      document.body.appendChild(probe);
+      const widthOf40 = probe.getBoundingClientRect().width;
+      probe.remove();
+
+      return {
+        text: (el.textContent ?? '').trim().slice(0, 50),
+        box: Math.round(el.getBoundingClientRect().width),
+        needed: Math.ceil(widthOf40),
+        ellipsis: style.textOverflow,
+        titled: el.getAttribute('title') !== null,
+      };
+    });
+  });
+
+  expect(measured.length, 'no task titles on the page').toBeGreaterThan(0);
+
+  const tooNarrow = measured.filter((row) => row.box < row.needed);
+  expect(tooNarrow, 'these titles have room for fewer than 40 characters at 1280').toEqual([]);
+
+  // Cut off, but cut off honestly, and the whole thing is one hover away.
+  expect(measured.every((row) => row.ellipsis === 'ellipsis')).toBe(true);
+  expect(measured.every((row) => row.titled)).toBe(true);
 });

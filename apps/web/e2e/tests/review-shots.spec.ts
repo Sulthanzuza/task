@@ -1,7 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import type { TaskDetail } from '@tm/shared';
 import { apiAs, expect, signIn, test, USERS } from '../fixtures';
 import { apiTime } from '../playwright.config';
 
@@ -109,55 +108,28 @@ const PNG = Buffer.from(
 );
 
 /**
- * One task carrying everything the detail screen can show.
+ * Find the showcase task and put two files on it.
  *
- * A screenshot of a task with a title and nothing else proves the page
- * renders and tells a reviewer nothing about how it looks when it is full,
- * which is the state worth checking. This builds it through the API, so the
- * description, the mentions, the files and the blocked period all arrive the
- * way they would from a person.
+ * The task itself comes from the demo seed, which can date its history
+ * across the last five working days. Doing it through the API here stamped
+ * every row with the same second, and a task created, started, blocked and
+ * resumed inside one second is not a picture of real work.
+ *
+ * The attachments stay here: they need object storage, and being the most
+ * recent events on the task is exactly right for them.
  */
-async function buildShowcaseTask(api: APIRequestContext): Promise<string> {
+const SHOWCASE_TITLE = 'Reconcile the opening balances before the first invoice run';
+
+async function showcaseTask(api: APIRequestContext): Promise<string> {
   const lead = await apiAs(api, USERS.lead);
 
-  const people = await lead.get<{ items: Array<{ id: string; name: string }> }>('/users');
-  const rahul = people.items.find((person) => person.name === USERS.member.name);
-  // Anyone but the assignee. Nisha if this lead can see her, otherwise
-  // whoever else is there: an empty Reviewer makes the screenshot look like
-  // the field does not work.
-  const reviewer =
-    people.items.find((person) => person.name === USERS.otherLead.name) ??
-    people.items.find((person) => person.name === USERS.lead.name) ??
-    people.items.find((person) => person.name !== USERS.member.name);
-
-  const projects = await lead.get<{ items: Array<{ id: string; key: string }> }>('/projects');
-  const project = projects.items[0];
-  if (!project || !rahul) throw new Error('The demo seed did not produce a project and a member.');
-
-  const labels = await lead.get<{ items: Array<{ id: string; name: string }> }>(
-    '/labels?projectId=' + project.id,
+  const found = await lead.get<{ items: Array<{ key: string; title: string }> }>(
+    '/tasks?limit=50&q=' + encodeURIComponent('opening balances'),
   );
-
-  // Creation hangs off the project; the rest of the endpoints take the task.
-  const task = await lead.post<TaskDetail>('/projects/' + project.id + '/tasks', {
-    title: 'Reconcile the opening balances before the first invoice run',
-    description:
-      'The migration brought over ledger balances as at the cut-off date, but three ' +
-      'accounts disagree with the statements by small amounts.\n\n' +
-      '- Trade debtors: out by 1,240.00\n' +
-      '- Accruals: out by 86.50\n' +
-      '- Suspense: holds 3 unmatched lines\n\n' +
-      'We cannot run the first invoice batch until these agree, so this blocks the ' +
-      'go-live date rather than just the finance workstream.',
-    priority: 'HIGH',
-    assigneeId: rahul.id,
-    reviewerId: reviewer?.id ?? null,
-    dueDate: new Date(new Date(await apiTime()).getTime() + 4 * 86_400_000)
-      .toISOString()
-      .slice(0, 10),
-    estimatedHours: 6,
-    labelIds: labels.items.slice(0, 2).map((label) => label.id),
-  });
+  const task = found.items.find((item) => item.title === SHOWCASE_TITLE);
+  if (!task) {
+    throw new Error('The demo seed did not create the showcase task. Run with E2E_DEMO=1.');
+  }
 
   // Two files, one of them an image, so the list shows a tile and a row.
   for (const file of [
@@ -165,40 +137,14 @@ async function buildShowcaseTask(api: APIRequestContext): Promise<string> {
     {
       name: 'statement-differences.txt',
       mimeType: 'text/plain',
-      buffer: Buffer.from('Trade debtors 1240.00\nAccruals 86.50\nSuspense 3 lines\n', 'utf8'),
+      buffer: Buffer.from(
+        ['Trade debtors 1240.00', 'Accruals 86.50', 'Suspense 3 lines', ''].join('\n'),
+        'utf8',
+      ),
     },
   ]) {
     await lead.upload('/tasks/' + task.key + '/attachments', file);
   }
-
-  // A conversation, with a mention in it.
-  await lead.post('/tasks/' + task.key + '/comments', {
-    body:
-      'The suspense lines look like the three refunds from March. @[' +
-      USERS.member.name +
-      '](' +
-      rahul.id +
-      ') can you check them against the bank export?',
-  });
-
-  const member = await apiAs(api, USERS.member);
-  await member.post('/tasks/' + task.key + '/comments', {
-    body: 'Two of the three match. The last one has no reference at all, so I have asked the bank.',
-  });
-
-  /*
-   * A blocked period in the history: blocked, then unblocked, so the
-   * timeline has the pair and the task is not sitting in Blocked for the
-   * screenshot.
-   */
-  await member.post('/tasks/' + task.id + '/transition', { to: 'IN_PROGRESS' });
-  await member.post('/tasks/' + task.id + '/transition', {
-    to: 'BLOCKED',
-    blockerType: 'EXTERNAL',
-    blockedReason: 'Waiting on the bank to identify the unreferenced receipt.',
-  });
-  await member.post('/tasks/' + task.id + '/transition', { to: 'IN_PROGRESS' });
-  await member.put('/tasks/' + task.id + '/progress', { progress: 60 });
 
   return task.key;
 }
@@ -259,7 +205,7 @@ test('the screens a lead works on', async ({ browser }) => {
 });
 
 test('the screens a member works on', async ({ browser, api }) => {
-  const taskKey = await buildShowcaseTask(api);
+  const taskKey = await showcaseTask(api);
 
   const { page, context } = await freshPage(browser);
   await signIn(page, USERS.member);

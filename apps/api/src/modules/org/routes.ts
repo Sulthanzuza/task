@@ -233,6 +233,25 @@ orgRouter.get(
  * pickers show which days are not working days. Changing them is the admin's,
  * since every working-day calculation in the system moves with them.
  */
+/**
+ * Weekends and holidays, for drawing a calendar.
+ *
+ * Authenticated but not administrative: every screen that shows a week has
+ * to know which of its days are working ones, and /settings is behind
+ * org.manage because it also carries mail and digest configuration.
+ */
+orgRouter.get(
+  '/calendar',
+  handler(async (_req, res) => {
+    const settings = await getOrgSettings();
+    res.json({
+      weekendDays: settings.weekendDays,
+      weekStartsOn: settings.weekStartsOn,
+      holidays: await listHolidays(),
+    });
+  }),
+);
+
 orgRouter.get(
   '/holidays',
   validate({ query: z.object({ year: z.coerce.number().int().min(1970).max(2200).optional() }) }),

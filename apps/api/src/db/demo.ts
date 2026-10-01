@@ -6,6 +6,7 @@ import {
   labels,
   leaves,
   projects,
+  commentMentions,
   taskActivity,
   taskComments,
   taskLabels,
@@ -14,7 +15,14 @@ import {
   users,
 } from './schema';
 import { env } from '../config/env';
-import { addDays, toDateOnly } from '../lib/date-utils';
+import {
+  addDays,
+  isWorkingDay,
+  startOfDayUtc,
+  toDateOnly,
+  type WorkCalendar,
+} from '../lib/date-utils';
+import { getOrgContext } from '../modules/org/service';
 import { logger } from '../lib/logger';
 
 /**
@@ -155,7 +163,23 @@ function pick<T>(random: () => number, list: readonly T[]): T {
  * what a real backlog looks like and what makes the twelve bars tell a story
  * rather than sit flat.
  */
-function planTasks(now: Date, timezone: string): Plan[] {
+/**
+ * Nudge a date onto a working day.
+ *
+ * Nothing is due on a Sunday, so demo data that puts work there reads as
+ * generated the moment anybody looks at a calendar. Forward rather than
+ * back, because a deadline that moves earlier is a different promise.
+ */
+function nextWorkingDay(date: string, calendar: WorkCalendar): string {
+  let candidate = date;
+  // A week is enough for any run of weekend plus holidays.
+  for (let i = 0; i < 9 && !isWorkingDay(candidate, calendar); i += 1) {
+    candidate = addDays(candidate, 1);
+  }
+  return candidate;
+}
+
+function planTasks(now: Date, timezone: string, calendar: WorkCalendar): Plan[] {
   const random = makeRandom(SEED);
   const today = toDateOnly(now, timezone);
   const plans: Plan[] = [];
@@ -261,7 +285,7 @@ function planTasks(now: Date, timezone: string): Plan[] {
         title: base.title,
         status: cancelled ? 'CANCELLED' : 'COMPLETED',
         progress: cancelled ? Math.floor(random() * 60) : 100,
-        dueDate: addDays(today, dueOffset),
+        dueDate: nextWorkingDay(addDays(today, dueOffset), calendar),
         completedAt: cancelled ? null : completedAt,
         blockerType: null,
         lastActivityAt: completedAt,
@@ -323,7 +347,7 @@ function planTasks(now: Date, timezone: string): Plan[] {
       title: base.title,
       status,
       progress,
-      dueDate: addDays(today, dueOffset),
+      dueDate: nextWorkingDay(addDays(today, dueOffset), calendar),
       completedAt: null,
       blockerType,
       lastActivityAt: lastActivityAt < createdAt ? createdAt : lastActivityAt,
@@ -409,7 +433,9 @@ export async function seedDemo(now = new Date()): Promise<DemoResult> {
 
   await seedAbsences(userIds, now, timezone);
 
-  const plans = planTasks(now, timezone);
+  // The organisation's own weekends and holidays, so nothing falls due on one.
+  const { calendar } = await getOrgContext();
+  const plans = planTasks(now, timezone, calendar);
   let created = 0;
 
   for (const plan of plans) {
@@ -568,6 +594,189 @@ export async function seedDemo(now = new Date()): Promise<DemoResult> {
     }
   }
 
+  await seedShowcaseTask({ projectIds, userIds, leadId, labelIds, now, timezone, calendar });
+
   logger.info({ created }, 'Demo data added.');
   return { created, skipped: 0 };
+}
+
+/**
+ * The one task the task-detail screenshot is taken of.
+ *
+ * Everything else here is generated from the same few sentences, which is
+ * fine in a list and useless as a picture of the screen: a reviewer needs to
+ * see what a full task looks like. So this one has a description worth
+ * reading, a reviewer, an estimate, labels, a conversation with a mention in
+ * it, and a period where it was blocked and then resumed.
+ *
+ * The history is written straight to the table, dated across the last five
+ * working days. Posting it through the API would stamp every row with the
+ * same second, and a timeline where a task is created, started, blocked and
+ * resumed inside one second is not a picture of real work.
+ */
+const SHOWCASE_TITLE = 'Reconcile the opening balances before the first invoice run';
+
+async function seedShowcaseTask(ctx: {
+  projectIds: Map<string, string>;
+  userIds: Map<string, string>;
+  leadId: string;
+  labelIds: Map<string, string>;
+  now: Date;
+  timezone: string;
+  calendar: WorkCalendar;
+}): Promise<void> {
+  const projectId = ctx.projectIds.get('ERP');
+  const assigneeId = ctx.userIds.get('rahul@example.com');
+  const reviewerId = ctx.userIds.get('nisha@example.com') ?? ctx.leadId;
+  if (!projectId || !assigneeId) return;
+
+  /*
+   * The last five working days, oldest first, each at a plausible hour.
+   * Walking backwards over the calendar rather than subtracting days, or a
+   * weekend lands in the middle of the story.
+   */
+  const days: Date[] = [];
+  let cursor = toDateOnly(ctx.now, ctx.timezone);
+  while (days.length < 5) {
+    if (isWorkingDay(cursor, ctx.calendar)) days.unshift(startOfDayUtc(cursor, ctx.timezone));
+    cursor = addDays(cursor, -1);
+  }
+  const at = (day: number, hour: number) =>
+    new Date((days[day] as Date).getTime() + hour * 3_600_000);
+
+  const [counter] = await db
+    .update(projects)
+    .set({ taskCounter: sql`${projects.taskCounter} + 1` })
+    .where(eq(projects.id, projectId))
+    .returning({ number: projects.taskCounter });
+  if (!counter) return;
+
+  const [task] = await db
+    .insert(tasks)
+    .values({
+      projectId,
+      number: counter.number,
+      title: SHOWCASE_TITLE,
+      description:
+        'The migration brought over ledger balances as at the cut-off date, but ' +
+        'three accounts disagree with the statements by small amounts.\n\n' +
+        '- Trade debtors: out by 1,240.00\n' +
+        '- Accruals: out by 86.50\n' +
+        '- Suspense: holds 3 unmatched lines\n\n' +
+        'We cannot run the first invoice batch until these agree, so this blocks ' +
+        'the go-live date rather than just the finance workstream.',
+      status: 'IN_PROGRESS',
+      priority: 'HIGH',
+      createdBy: ctx.leadId,
+      assigneeId,
+      reviewerId,
+      progress: 60,
+      dueDate: nextWorkingDay(addDays(toDateOnly(ctx.now, ctx.timezone), 4), ctx.calendar),
+      estimatedMinutes: 6 * 60,
+      createdAt: at(0, 9),
+      updatedAt: at(4, 16),
+      lastActivityAt: at(4, 16),
+    })
+    .returning({ id: tasks.id });
+  if (!task) return;
+
+  for (const name of ['Finance', 'Bug']) {
+    const labelId = ctx.labelIds.get(name);
+    if (labelId) await db.insert(taskLabels).values({ taskId: task.id, labelId });
+  }
+
+  const history: Array<{
+    action: string;
+    field?: string;
+    oldValue?: unknown;
+    newValue?: unknown;
+    meta?: Record<string, unknown>;
+    actorId: string;
+    at: Date;
+  }> = [
+    {
+      action: 'task.created',
+      newValue: { title: SHOWCASE_TITLE, status: 'BACKLOG' },
+      meta: DEMO_MARKER,
+      actorId: ctx.leadId,
+      at: at(0, 9),
+    },
+    { action: 'task.assigned', newValue: assigneeId, actorId: ctx.leadId, at: at(0, 10) },
+    {
+      action: 'task.transitioned',
+      field: 'status',
+      oldValue: 'ASSIGNED',
+      newValue: 'IN_PROGRESS',
+      actorId: assigneeId,
+      at: at(1, 10),
+    },
+    { action: 'task.progress', oldValue: 0, newValue: 25, actorId: assigneeId, at: at(1, 16) },
+    {
+      action: 'task.transitioned',
+      field: 'status',
+      oldValue: 'IN_PROGRESS',
+      newValue: 'BLOCKED',
+      actorId: assigneeId,
+      at: at(2, 11),
+    },
+    {
+      action: 'task.transitioned',
+      field: 'status',
+      oldValue: 'BLOCKED',
+      newValue: 'IN_PROGRESS',
+      actorId: assigneeId,
+      at: at(3, 14),
+    },
+    { action: 'task.progress', oldValue: 25, newValue: 60, actorId: assigneeId, at: at(4, 16) },
+  ];
+
+  await db.insert(taskActivity).values(
+    history.map((entry) => ({
+      taskId: task.id,
+      actorId: entry.actorId,
+      action: entry.action,
+      field: entry.field ?? null,
+      oldValue: entry.oldValue === undefined ? null : entry.oldValue,
+      newValue: entry.newValue === undefined ? null : entry.newValue,
+      meta: entry.meta ?? null,
+      createdAt: entry.at,
+    })),
+  );
+
+  const posted = await db
+    .insert(taskComments)
+    .values([
+      {
+        taskId: task.id,
+        userId: ctx.leadId,
+        body:
+          'The suspense lines look like the three refunds from March. ' +
+          '@[Rahul](' +
+          assigneeId +
+          ') can you check them against the bank export?',
+        createdAt: at(1, 11),
+      },
+      {
+        taskId: task.id,
+        userId: assigneeId,
+        body:
+          'Two of the three match. The last one has no reference at all, so I have ' +
+          'asked the bank and parked this until they come back.',
+        createdAt: at(2, 11),
+      },
+      {
+        taskId: task.id,
+        userId: assigneeId,
+        body: 'The bank identified it: a duplicated settlement. Picking this back up.',
+        createdAt: at(3, 14),
+      },
+    ])
+    .returning({ id: taskComments.id });
+
+  // The mention is a row of its own, which is what drives the notification
+  // and the highlight in the comment body.
+  const mentioning = posted[0];
+  if (mentioning) {
+    await db.insert(commentMentions).values({ commentId: mentioning.id, userId: assigneeId });
+  }
 }

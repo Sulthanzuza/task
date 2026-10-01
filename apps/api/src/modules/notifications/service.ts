@@ -266,6 +266,8 @@ export interface NotificationView {
   body: string | null;
   taskId: string | null;
   taskKey: string | null;
+  /** Who did the thing, so several updates to one task can be summarised. */
+  actorName: string | null;
   /** Where this notification goes, for anything with no task of its own. */
   link: string | null;
   readAt: string | null;
@@ -296,6 +298,9 @@ export async function listNotifications(
       body: row.body,
       taskId: row.taskId,
       taskKey: (row.data as { taskKey?: string } | null)?.taskKey ?? null,
+      // Already stored; the list simply never passed it on. The bell groups
+      // several updates to one task into "4 updates from Rahul".
+      actorName: (row.data as { actorName?: string } | null)?.actorName ?? null,
       link: (row.data as { link?: string } | null)?.link ?? null,
       readAt: row.readAt ? row.readAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),

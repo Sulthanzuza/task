@@ -204,7 +204,13 @@ export function TasksPage() {
         ) : null}
       </Card>
 
-      <Card className="overflow-hidden">
+      {/*
+        overflow-hidden only while the table scrolls sideways. Any ancestor
+        with a clipped overflow is a scrollport, and a sticky header measures
+        itself against the nearest one: with it on at every width the header
+        parked 64px down inside this card instead of under the top bar.
+      */}
+      <Card className="overflow-hidden md:overflow-visible">
         {query.isLoading ? (
           <div className="space-y-2 p-4">
             {[0, 1, 2, 3, 4].map((i) => (

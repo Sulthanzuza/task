@@ -304,6 +304,45 @@ describe.each(THEMES)('the %s theme', (theme) => {
     expect(failures, 'ink on the heat ramp').toEqual([]);
   });
 
+  it('clears 4.5:1 for the ink colours on a muted surface too', () => {
+    /*
+     * Checking the ink only against the card was not enough. Half the
+     * controls sit on --color-surface-muted, which is a shade away, and
+     * ink-faint was just under the floor on it in all four themes: the
+     * "Nobody" in a person picker, every placeholder, every hint.
+     */
+    const behind = flatten(palette['surface-muted'] as string, palette.surface as string);
+
+    const failures = ['ink', 'ink-muted', 'ink-faint'].flatMap((name) => {
+      const ratio = contrast(palette[name] as string, behind);
+      return ratio < 4.5 ? [name + ' ' + palette[name] + ' at ' + ratio.toFixed(2) + ':1'] : [];
+    });
+
+    expect(failures, 'against the muted surface ' + behind).toEqual([]);
+  });
+
+  it('pairs an ink with every filled background', () => {
+    /*
+     * Both ends of the brand gradient, not the text accent. A primary button
+     * is painted with a background-image, which axe skips entirely, so this
+     * is the only place the pairing is checked at all. It is how white ink
+     * on a bright cyan gradient survived in two themes.
+     */
+    const pairs: Array<[string, string]> = [
+      ['danger-ink', 'danger'],
+      ['accent-ink', 'accent-from'],
+      ['accent-ink', 'accent-to'],
+    ];
+
+    const failures = pairs.flatMap(([ink, fill]) => {
+      if (!palette[ink] || !palette[fill]) return [];
+      const ratio = contrast(palette[ink] as string, palette[fill] as string);
+      return ratio < 4.5 ? [ink + ' on ' + fill + ' at ' + ratio.toFixed(2) + ':1'] : [];
+    });
+
+    expect(failures).toEqual([]);
+  });
+
   it('clears 4.5:1 for every colour set on its soft background', () => {
     const failures = SOFT_PAIRS.filter((name) => palette[name + '-soft']).flatMap((name) => {
       const behind = flatten(palette[name + '-soft'] as string, palette.surface as string);
@@ -349,6 +388,11 @@ describe.each(THEMES)('the %s theme', (theme) => {
       'chart-muted',
       'chart-grid',
       'heat-max',
+      'danger-ink',
+      'accent-ink',
+      'accent-from',
+      'accent-to',
+      'surface-muted',
     ].filter((name) => !palette[name]);
     expect(missing).toEqual([]);
   });

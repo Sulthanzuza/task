@@ -32,6 +32,51 @@ import { cn, formatDateTime } from '@/lib/utils';
 
 const MAX_UPLOAD_MB = 25;
 
+/**
+ * Whether a file is being dragged over the window.
+ *
+ * dragenter and dragleave fire for every element the pointer crosses, so a
+ * naive listener flickers all the way across the page. Counting the pairs
+ * and only clearing at zero gives one steady answer for the whole drag.
+ */
+function useFileDragOverPage(): boolean {
+  const [over, setOver] = useState(false);
+  const depth = useRef(0);
+
+  useEffect(() => {
+    const carriesFiles = (event: DragEvent) =>
+      Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+    const enter = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      depth.current += 1;
+      setOver(true);
+    };
+    const leave = () => {
+      depth.current = Math.max(0, depth.current - 1);
+      if (depth.current === 0) setOver(false);
+    };
+    const drop = () => {
+      depth.current = 0;
+      setOver(false);
+    };
+
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    // A drag that ends outside the window never fires drop.
+    window.addEventListener('dragend', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+      window.removeEventListener('dragend', drop);
+    };
+  }, []);
+
+  return over;
+}
+
 export function Attachments({
   taskIdOrKey,
   canAttach,
@@ -77,6 +122,9 @@ export function Attachments({
   }
 
   const items = attachments.data?.items ?? [];
+  // A file over the window anywhere: that is when the big target earns its space.
+  const fileOverPage = useFileDragOverPage();
+  const expanded = dragging || fileOverPage;
 
   return (
     <section aria-labelledby="attachments-heading">
@@ -90,11 +138,22 @@ export function Attachments({
 
       <Card>
         {canAttach ? (
+          /*
+             A line, not a landing strip.
+
+             At rest this is one row saying what you can do, because a panel
+             with nothing in it was spending five lines to say "empty". The
+             full target appears the moment a file is actually over the
+             window, which is the only moment it is any use.
+           */
           <div
             data-testid="attachment-dropzone"
             className={cn(
-              'm-3 flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
-              dragging ? 'border-accent bg-accent-soft' : 'border-border-subtle',
+              'm-3 rounded-lg border border-dashed text-center transition-all',
+              expanded
+                ? 'flex flex-col items-center gap-2 px-4 py-5'
+                : 'flex items-center gap-2 px-3 py-2 text-left',
+              dragging || fileOverPage ? 'border-accent bg-accent-soft' : 'border-border-subtle',
             )}
             onDragOver={(event) => {
               event.preventDefault();
@@ -108,9 +167,17 @@ export function Attachments({
               if (dropped) void send(dropped);
             }}
           >
-            <Upload size={18} className="text-ink-faint" aria-hidden />
-            <p className="text-xs text-ink-muted">
-              Drop a file here, or choose one. Up to {MAX_UPLOAD_MB} MB.
+            <Upload
+              size={expanded ? 18 : 14}
+              className={cn('shrink-0', expanded ? 'text-accent' : 'text-ink-faint')}
+              aria-hidden
+            />
+            <p className={cn('text-xs', expanded ? 'text-ink-muted' : 'text-ink-faint')}>
+              {expanded
+                ? 'Drop it here. Up to ' + MAX_UPLOAD_MB + ' MB.'
+                : items.length === 0
+                  ? 'No files. Drop one here, or choose a file.'
+                  : 'Drop another here, or choose a file.'}
             </p>
 
             <input

@@ -1,5 +1,8 @@
 import {
+  useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEventHandler,
   type PointerEventHandler,
@@ -17,10 +20,11 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { Ban, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { Ban, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TaskDetail, TaskStatus, TaskSummary, TransitionRequirement } from '@tm/shared';
 import {
+  BLOCKER_TYPE_LABELS,
   BOARD_COLUMNS,
   COLLAPSED_BOARD_COLUMNS,
   STATUS_LABELS,
@@ -197,7 +201,7 @@ export function BoardPage() {
             The strip scrolls, not the page. A board that moves the whole
             window sideways on a phone loses the top bar with it.
           */}
-          <div className="relative flex max-w-full flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-3">
+          <ColumnStrip>
             {columns.map((status) => (
               <Column
                 key={status}
@@ -208,7 +212,7 @@ export function BoardPage() {
                 verdictFor={verdictFor}
               />
             ))}
-          </div>
+          </ColumnStrip>
 
           <DragOverlay>{dragging ? <TaskCard task={dragging} overlay /> : null}</DragOverlay>
         </DndContext>
@@ -296,6 +300,115 @@ function Column({
  * link: nothing inside could be reached by keyboard. Splitting the two keeps
  * the easy pointer target and gives the keyboard a real control to use.
  */
+/** 256px, as w-64. The scroll buttons step by exactly one column. */
+const COLUMN_WIDTH = 256;
+
+/**
+ * The horizontal strip, with something to say it goes on.
+ *
+ * Nine statuses do not fit any window, and a board whose columns simply stop
+ * at the edge looks finished. A fade over the overflowing side and a pair of
+ * buttons say there is more and give a way there that does not need a
+ * trackpad gesture or a visible scrollbar.
+ */
+function ColumnStrip({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const measure = useCallback(() => {
+    const node = ref.current;
+    if (!node) return;
+    const max = node.scrollWidth - node.clientWidth;
+    setEdges({ left: node.scrollLeft > 4, right: node.scrollLeft < max - 4 });
+  }, []);
+
+  useEffect(() => {
+    measure();
+    const node = ref.current;
+    if (!node) return;
+    // Columns appear and disappear as the filters change, so watch the box
+    // rather than measuring once on mount.
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [measure, children]);
+
+  const nudge = (direction: -1 | 1) => {
+    // One column and its gap, so a press lands on a column boundary.
+    ref.current?.scrollBy({ left: direction * (COLUMN_WIDTH + 12), behavior: 'smooth' });
+  };
+
+  return (
+    <div className="relative">
+      <div
+        ref={ref}
+        onScroll={measure}
+        className="relative flex max-w-full flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-3"
+      >
+        {children}
+      </div>
+
+      {/* Decoration over the edge; it must never eat a click on a card. */}
+      {edges.left ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[var(--color-canvas)] to-transparent"
+        />
+      ) : null}
+      {edges.right ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[var(--color-canvas)] to-transparent"
+        />
+      ) : null}
+
+      {/*
+        pointer-events-none on the row, auto on the buttons. Without it this
+        strip is an invisible band across the middle of the board that
+        swallows every drop aimed at a column behind it.
+      */}
+      {edges.left || edges.right ? (
+        <div className="pointer-events-none absolute top-1/2 right-1 left-1 flex -translate-y-1/2 justify-between">
+          <StripButton show={edges.left} label="Scroll the board left" onClick={() => nudge(-1)}>
+            <ChevronLeft size={16} aria-hidden />
+          </StripButton>
+          <StripButton show={edges.right} label="Scroll the board right" onClick={() => nudge(1)}>
+            <ChevronRight size={16} aria-hidden />
+          </StripButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StripButton({
+  show,
+  label,
+  onClick,
+  children,
+}: {
+  show: boolean;
+  label: string;
+  onClick(): void;
+  children: ReactNode;
+}) {
+  if (!show) return <span />;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-border-subtle bg-surface text-ink shadow-lg transition-colors hover:border-border-strong"
+    >
+      {children}
+    </button>
+  );
+}
+
 function DraggableCard({ task }: { task: TaskSummary }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
 
@@ -329,6 +442,13 @@ function DraggableCard({ task }: { task: TaskSummary }) {
       />
     </div>
   );
+}
+
+/** "Blocked 2d · Waiting on client". */
+function blockedSummary(task: TaskSummary): string {
+  const days = task.workingDaysBlocked;
+  const age = days === null ? 'Blocked' : 'Blocked ' + Math.max(days, 1) + 'd';
+  return task.blockerType ? age + ' \u00b7 ' + BLOCKER_TYPE_LABELS[task.blockerType] : age;
 }
 
 function TaskCard({
@@ -376,13 +496,30 @@ function TaskCard({
         {task.title}
       </p>
 
+      {/*
+        A blocked card without the age and the cause is just a red card. How
+        long it has been stuck and who it is stuck on is the whole reason a
+        lead scans this column; the sentence itself goes in the tooltip,
+        because it is usually too long for a card.
+      */}
+      {task.status === 'BLOCKED' ? (
+        <p
+          className="mt-1 truncate text-[11px] text-danger"
+          title={task.blockedReason ?? undefined}
+        >
+          {blockedSummary(task)}
+        </p>
+      ) : null}
+
       <div className="mt-2 flex items-center gap-2">
         <UserAvatar user={task.assignee} size="sm" />
         <span className="ml-auto">
+          {/* No date, nothing there: a dash on a card is noise. */}
           <DueBadge
             dueDate={task.dueDate}
             status={task.status}
             workingDaysLate={task.workingDaysLate}
+            emptyLabel={null}
           />
         </span>
       </div>

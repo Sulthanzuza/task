@@ -220,3 +220,55 @@ test('a member sees their own recent activity', async ({ page, api }) => {
   await expect(activity.first()).toBeVisible();
   await expect(page.getByRole('link', { name: task.key }).first()).toBeVisible();
 });
+
+/**
+ * The sticky header must stick to the window, not to its own box.
+ *
+ * It was inside a wrapper with overflow-x: auto, which scrolls on both axes
+ * and so becomes the containing block for a sticky child. top-16 then meant
+ * "64px down inside this box": the labels floated over the second row with
+ * an empty band above the first. A full-page screenshot cannot show it,
+ * because nothing is scrolled in one, so this scrolls.
+ */
+test('the task list header never covers the first row', async ({ page }) => {
+  await signIn(page, USERS.lead);
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.goto('/tasks');
+  await expect(page.locator('tbody tr').first()).toBeVisible();
+
+  const geometry = () =>
+    page.evaluate(() => {
+      const header = document.querySelector('thead th');
+      const row = document.querySelector('tbody tr');
+      const bar = document.querySelector('header');
+      if (!header || !row || !bar) return null;
+      const h = header.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      return {
+        headerTop: Math.round(h.top),
+        headerBottom: Math.round(h.bottom),
+        rowTop: Math.round(r.top),
+        barBottom: Math.round(bar.getBoundingClientRect().bottom),
+      };
+    });
+
+  const atRest = await geometry();
+  expect(atRest, 'the table should be on the page').not.toBeNull();
+
+  // Nothing scrolled: the first row begins where the header ends, give or
+  // take a border. An overlap is the bug; a wide gap is the other half of it.
+  const restGap = atRest!.rowTop - atRest!.headerBottom;
+  expect(restGap, 'the header overlaps the first row at rest').toBeGreaterThanOrEqual(-1);
+  expect(restGap, 'there is an empty band between the header and the first row').toBeLessThan(8);
+
+  await page.mouse.wheel(0, 500);
+  await page.waitForTimeout(250);
+
+  const scrolled = await geometry();
+  // Stuck directly under the top bar, and still its full height.
+  expect(
+    Math.abs(scrolled!.headerTop - scrolled!.barBottom),
+    'the header should stick under the top bar, not somewhere inside the card',
+  ).toBeLessThanOrEqual(2);
+  expect(scrolled!.headerBottom).toBeGreaterThan(scrolled!.headerTop);
+});

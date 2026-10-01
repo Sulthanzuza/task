@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-09-30. Branch `master`, head `a5313f0` plus the design-system work below.
+Last updated: 2026-10-01. Branch `master`, head `5269072` plus the review fixes below.
 
 ## Built, by prompt
 
@@ -41,7 +41,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `696e511` | Design system: four themes as tokens, the top-bar shell, `/design` |
 | `30ad223` | Responsive top bar: pill icons down to 900px, identity into the account menu |
 | `a5313f0` | Dashboard redesign, the chart set, and `pnpm db:seed --demo` |
-| _this one_ | The design system applied to every remaining screen (below) |
+| `5269072` | The design system applied to every remaining screen (below) |
+| _this one_ | The fixes from the screenshot review (below) |
 
 ### The design system, applied (three design prompts)
 
@@ -113,10 +114,21 @@ These are decided, not oversights. Do not "fix" them without asking.
   take the row and column semantics away from a screen reader, which the same prompt
   asked to protect. Card lists that are not tabular — My Tasks, the attention list, the
   notification rows — do use a CSS grid, because there is nothing to lose there.
-- **Screenshots are written twice from one capture.** `e2e/screenshots` is committed
-  and uploaded by CI so a visual change shows up in a diff; `e2e/.shots` is ignored and
-  is the pile a reviewer opens. Both get the same bytes, named
-  `<screen>-<theme>-<width>.png`.
+- **Two screenshot runs, not one.** `pnpm e2e` writes the committed set to
+  `e2e/screenshots`, which CI uploads so a visual change shows up in a diff. `pnpm
+  shots` writes the review set to `e2e/.shots`, which is ignored. They are separate
+  because the review set runs against the demo seed, and twelve weeks of generated
+  history would break every test that counts the rows the ordinary seed creates. Both
+  name files `<screen>-<theme>-<width>.png`.
+- **Both runs freeze the browser clock at today 09:30 in the org zone.** Every screen
+  carries a relative time somewhere, so re-running the capture produced a diff on pages
+  nothing had touched. It is *today* rather than a fixed date because the API has its
+  own clock and nothing can freeze that from outside: pinning the browser to a date the
+  server disagrees with would make every screen claim the work is weeks overdue. Two
+  runs on the same day are now identical, which is what the diffs were about.
+- **The review set is captured per role.** Member screens (My Tasks, task detail,
+  board) as Rahul, lead screens as Sulthan, because a member sees different controls
+  and shooting everything as a lead hides half of the product.
 - **Leads can open `/admin/projects` and `/admin/import`.** The brief gives leads their
   own team's projects, so those two screens are lead-visible; every other admin screen
   is super-admin only. The server enforces the team boundary in both cases, so the
@@ -181,6 +193,7 @@ pnpm typecheck
 pnpm lint
 pnpm test                     # Vitest + Testcontainers; starts a real Postgres per file
 pnpm e2e                      # Playwright; builds the web app and starts its own stack
+pnpm shots                    # the review screenshots, demo-seeded, into e2e/.shots
 ```
 
 `pnpm e2e` needs ports **4100** (API), **4101** (worker health) and **5199** (web) free.
@@ -196,9 +209,12 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
-| `apps/web` unit (tokens and contrast) | 1 | 29 |
+| `apps/web` unit (tokens and contrast) | 1 | 37 |
 | `apps/api` integration | 20 | 376 |
-| `apps/web` end-to-end | 13 | 55 |
+| `apps/web` end-to-end | 13 | 56 |
+
+`review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
+different database.
 
 All passing, with typecheck and lint clean.
 

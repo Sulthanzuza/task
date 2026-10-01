@@ -36,18 +36,33 @@ export function ThemeSwitch() {
     };
   }, [open]);
 
+  const current = THEME_META[theme];
+  const CurrentIcon = current.icon;
+
   return (
     <div ref={ref} className="relative flex items-center">
+      {/*
+        On a phone this is one round button showing the theme you are in.
+        Hiding the three icons and leaving the pill behind gave a tall empty
+        capsule with a chevron in it, which said nothing about the theme and
+        was the widest piece of nothing in the bar.
+      */}
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={'Theme: ' + current.label + '. Choose another'}
+        onClick={() => setOpen((shown) => !shown)}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border-subtle bg-surface text-ink transition-colors hover:border-border-strong sm:hidden"
+      >
+        <CurrentIcon size={17} aria-hidden />
+      </button>
+
       <div
         role="radiogroup"
         aria-label="Theme"
-        className="flex items-center gap-0.5 rounded-full border border-border-subtle bg-surface/70 p-0.5"
+        className="hidden items-center gap-0.5 rounded-full border border-border-subtle bg-surface/70 p-0.5 sm:flex"
       >
-        {/*
-          On a phone the row of three would crowd out the search, the bell and
-          the menu button, so below 640px only the chevron remains and every
-          theme is chosen from its menu.
-        */}
         {INLINE.map((name) => {
           const meta = THEME_META[name];
           const Icon = meta.icon;
@@ -62,7 +77,7 @@ export function ThemeSwitch() {
               title={meta.label + ' — ' + meta.hint}
               onClick={() => setTheme(name)}
               className={cn(
-                'hidden rounded-full p-1.5 transition-all sm:inline-flex',
+                'inline-flex rounded-full p-1.5 transition-all',
                 active
                   ? 'accent-gradient text-[var(--color-accent-ink)]'
                   : 'text-ink-faint hover:text-ink',

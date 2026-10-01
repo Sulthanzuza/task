@@ -12,6 +12,7 @@ import {
   useTaskTimeline,
   useTransitionTask,
   useUpdateProgress,
+  useUpdateTask,
   useWatchToggle,
 } from './api';
 import { useLabels, useUsers } from '@/features/team/api';
@@ -25,10 +26,12 @@ import {
   Button,
   Card,
   EmptyState,
+  Input,
   Label,
   Select,
   Skeleton,
   Spinner,
+  Textarea,
 } from '@/components/ui/primitives';
 import {
   BlockerBadge,
@@ -40,6 +43,7 @@ import {
 } from '@/components/common/badges';
 import { formatDate, formatDateTime, formatHours, relativeTime } from '@/lib/utils';
 import { TransitionDialog } from './TransitionDialog';
+import { PersonPicker } from './PersonPicker';
 
 export function TaskDetailPage() {
   const { key } = useParams<{ key: string }>();
@@ -93,17 +97,42 @@ export function TaskDetailPage() {
   if (!task.data) return null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 md:pb-6">
+    /*
+     * pb-28 clears the sticky action bar on a phone. Without it the bar sits
+     * on top of the Comment button, which is the one thing at the bottom of
+     * this page somebody needs to press.
+     */
+    <div className="mx-auto max-w-6xl px-4 py-6 pb-28 sm:px-6 md:pb-6">
+      {/*
+        One column on a phone, and the order is the order you need it in:
+        what this is, what you can do about it, the facts, then the detail.
+        On a wide screen the facts move into their own column, so `order`
+        only applies while everything is stacked.
+      */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <TaskHeader task={task.data} />
-          <TransitionBar task={task.data} />
-          <DescriptionCard task={task.data} />
-          <AttachmentsSection task={task.data} />
-          <TimelineCard taskKey={key} entries={timeline.data?.items} loading={timeline.isLoading} />
+        <div className="contents lg:col-span-2 lg:block lg:space-y-5">
+          <div className="order-1 lg:mb-5">
+            <TaskHeader task={task.data} />
+          </div>
+          <div className="order-2 lg:mb-5">
+            <TransitionBar task={task.data} />
+          </div>
+          <div className="order-4 lg:mb-5">
+            <DescriptionCard task={task.data} />
+          </div>
+          <div className="order-5 lg:mb-5">
+            <AttachmentsSection task={task.data} />
+          </div>
+          <div className="order-6">
+            <TimelineCard
+              taskKey={key}
+              entries={timeline.data?.items}
+              loading={timeline.isLoading}
+            />
+          </div>
         </div>
 
-        <aside className="space-y-4">
+        <aside className="order-3 space-y-4">
           <FieldsCard task={task.data} />
         </aside>
       </div>
@@ -165,7 +194,7 @@ function TaskHeader({ task }: { task: TaskDetail }) {
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} />
         <PriorityBadge priority={task.priority} />
-        <DueBadge dueDate={task.dueDate} status={task.status} />
+        <DueBadge dueDate={task.dueDate} status={task.status} emptyLabel="No due date" />
         {task.labels.map((label) => (
           <LabelChip key={label.id} name={label.name} color={label.color} />
         ))}
@@ -184,6 +213,25 @@ function TaskHeader({ task }: { task: TaskDetail }) {
       ) : null}
     </header>
   );
+}
+
+/**
+ * Which of the allowed moves is the one somebody came here to make.
+ *
+ * The server says what is permitted; it has no opinion on what is likely.
+ * Giving every option the same weight makes the person read all six, and
+ * puts "Cancel the task" beside "Start work" as an equal.
+ *
+ * Forward is primary, cancelling is destructive and asks first, and the rest
+ * are ordinary. The target status decides it, so a new label in the workflow
+ * table does not need a change here.
+ */
+const RANK = { primary: 0, secondary: 1, danger: 2 } as const;
+
+function emphasis(to: TaskStatus): 'primary' | 'danger' | 'secondary' {
+  if (to === 'IN_PROGRESS' || to === 'READY_FOR_REVIEW' || to === 'COMPLETED') return 'primary';
+  if (to === 'CANCELLED') return 'danger';
+  return 'secondary';
 }
 
 /**
@@ -228,21 +276,27 @@ function TransitionBar({ task }: { task: TaskDetail }) {
       }
     >
       <div className="flex flex-wrap gap-2">
-        {task.availableTransitions.map((option) => (
-          <Button
-            key={option.to}
-            size="sm"
-            variant={option.to === 'COMPLETED' ? 'primary' : 'outline'}
-            disabled={transition.isPending}
-            onClick={() =>
-              option.requires.length > 0
-                ? setPending({ to: option.to, requires: option.requires })
-                : run(option.to)
-            }
-          >
-            {option.label}
-          </Button>
-        ))}
+        {[...task.availableTransitions]
+          // Forward first, cancelling last, whatever order the server listed.
+          .sort((a, b) => RANK[emphasis(a.to)] - RANK[emphasis(b.to)])
+          .map((option) => {
+            const weight = emphasis(option.to);
+            return (
+              <Button
+                key={option.to}
+                size="sm"
+                variant={weight === 'secondary' ? 'outline' : weight}
+                disabled={transition.isPending}
+                onClick={() =>
+                  option.requires.length > 0
+                    ? setPending({ to: option.to, requires: option.requires })
+                    : run(option.to)
+                }
+              >
+                {option.label}
+              </Button>
+            );
+          })}
       </div>
 
       {error && !pending ? (
@@ -292,6 +346,7 @@ function AssigneeField({ task }: { task: TaskDetail }) {
   const { isLead } = useAuth();
   const people = useUsers();
   const assign = useAssignTask(task.id, people.data?.items ?? []);
+  const [handover, setHandover] = useState<{ id: string | null; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!isLead) {
@@ -302,34 +357,334 @@ function AssigneeField({ task }: { task: TaskDetail }) {
     );
   }
 
+  const send = (assigneeId: string | null, note?: string) => {
+    setError(null);
+    assign.mutate(
+      { assigneeId, ...(note ? { handoverNote: note } : {}) },
+      {
+        onSuccess: () => setHandover(null),
+        onError: (cause) => setError(cause instanceof Error ? cause.message : 'That did not work.'),
+      },
+    );
+  };
+
   return (
     <div>
       <Field label="Assignee">
-        <Select
-          aria-label="Assignee"
-          className="h-8 w-44 text-xs"
-          value={task.assignee?.id ?? ''}
+        <PersonPicker
+          label="Assignee"
+          className="w-48"
+          value={task.assignee}
           disabled={assign.isPending}
-          onChange={(event) => {
-            const chosen = event.target.value;
+          onChange={(id) => {
+            if (id === task.assignee?.id) return;
+            /*
+             * Moving work from one person to another is a handover, and the
+             * person picking it up needs to know where it got to. Taking it
+             * off somebody, or giving out work nobody held, is not.
+             */
+            if (task.assignee && id !== null) {
+              const next = people.data?.items.find((person) => person.id === id);
+              setHandover({ id, name: next?.name ?? 'them' });
+              return;
+            }
+            send(id);
+          }}
+        />
+      </Field>
+
+      {error ? (
+        <p role="alert" className="mt-1 text-right text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+
+      {handover ? (
+        <HandoverDialog
+          from={task.assignee?.name ?? 'nobody'}
+          to={handover.name}
+          busy={assign.isPending}
+          error={error}
+          onCancel={() => {
+            setHandover(null);
             setError(null);
+          }}
+          onConfirm={(note) => send(handover.id, note)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The note that travels with reassigned work.
+ *
+ * Optional, because sometimes there is genuinely nothing to say and forcing
+ * a sentence only produces "reassigning". When there is something, it lands
+ * on the timeline where the next person will actually look for it.
+ */
+function HandoverDialog({
+  from,
+  to,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  from: string;
+  to: string;
+  busy: boolean;
+  error: string | null;
+  onCancel(): void;
+  onConfirm(note?: string): void;
+}) {
+  const [note, setNote] = useState('');
+  const trimmed = note.trim();
+  // The API will not take a note shorter than this, so neither will the form.
+  const tooShort = trimmed.length > 0 && trimmed.length < 3;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={'Hand over to ' + to}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    >
+      <Card className="w-full max-w-md p-5">
+        <h2 className="text-sm font-semibold">
+          Hand over from {from} to {to}
+        </h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          Anything {to} should know before picking this up? It goes on the timeline.
+        </p>
+
+        <div className="mt-3">
+          <Label htmlFor="handover-note">Handover note</Label>
+          <Textarea
+            id="handover-note"
+            autoFocus
+            rows={4}
+            value={note}
+            onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
+              setNote(event.currentTarget.value)
+            }
+            placeholder="The API side is done and merged; the migration still needs reviewing."
+          />
+          {tooShort ? (
+            <p role="alert" className="mt-1 text-xs text-danger">
+              A note needs at least three characters, or leave it empty.
+            </p>
+          ) : null}
+        </div>
+
+        {error ? (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={busy || tooShort}
+            onClick={() => onConfirm(trimmed.length >= 3 ? trimmed : undefined)}
+          >
+            {busy ? <Spinner /> : null}
+            Hand it over
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/** The reviewer goes through the same endpoint as the assignee. */
+function ReviewerField({ task }: { task: TaskDetail }) {
+  const { isLead } = useAuth();
+  const people = useUsers();
+  const assign = useAssignTask(task.id, people.data?.items ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isLead) {
+    return (
+      <Field label="Reviewer">
+        {task.reviewer ? (
+          <UserAvatar user={task.reviewer} showName size="sm" />
+        ) : (
+          <span className="text-xs text-ink-faint">Nobody yet</span>
+        )}
+      </Field>
+    );
+  }
+
+  return (
+    <div>
+      <Field label="Reviewer">
+        <PersonPicker
+          label="Reviewer"
+          className="w-48"
+          nobodyLabel="Nobody yet"
+          value={task.reviewer}
+          disabled={assign.isPending}
+          onChange={(id) => {
+            if (id === (task.reviewer?.id ?? null)) return;
+            setError(null);
+            // assigneeId is required by the endpoint; send back what it has.
             assign.mutate(
-              { assigneeId: chosen === '' ? null : chosen },
+              { assigneeId: task.assignee?.id ?? null, reviewerId: id },
               {
                 onError: (cause) =>
                   setError(cause instanceof Error ? cause.message : 'That did not work.'),
               },
             );
           }}
-        >
-          <option value="">Nobody</option>
-          {people.data?.items.map((person) => (
-            <option key={person.id} value={person.id}>
-              {person.name}
-            </option>
-          ))}
-        </Select>
+        />
       </Field>
+      {error ? (
+        <p role="alert" className="mt-1 text-right text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A field a lead edits in place and everyone else reads.
+ *
+ * It commits on blur rather than on every keystroke, so a half-typed date is
+ * never sent, and it holds a draft while focused so the server's value does
+ * not overwrite what is being typed.
+ */
+function InlineEdit({
+  label,
+  value,
+  display,
+  type,
+  step,
+  min,
+  placeholder,
+  onCommit,
+  busy,
+}: {
+  label: string;
+  value: string;
+  display: React.ReactNode;
+  type: 'date' | 'number';
+  step?: string;
+  min?: string;
+  placeholder?: string;
+  onCommit(next: string): void;
+  busy: boolean;
+}) {
+  const { isLead } = useAuth();
+  const [draft, setDraft] = useState<string | null>(null);
+
+  if (!isLead) return <Field label={label}>{display}</Field>;
+
+  return (
+    <Field label={label}>
+      <Input
+        type={type}
+        step={step}
+        min={min}
+        placeholder={placeholder}
+        aria-label={label}
+        disabled={busy}
+        className="h-8 w-48 text-xs"
+        value={draft ?? value}
+        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+          setDraft(event.currentTarget.value)
+        }
+        onBlur={() => {
+          if (draft === null || draft === value) {
+            setDraft(null);
+            return;
+          }
+          onCommit(draft);
+          setDraft(null);
+        }}
+        onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
+            setDraft(null);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </Field>
+  );
+}
+
+function DueDateField({ task }: { task: TaskDetail }) {
+  const update = useUpdateTask(task.id);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div>
+      <InlineEdit
+        label="Due"
+        type="date"
+        busy={update.isPending}
+        value={task.dueDate ?? ''}
+        display={<DueBadge dueDate={task.dueDate} status={task.status} emptyLabel="No due date" />}
+        onCommit={(next) => {
+          setError(null);
+          update.mutate(
+            { dueDate: next === '' ? null : next },
+            {
+              onError: (cause: unknown) =>
+                setError(cause instanceof Error ? cause.message : 'That date was refused.'),
+            },
+          );
+        }}
+      />
+      {error ? (
+        <p role="alert" className="mt-1 text-right text-xs text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function EstimateField({ task }: { task: TaskDetail }) {
+  const update = useUpdateTask(task.id);
+  const [error, setError] = useState<string | null>(null);
+
+  const hours = task.estimatedMinutes === null ? '' : String(task.estimatedMinutes / 60);
+
+  return (
+    <div>
+      <InlineEdit
+        label="Estimate"
+        type="number"
+        step="0.5"
+        min="0"
+        placeholder="Hours"
+        busy={update.isPending}
+        value={hours}
+        display={
+          task.estimatedMinutes === null ? (
+            <span className="text-xs text-ink-faint">No estimate</span>
+          ) : (
+            formatHours(task.estimatedMinutes)
+          )
+        }
+        onCommit={(next) => {
+          setError(null);
+          update.mutate(
+            { estimatedHours: next === '' ? null : Number(next) },
+            {
+              onError: (cause: unknown) =>
+                setError(cause instanceof Error ? cause.message : 'That estimate was refused.'),
+            },
+          );
+        }}
+      />
       {error ? (
         <p role="alert" className="mt-1 text-right text-xs text-danger">
           {error}
@@ -449,7 +804,9 @@ function FieldsCard({ task }: { task: TaskDetail }) {
           max={100}
           step={5}
           value={shown}
-          className="w-full accent-[var(--color-accent)]"
+          // --fill drives the filled part of the track; see .range-token.
+          style={{ ['--fill' as string]: shown + '%' }}
+          className="range-token"
           onChange={(e) => setDraft(Number(e.currentTarget.value))}
           onPointerUp={() => {
             if (draft !== null && draft !== task.progress) progress.mutate(draft);
@@ -463,17 +820,13 @@ function FieldsCard({ task }: { task: TaskDetail }) {
       </div>
 
       <AssigneeField task={task} />
-      <Field label="Reviewer">
-        <UserAvatar user={task.reviewer} showName size="sm" />
-      </Field>
+      <ReviewerField task={task} />
       <Field label="Created by">
         <UserAvatar user={task.createdBy} showName size="sm" />
       </Field>
-      <Field label="Start">{formatDate(task.startDate)}</Field>
-      <Field label="Due">
-        <DueBadge dueDate={task.dueDate} status={task.status} />
-      </Field>
-      <Field label="Estimate">{formatHours(task.estimatedMinutes)}</Field>
+      {task.startDate ? <Field label="Start">{formatDate(task.startDate)}</Field> : null}
+      <DueDateField task={task} />
+      <EstimateField task={task} />
       <Field label="Last update">{relativeTime(task.lastActivityAt)}</Field>
       {task.completedAt ? (
         <Field label="Completed">{formatDateTime(task.completedAt)}</Field>
@@ -611,7 +964,7 @@ function TimelineCard({
         </div>
       ) : (
         // A line down the left, with a dot per entry coloured by what happened.
-        <ol className="relative space-y-3 before:absolute before:top-2 before:bottom-2 before:left-[3px] before:w-px before:bg-border-subtle">
+        <ol className="relative space-y-3 before:absolute before:top-2 before:bottom-2 before:left-[3.5px] before:w-px before:bg-border-subtle">
           {visible.map((entry) =>
             entry.kind === 'comment' ? (
               <li key={'c' + entry.id} className="flex gap-2.5">
@@ -637,7 +990,15 @@ function TimelineCard({
               <li key={'a' + entry.id} className="flex items-baseline gap-2 text-xs text-ink-muted">
                 <span
                   aria-hidden
-                  className="mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-surface"
+                  /*
+                   * relative, so the dot paints over the line behind it. The
+                   * line is an absolutely positioned pseudo-element on the
+                   * list, which puts it above its static children: it was
+                   * drawn straight through every dot, and in the light theme,
+                   * where the line is dark enough to see, that read as a row
+                   * of half-circles.
+                   */
+                  className="relative z-10 mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-surface"
                   style={{ background: activityColour(entry.action) }}
                 />
                 <span className="flex-1">{describe(entry)}</span>

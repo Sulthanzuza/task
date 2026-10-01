@@ -63,11 +63,36 @@ async function disableQuietHours(): Promise<void> {
     .where(eq(orgSettings.id, 1));
 }
 
+/**
+ * The review screenshots want a populated database; the suite wants a counted
+ * one.
+ *
+ * Twelve weeks of demo history makes the charts worth looking at and would
+ * break every test that asserts how many tasks the ordinary seed creates, so
+ * it is added only for the screenshot run. It is dated from the same instant
+ * the browser's clock is frozen at, or the two disagree about what "today"
+ * means and half the dates read as overdue.
+ */
+async function addDemoData(): Promise<void> {
+  if (process.env.E2E_DEMO !== '1') return;
+
+  const fixed = process.env.E2E_FIXED_TIME;
+  const now = fixed ? new Date(fixed) : new Date();
+  if (Number.isNaN(now.getTime())) {
+    throw new Error('E2E_FIXED_TIME is not a date: ' + String(fixed));
+  }
+
+  const { seedDemo } = await import('./demo');
+  const result = await seedDemo(now);
+  logger.info({ ...result, now: now.toISOString() }, 'Demo data added for the screenshot run.');
+}
+
 async function main(): Promise<void> {
   const database = await createDatabaseIfMissing();
   const { reset } = await import('./reset');
   await reset();
   await disableQuietHours();
+  await addDemoData();
   const { closeDatabase } = await import('./client');
   await closeDatabase();
   logger.info({ database }, 'End-to-end database ready.');

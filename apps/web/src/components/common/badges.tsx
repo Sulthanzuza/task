@@ -90,10 +90,18 @@ export function DueBadge({
   dueDate,
   status,
   workingDaysLate,
+  emptyLabel = '\u2014',
   className,
 }: {
   dueDate: string | null;
   status?: TaskStatus;
+  /**
+   * What to show when there is no due date. A bare em dash reads as a value
+   * that failed to load rather than as a date nobody set, so the places with
+   * room say so in words, and the places without it (a board card) pass null
+   * and show nothing at all.
+   */
+  emptyLabel?: string | null;
   /**
    * Working days past the date, counted on the server against the
    * organisation's calendar. When it is given, the badge says how late the
@@ -103,7 +111,10 @@ export function DueBadge({
   workingDaysLate?: number | null;
   className?: string;
 }) {
-  if (!dueDate) return <span className="text-xs text-ink-faint">—</span>;
+  if (!dueDate) {
+    if (emptyLabel === null) return null;
+    return <span className={cn('text-xs text-ink-faint', className)}>{emptyLabel}</span>;
+  }
 
   const closed = status === 'COMPLETED' || status === 'CANCELLED';
   const today = todayIso();

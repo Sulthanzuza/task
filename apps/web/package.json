@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "e2e": "playwright test -c e2e/playwright.config.ts",
+    "shots": "playwright test -c e2e/shots.config.ts",
     "e2e:ui": "playwright test -c e2e/playwright.config.ts --ui",
     "smoke": "playwright test -c e2e/smoke.config.ts"
   },

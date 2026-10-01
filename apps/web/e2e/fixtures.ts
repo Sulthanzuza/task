@@ -113,7 +113,13 @@ export async function userIdOf(
 export async function apiAs(
   api: APIRequestContext,
   user: { email: string; password: string },
-): Promise<{ token: string; get<T>(path: string): Promise<T> }> {
+): Promise<{
+  token: string;
+  get<T>(path: string): Promise<T>;
+  post<T>(path: string, data: unknown): Promise<T>;
+  put<T>(path: string, data: unknown): Promise<T>;
+  upload<T>(path: string, file: { name: string; mimeType: string; buffer: Buffer }): Promise<T>;
+}> {
   const login = await api.post('/api/v1/auth/login', {
     data: { email: user.email, password: user.password },
   });
@@ -127,6 +133,46 @@ export async function apiAs(
         headers: { Authorization: 'Bearer ' + token },
       });
       expect(response.ok(), 'GET ' + path + ' failed: ' + response.status()).toBeTruthy();
+      return (await response.json()) as T;
+    },
+
+    async post<T>(path: string, data: unknown): Promise<T> {
+      const response = await api.post('/api/v1' + path, {
+        headers: { Authorization: 'Bearer ' + token },
+        data: data as Record<string, unknown>,
+      });
+      expect(
+        response.ok(),
+        'POST ' + path + ' failed: ' + response.status() + ' ' + (await response.text()),
+      ).toBeTruthy();
+      return (await response.json()) as T;
+    },
+
+    async put<T>(path: string, data: unknown): Promise<T> {
+      const response = await api.put('/api/v1' + path, {
+        headers: { Authorization: 'Bearer ' + token },
+        data: data as Record<string, unknown>,
+      });
+      expect(
+        response.ok(),
+        'PUT ' + path + ' failed: ' + response.status() + ' ' + (await response.text()),
+      ).toBeTruthy();
+      return (await response.json()) as T;
+    },
+
+    /** Multipart, for the one endpoint that takes bytes rather than JSON. */
+    async upload<T>(
+      path: string,
+      file: { name: string; mimeType: string; buffer: Buffer },
+    ): Promise<T> {
+      const response = await api.post('/api/v1' + path, {
+        headers: { Authorization: 'Bearer ' + token },
+        multipart: { file },
+      });
+      expect(
+        response.ok(),
+        'UPLOAD ' + path + ' failed: ' + response.status() + ' ' + (await response.text()),
+      ).toBeTruthy();
       return (await response.json()) as T;
     },
   };

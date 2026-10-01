@@ -44,7 +44,19 @@ export function DataTable({
   columns: Column[];
   /** Below this the table scrolls sideways inside its own box, not the page. */
   minWidth?: string;
-  /** Under the 64px top bar, for the long lists you scroll through. */
+  /**
+   * Stick the header under the 64px top bar while the page scrolls.
+   *
+   * This only works where the table is not inside a horizontal scroller: an
+   * element with overflow-x: auto scrolls on both axes, which makes it the
+   * containing block for a sticky child, so the header sticks 64px down
+   * inside the box instead of to the window. That is what it was doing:
+   * floating over the second row with a gap above the first.
+   *
+   * So at md and above the wrapper lets its content overflow and the page is
+   * the scroller; below md the wrapper scrolls sideways and the header does
+   * not stick, which is the right trade on a phone anyway.
+   */
   sticky?: boolean;
   children: ReactNode;
   className?: string;
@@ -52,7 +64,7 @@ export function DataTable({
   return (
     // relative, because a sr-only child of a static scroller is positioned
     // against the viewport and drags the whole document sideways.
-    <div className={cn('relative overflow-x-auto', className)}>
+    <div className={cn('relative overflow-x-auto', sticky && 'md:overflow-x-visible', className)}>
       <table className="w-full table-fixed border-collapse text-sm" style={{ minWidth }}>
         <colgroup>
           {columns.map((column, index) => (
@@ -63,20 +75,23 @@ export function DataTable({
           ))}
         </colgroup>
         <thead>
-          <tr
-            className={cn(
-              'border-b border-border-subtle text-left text-xs text-ink-muted',
-              sticky && 'sticky top-16 z-10 bg-surface',
-            )}
-          >
+          <tr className="text-left text-xs text-ink-muted">
             {columns.map((column, index) => (
               <th
                 key={index}
                 scope="col"
                 className={cn(
-                  'px-3 py-2 font-medium',
+                  'bg-surface px-3 py-2 font-medium',
                   column.align === 'right' && 'text-right',
                   hiddenAt(column.hideBelow),
+                  /*
+                   * The cells stick, not the row: a <tr> paints no background
+                   * of its own and draws no border while stuck, so the rows
+                   * showed through the labels.
+                   */
+                  sticky && 'md:sticky md:top-16 md:z-10',
+                  // inset shadow rather than border-b, which a sticky cell drops.
+                  'shadow-[inset_0_-1px_0_var(--color-border-subtle)]',
                 )}
               >
                 {column.label}

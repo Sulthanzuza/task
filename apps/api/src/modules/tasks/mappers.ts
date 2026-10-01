@@ -23,6 +23,19 @@ function lateness(row: TaskRow, ctx: LatenessContext | undefined): number | null
   return workingDaysBetween(row.dueDate, ctx.today, ctx.calendar);
 }
 
+/**
+ * How many working days a task has been blocked.
+ *
+ * The same reasoning as lateness: a task blocked on Friday afternoon is one
+ * working day old on Monday, not three, and only this side knows which days
+ * this organisation counts.
+ */
+function blockedFor(row: TaskRow, ctx: LatenessContext | undefined): number | null {
+  if (!ctx || row.status !== 'BLOCKED' || !row.blockedAt) return null;
+  const since = row.blockedAt.toISOString().slice(0, 10);
+  return workingDaysBetween(since, ctx.today, ctx.calendar);
+}
+
 export function toUserSummary(row: UserRow | undefined | null): UserSummary | null {
   if (!row) return null;
   return {
@@ -64,6 +77,7 @@ export function toTaskSummary(
     blockerType: row.blockerType,
     blockedAt: iso(row.blockedAt),
     workingDaysLate: lateness(row, ctx),
+    workingDaysBlocked: blockedFor(row, ctx),
     lastActivityAt: row.lastActivityAt.toISOString(),
     completedAt: iso(row.completedAt),
     parentTaskId: row.parentTaskId,

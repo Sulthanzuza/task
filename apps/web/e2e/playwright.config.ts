@@ -15,6 +15,31 @@ export const E2E_BASE_URL = 'http://localhost:' + E2E_WEB_PORT;
 export const E2E_API_URL = 'http://localhost:' + E2E_API_PORT;
 
 /** A separate database, dropped and rebuilt before every run. */
+/**
+ * One instant for the whole run: today at 09:30 in the organisation's zone.
+ *
+ * Every screenshot used to show "2 hours ago" somewhere, and that number
+ * moved between runs, so a capture of an unchanged page still came out as a
+ * diff. Freezing the browser's clock stops that.
+ *
+ * It is today rather than a date written down here on purpose. The API has
+ * its own clock, and nothing can freeze that from out here; pinning the
+ * browser to a date the server does not agree with would make every screen
+ * say a task is three weeks overdue. Today at a fixed time of day is the
+ * furthest the two can be held together, and it makes two runs on the same
+ * day identical, which is what the diffs were about.
+ */
+export const E2E_FIXED_TIME = (() => {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  // 09:30 in Asia/Kolkata, written as the instant it is.
+  return today + 'T04:00:00.000Z';
+})();
+
 /** Mailpit, started by docker compose, is where e2e email lands. */
 export const E2E_MAILPIT_URL = process.env.E2E_MAILPIT_URL ?? 'http://localhost:8025';
 
@@ -49,6 +74,10 @@ const apiEnv = {
   JWT_ACCESS_TTL_SECONDS: '8',
   REFRESH_GRACE_SECONDS: '30',
   SEED_TIMEZONE: 'Asia/Kolkata',
+  // Read by db:prepare-e2e, so the demo data is dated from the same instant
+  // the browser's clock is frozen at.
+  E2E_FIXED_TIME: E2E_FIXED_TIME,
+  E2E_DEMO: '',
   SEED_PASSWORD: 'Password123!',
   // The suite checks that email really arrives, so the queue runs and the
   // mailer points at mailpit. A one second debounce keeps the wait short.
@@ -60,78 +89,92 @@ const apiEnv = {
   MAIL_FROM: 'Task Manager <no-reply@taskmanager.local>',
 };
 
-export default defineConfig({
-  testDir: './tests',
-  outputDir: './.artifacts',
-  fullyParallel: false,
-  workers: 1,
-  retries: 0,
-  timeout: 45_000,
-  expect: { timeout: 10_000 },
+/**
+ * Two runs out of one config.
+ *
+ * The review set runs against the demo seed, which the rest of the suite must
+ * not see: those tests count the rows the ordinary seed creates. A flag
+ * rather than an environment variable, because setting one of those on the
+ * command line is not the same sentence on Windows as it is elsewhere, and
+ * that is not worth a dependency.
+ */
+export function createConfig(shots: boolean) {
+  return defineConfig({
+    testDir: './tests',
+    testMatch: shots ? /review-shots\.spec\.ts/ : /^(?!.*review-shots).*\.spec\.ts$/,
+    outputDir: './.artifacts',
+    fullyParallel: false,
+    workers: 1,
+    retries: 0,
+    timeout: 45_000,
+    expect: { timeout: 10_000 },
 
-  reporter: [['list'], ['html', { outputFolder: './.report', open: 'never' }]],
+    reporter: [['list'], ['html', { outputFolder: './.report', open: 'never' }]],
 
-  use: {
-    /*
-     * Animation off for the whole suite. Chart libraries draw over several
-     * hundred milliseconds, and a screenshot taken during that shows a line
-     * that stops partway; the kit already honours this setting.
-     */
-    reducedMotion: 'reduce',
-    baseURL: E2E_BASE_URL,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'off',
-  },
-
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } },
+    use: {
+      /*
+       * Animation off for the whole suite. Chart libraries draw over several
+       * hundred milliseconds, and a screenshot taken during that shows a line
+       * that stops partway; the kit already honours this setting.
+       */
+      reducedMotion: 'reduce',
+      baseURL: E2E_BASE_URL,
+      trace: 'retain-on-failure',
+      screenshot: 'only-on-failure',
+      video: 'off',
     },
-  ],
 
-  webServer: [
-    {
-      // The database is built here, not in globalSetup: Playwright starts the
-      // webServer processes first, so the API needs its database already present.
-      command: 'pnpm --filter @tm/api db:prepare-e2e && pnpm --filter @tm/api dev',
-      cwd: repoRoot,
-      url: E2E_API_URL + '/api/v1/health',
-      reuseExistingServer: false,
-      timeout: 120_000,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: apiEnv,
-    },
-    {
-      // The worker is what actually sends email; the API only enqueues.
-      command: 'pnpm --filter @tm/api dev:worker',
-      cwd: repoRoot,
-      // Its own health endpoint: waiting on the API's would let Playwright think
-      // the worker had started when only the API was up.
-      url: 'http://localhost:' + E2E_WORKER_PORT + '/health',
-      reuseExistingServer: false,
-      timeout: 120_000,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...apiEnv, WORKER_HEALTH_PORT: String(E2E_WORKER_PORT) },
-    },
-    {
-      // Build and serve, rather than run the dev server: the suite tests the real
-      // bundle, and no file watcher runs to fall over mid-run on Windows.
-      command: 'pnpm --filter @tm/web build && pnpm --filter @tm/web preview',
-      cwd: repoRoot,
-      url: E2E_BASE_URL,
-      reuseExistingServer: false,
-      timeout: 180_000,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: {
-        ...process.env,
-        WEB_PORT: String(E2E_WEB_PORT),
-        API_URL: E2E_API_URL,
+    projects: [
+      {
+        name: 'chromium',
+        use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } },
       },
-    },
-  ],
-});
+    ],
+
+    webServer: [
+      {
+        // The database is built here, not in globalSetup: Playwright starts the
+        // webServer processes first, so the API needs its database already present.
+        command: 'pnpm --filter @tm/api db:prepare-e2e && pnpm --filter @tm/api dev',
+        cwd: repoRoot,
+        url: E2E_API_URL + '/api/v1/health',
+        reuseExistingServer: false,
+        timeout: 120_000,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...apiEnv, E2E_DEMO: shots ? '1' : '' },
+      },
+      {
+        // The worker is what actually sends email; the API only enqueues.
+        command: 'pnpm --filter @tm/api dev:worker',
+        cwd: repoRoot,
+        // Its own health endpoint: waiting on the API's would let Playwright think
+        // the worker had started when only the API was up.
+        url: 'http://localhost:' + E2E_WORKER_PORT + '/health',
+        reuseExistingServer: false,
+        timeout: 120_000,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...apiEnv, E2E_DEMO: '', WORKER_HEALTH_PORT: String(E2E_WORKER_PORT) },
+      },
+      {
+        // Build and serve, rather than run the dev server: the suite tests the real
+        // bundle, and no file watcher runs to fall over mid-run on Windows.
+        command: 'pnpm --filter @tm/web build && pnpm --filter @tm/web preview',
+        cwd: repoRoot,
+        url: E2E_BASE_URL,
+        reuseExistingServer: false,
+        timeout: 180_000,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          WEB_PORT: String(E2E_WEB_PORT),
+          API_URL: E2E_API_URL,
+        },
+      },
+    ],
+  });
+}
+
+export default createConfig(false);

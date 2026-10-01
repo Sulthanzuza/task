@@ -68,9 +68,8 @@ export function NotificationBell() {
         {count > 0 ? (
           <span
             data-testid="notification-count"
-            // The canvas colour, not white: in the dark themes --color-danger
-            // is a light red, and white on it cannot be read.
-            className="absolute top-1 right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-[var(--color-canvas)]"
+            // The ink paired with --color-danger; see index.css.
+            className="absolute top-1 right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-[var(--color-danger-ink)]"
           >
             {count > 99 ? '99+' : count}
           </span>

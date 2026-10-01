@@ -15,7 +15,20 @@ import { cn } from '@/lib/utils';
 const buttonStyles = cva(
   // Pills throughout, as in both references.
   'inline-flex items-center justify-center gap-2 rounded-full text-sm font-medium transition-all ' +
-    'disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap',
+    'whitespace-nowrap ' +
+    /*
+     * A disabled button must look disabled in every theme, not just dimmer.
+     * The primary variant keeps its gradient and its glow at 50% opacity,
+     * which on a dark card still reads as the brightest thing on the screen,
+     * so the fill and the shadow are taken away rather than faded.
+     *
+     * pointer-events stay on: without them the cursor never changes, and the
+     * only feedback for "you cannot press this" is that nothing happens.
+     */
+    'disabled:cursor-not-allowed disabled:bg-none disabled:bg-surface-muted ' +
+    'disabled:text-ink-faint disabled:shadow-none disabled:border-border-subtle ' +
+    'disabled:opacity-70 disabled:hover:brightness-100 disabled:hover:bg-surface-muted ' +
+    'disabled:hover:border-border-subtle disabled:hover:text-ink-faint',
   {
     variants: {
       variant: {
@@ -24,7 +37,9 @@ const buttonStyles = cva(
         secondary: 'bg-surface-muted text-ink hover:bg-border-subtle',
         outline: 'border border-border-subtle bg-surface text-ink hover:border-border-strong',
         ghost: 'text-ink-muted hover:bg-surface-muted hover:text-ink',
-        danger: 'bg-danger text-white hover:brightness-110',
+        // Its own paired ink: white fails on the dark reds, the canvas fails
+        // on the light ones, and the dusk canvas fails on both.
+        danger: 'bg-danger text-[var(--color-danger-ink)] hover:brightness-110',
       },
       size: {
         sm: 'h-8 px-3.5 text-xs',

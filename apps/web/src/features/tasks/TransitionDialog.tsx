@@ -31,7 +31,9 @@ export function TransitionDialog({
 
   const needsComment = requires.includes('comment');
   const needsBlocker = requires.includes('blockedReason');
-  const ready = (!needsComment || comment.trim().length > 0) && (!needsBlocker || blockedReason.trim().length > 2);
+  const ready =
+    (!needsComment || comment.trim().length > 0) &&
+    (!needsBlocker || blockedReason.trim().length > 2);
 
   return (
     <div
@@ -93,9 +95,15 @@ export function TransitionDialog({
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
-            Cancel
+            {to === 'CANCELLED' ? 'Keep it open' : 'Cancel'}
           </Button>
           <Button
+            /*
+             * Cancelling a task is the one move with nothing after it, so the
+             * button that does it is styled as what it is. This dialog is
+             * already the confirmation: it will not proceed without a reason.
+             */
+            variant={to === 'CANCELLED' ? 'danger' : 'primary'}
             disabled={!ready || busy}
             onClick={() =>
               onConfirm({
@@ -105,7 +113,7 @@ export function TransitionDialog({
             }
           >
             {busy ? <Spinner /> : null}
-            Confirm
+            {to === 'CANCELLED' ? 'Cancel the task' : 'Confirm'}
           </Button>
         </div>
       </Card>

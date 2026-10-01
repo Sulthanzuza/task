@@ -35,7 +35,7 @@
 
   --color-ink: #e6f1ff;
   --color-ink-muted: #7c93b5;
-  --color-ink-faint: #778aac;
+  --color-ink-faint: #7f90b0;
 
   /* Accent: cyan to teal, with a slate blue behind it. */
   --color-accent: #22d3ee;
@@ -55,6 +55,16 @@
 
   /* Feedback. */
   --color-danger: #fb7185;
+
+  /*
+   * The ink that goes on --color-danger.
+   *
+   * Neither white nor the canvas works in all four: danger is a dark red in
+   * the light family and a light one in the dark family, and the dusk canvas
+   * is a mid blue-grey that fails against both. So the pairing is named.
+   */
+  --color-danger-ink: #1a0509;
+
   --color-danger-soft: rgba(251, 113, 133, 0.16);
   --color-warning: #fbbf24;
   --color-warning-soft: rgba(251, 191, 36, 0.16);
@@ -150,18 +160,40 @@
 
   --color-ink: #1b2a44;
   --color-ink-muted: #4a5b78;
-  --color-ink-faint: #5e6d82;
+  --color-ink-faint: #58677a;
 
   /* Darkened so cyan on a pale card still clears AA for text. */
   --color-accent: #0b667e;
   --color-accent-2: #0f766e;
   --color-accent-hover: #155e75;
+
+  /*
+   * The brand gradient, restated for the light family.
+   *
+   * It used to inherit midnight's bright cyan, so a primary button here was
+   * white on #22d3ee: 1.81:1. axe never saw it, because it cannot measure
+   * text against a background-image, which is exactly the gap the token
+   * test covers.
+   */
+  --color-accent-from: #0e7490;
+  --color-accent-to: #0f766e;
+
   --color-accent-soft: rgba(14, 116, 144, 0.12);
   --color-accent-ink: #ffffff;
   --color-secondary: #3e5c8f;
   --color-secondary-soft: rgba(62, 92, 143, 0.14);
 
   --color-danger: #be123c;
+
+  /*
+   * The ink that goes on --color-danger.
+   *
+   * Neither white nor the canvas works in all four: danger is a dark red in
+   * the light family and a light one in the dark family, and the dusk canvas
+   * is a mid blue-grey that fails against both. So the pairing is named.
+   */
+  --color-danger-ink: #ffffff;
+
   --color-danger-soft: rgba(190, 18, 60, 0.1);
   --color-warning: #a94e09;
   --color-warning-soft: rgba(251, 191, 36, 0.14);
@@ -228,17 +260,39 @@
 
   --color-ink: #16213a;
   --color-ink-muted: #4b5a77;
-  --color-ink-faint: #62708a;
+  --color-ink-faint: #5c6a82;
 
   --color-accent: #0d708a;
   --color-accent-2: #0f766e;
   --color-accent-hover: #155e75;
+
+  /*
+   * The brand gradient, restated for the light family.
+   *
+   * It used to inherit midnight's bright cyan, so a primary button here was
+   * white on #22d3ee: 1.81:1. axe never saw it, because it cannot measure
+   * text against a background-image, which is exactly the gap the token
+   * test covers.
+   */
+  --color-accent-from: #0e7490;
+  --color-accent-to: #0f766e;
+
   --color-accent-soft: rgba(14, 116, 144, 0.1);
   --color-accent-ink: #ffffff;
   --color-secondary: #3e5c8f;
   --color-secondary-soft: rgba(62, 92, 143, 0.12);
 
   --color-danger: #be123c;
+
+  /*
+   * The ink that goes on --color-danger.
+   *
+   * Neither white nor the canvas works in all four: danger is a dark red in
+   * the light family and a light one in the dark family, and the dusk canvas
+   * is a mid blue-grey that fails against both. So the pairing is named.
+   */
+  --color-danger-ink: #ffffff;
+
   --color-danger-soft: rgba(190, 18, 60, 0.09);
   --color-warning: #a94e09;
   --color-warning-soft: rgba(251, 191, 36, 0.14);
@@ -310,7 +364,7 @@
 
   --color-ink: #f4effa;
   --color-ink-muted: #a294b8;
-  --color-ink-faint: #887b9c;
+  --color-ink-faint: #8e82a2;
 
   /* Lightened from the brand #c026d3, which reads at only 3.9:1 here. */
   --color-accent: #d946ef;
@@ -324,6 +378,16 @@
   --color-secondary-soft: rgba(124, 58, 237, 0.2);
 
   --color-danger: #fb7185;
+
+  /*
+   * The ink that goes on --color-danger.
+   *
+   * Neither white nor the canvas works in all four: danger is a dark red in
+   * the light family and a light one in the dark family, and the dusk canvas
+   * is a mid blue-grey that fails against both. So the pairing is named.
+   */
+  --color-danger-ink: #1a0509;
+
   --color-danger-soft: rgba(251, 113, 133, 0.16);
   --color-warning: #fbbf24;
   --color-warning-soft: rgba(251, 191, 36, 0.16);
@@ -517,5 +581,95 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * The progress slider, in the theme's own colours.
+ *
+ * accent-color alone tints the thumb and leaves the rail the browser's grey,
+ * which is the one grey on the page that belongs to nothing. --fill is set
+ * inline from the value, so the track is filled up to the thumb.
+ *
+ * The thumb is 18px to look right and 44px to touch: the hit area is the
+ * ::before box, which extends past the thumb without changing how it reads.
+ */
+.range-token {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range-token:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.range-token::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0 var(--fill, 0%),
+    var(--color-surface-muted) var(--fill, 0%) 100%
+  );
+  border: 1px solid var(--color-border-subtle);
+}
+
+.range-token::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.range-token::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.range-token::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  margin-top: -7px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface);
+  box-shadow: 0 2px 8px -2px var(--color-accent);
+}
+
+.range-token::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface);
+  box-shadow: 0 2px 8px -2px var(--color-accent);
+}
+
+.range-token:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.range-token:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* A 44px band to aim at on a touch screen, without a 44px-tall bar. */
+@media (pointer: coarse) {
+  .range-token {
+    height: 44px;
+  }
+
+  .range-token::-webkit-slider-thumb {
+    margin-top: -6px;
   }
 }

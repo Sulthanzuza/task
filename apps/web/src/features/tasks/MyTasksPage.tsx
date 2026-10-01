@@ -228,48 +228,75 @@ function TaskRow({ task }: { task: TaskSummary }) {
 
   return (
     /*
-     * Fixed columns from md up so the eye can run down one, wrapping below
-     * that because seven columns do not fit a phone.
+     * Two shapes, not one that wraps.
+     *
+     * From md it is fixed columns, so the eye runs down one. On a phone the
+     * title gets a line of its own at full width and everything else sits on
+     * a second line underneath, because wrapping a six-column row produced a
+     * title squeezed into whatever was left beside a progress bar.
      */
     <li
       className={cn(
-        'flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3',
-        'md:grid md:grid-cols-[78px_minmax(0,1fr)_96px_auto_80px_auto] md:gap-y-0',
+        'grid grid-cols-1 gap-x-3 gap-y-2 px-4 py-3',
+        'md:grid-cols-[78px_minmax(0,1fr)_96px_auto_80px_auto] md:items-center md:gap-y-0',
       )}
     >
-      <span className="flex items-center gap-1.5">
-        <PriorityIcon priority={task.priority} />
-        <Link to={'/tasks/' + task.key} className="font-mono text-xs text-accent hover:underline">
-          {task.key}
-        </Link>
-      </span>
-
+      {/* First on a phone, second on a wide screen. */}
       <Link
         to={'/tasks/' + task.key}
         title={task.title}
-        className="min-w-0 flex-1 truncate text-sm hover:underline"
+        className="order-1 min-w-0 truncate text-sm hover:underline md:order-2"
       >
         {task.title}
       </Link>
 
-      <ProgressBar value={task.progress} showLabel />
-      <StatusBadge status={task.status} />
-      <DueBadge
-        dueDate={task.dueDate}
-        status={task.status}
-        workingDaysLate={task.workingDaysLate}
-      />
+      {/*
+        Wrapping is allowed below md. The key, the bar, the status, the date
+        and an action do not fit 343px on one line, and the alternative is a
+        page that scrolls sideways.
+      */}
+      <div className="order-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 md:order-1 md:contents">
+        <span className="flex shrink-0 items-center gap-1.5">
+          <PriorityIcon priority={task.priority} />
+          <Link to={'/tasks/' + task.key} className="font-mono text-xs text-accent hover:underline">
+            {task.key}
+          </Link>
+        </span>
 
-      {quickAction ? (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={transition.isPending}
-          onClick={() => transition.mutate({ to: quickAction.to })}
-        >
-          {quickAction.label}
-        </Button>
-      ) : null}
+        <span className="min-w-16 flex-1 md:order-3 md:flex-none">
+          <ProgressBar value={task.progress} showLabel label={task.key + ' progress'} />
+        </span>
+
+        <span className="shrink-0 md:order-4">
+          <StatusBadge status={task.status} />
+        </span>
+
+        <span className="shrink-0 md:order-5">
+          <DueBadge
+            dueDate={task.dueDate}
+            status={task.status}
+            workingDaysLate={task.workingDaysLate}
+            emptyLabel={null}
+          />
+        </span>
+
+        {/*
+          The action stays on the row at 375 rather than moving into a menu:
+          there is at most one of them, and a single button fits where a
+          three-dot menu plus its sheet would not be any smaller.
+        */}
+        {quickAction ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto shrink-0 md:order-6 md:ml-0"
+            disabled={transition.isPending}
+            onClick={() => transition.mutate({ to: quickAction.to })}
+          >
+            {quickAction.label}
+          </Button>
+        ) : null}
+      </div>
     </li>
   );
 }

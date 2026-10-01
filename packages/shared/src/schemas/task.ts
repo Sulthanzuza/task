@@ -44,6 +44,11 @@ export const taskSummarySchema = z.object({
    * The browser cannot work this out: it does not know the calendar.
    */
   workingDaysLate: z.number().int().nullable(),
+  /**
+   * Working days a task has been blocked, counted on the server against the
+   * organisation's calendar. Null unless it is blocked right now.
+   */
+  workingDaysBlocked: z.number().int().nullable(),
   lastActivityAt: z.string(),
   completedAt: z.string().nullable(),
   parentTaskId: uuidSchema.nullable(),

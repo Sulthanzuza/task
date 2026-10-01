@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import type { UserSummary } from '@tm/shared';
 import type { z } from 'zod';
 import { Paperclip, Plus, Search, X } from 'lucide-react';
 import {
@@ -30,6 +31,7 @@ import {
   Textarea,
 } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
+import { PersonPicker } from './PersonPicker';
 
 /**
  * Uses the same Zod schema the API validates with, so the two agree by construction.
@@ -45,6 +47,12 @@ type CreateTaskForm = z.input<typeof createTaskSchema>;
  * away and reopening starts clean. That is cheaper and more predictable than
  * resetting state from an effect.
  */
+/** The form holds ids; the picker shows people. */
+function byId(people: UserSummary[] | undefined, id: string | null | undefined) {
+  if (!id) return null;
+  return people?.find((person) => person.id === id) ?? null;
+}
+
 export function CreateTaskDialog({
   open,
   onOpenChange,
@@ -96,11 +104,21 @@ function CreateTaskForm({
     register,
     handleSubmit,
     setError,
+    setValue,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<CreateTaskForm>({
     resolver: zodResolver(createTaskSchema),
     defaultValues: { title: '', priority: 'MEDIUM', labelIds: [], dependsOnTaskIds: [] },
   });
+
+  /*
+   * useWatch rather than watch(): watch returns a fresh function on every
+   * render, which the React Compiler cannot memoize, so it gives up on the
+   * whole component.
+   */
+  const assigneeId = useWatch({ control, name: 'assigneeId' });
+  const reviewerId = useWatch({ control, name: 'reviewerId' });
 
   // The task must exist before anything can be attached to it, so the upload
   // hook is bound once the key is known.
@@ -247,28 +265,29 @@ function CreateTaskForm({
           <AttachmentQueue files={files} onChange={setFiles} />
 
           <div className="grid grid-cols-2 gap-3">
+            {/*
+              The picker rather than a select: giving work out is a question
+              about who has room, and the open count answers it here instead
+              of on the dashboard.
+            */}
             <div>
-              <Label htmlFor="assigneeId">Assignee</Label>
-              <Select id="assigneeId" {...register('assigneeId', optional)}>
-                <option value="">Nobody yet</option>
-                {people.data?.items.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </Select>
+              <Label>Assignee</Label>
+              <PersonPicker
+                label="Assignee"
+                nobodyLabel="Nobody yet"
+                value={byId(people.data?.items, assigneeId)}
+                onChange={(id) => setValue('assigneeId', id)}
+              />
             </div>
 
             <div>
-              <Label htmlFor="reviewerId">Reviewer</Label>
-              <Select id="reviewerId" {...register('reviewerId', optional)}>
-                <option value="">Nobody yet</option>
-                {people.data?.items.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </Select>
+              <Label>Reviewer</Label>
+              <PersonPicker
+                label="Reviewer"
+                nobodyLabel="Nobody yet"
+                value={byId(people.data?.items, reviewerId)}
+                onChange={(id) => setValue('reviewerId', id)}
+              />
             </div>
 
             <div>

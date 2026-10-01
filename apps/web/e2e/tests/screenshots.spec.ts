@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import type { TaskSummary } from '@tm/shared';
 import { apiAs, expect, signIn, test, USERS } from '../fixtures';
+import { E2E_FIXED_TIME } from '../playwright.config';
 
 /**
  * Capture every main screen in all four themes and both widths, and prove the
@@ -11,18 +12,16 @@ import { apiAs, expect, signIn, test, USERS } from '../fixtures';
  */
 
 /**
- * Two copies of one capture.
+ * The committed set: uploaded by CI, so a visual change turns up in a diff.
  *
- * e2e/screenshots is committed and uploaded by CI, so a visual change turns
- * up in a diff. e2e/.shots is ignored, and is the pile a reviewer actually
- * opens. Taking the picture once and writing it twice keeps them honest:
- * they cannot drift apart.
+ * The review set is a separate run against the demo seed (`pnpm shots`,
+ * review-shots.spec.ts), because the demo data would break every test that
+ * counts the rows the ordinary seed creates.
  *
  * Named by width rather than by "desktop" and "mobile", so the files sort
  * and a reviewer can tell which is which without opening them.
  */
 const COMMITTED = 'e2e/screenshots';
-const REVIEW = 'e2e/.shots';
 
 const VIEWPORTS = [
   { width: 1280, height: 900 },
@@ -38,10 +37,19 @@ async function capture(
 ): Promise<void> {
   const file = name + '-' + theme + '-' + width + '.png';
   const image = await page.screenshot({ fullPage: options.fullPage ?? false });
-  for (const dir of [COMMITTED, REVIEW]) {
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, file), image);
-  }
+  await mkdir(COMMITTED, { recursive: true });
+  await writeFile(join(COMMITTED, file), image);
+}
+
+/**
+ * Freeze the clock before anything renders.
+ *
+ * Every screen carries a relative time somewhere, and those moved between
+ * runs, so re-running the capture produced a diff on pages nothing had
+ * touched. See E2E_FIXED_TIME for why it is today rather than a fixed date.
+ */
+async function freezeClock(page: Page) {
+  await page.clock.setFixedTime(new Date(E2E_FIXED_TIME));
 }
 
 const THEMES = ['midnight', 'dusk', 'light', 'violet'] as const;
@@ -187,6 +195,7 @@ test('capture every screen in all four themes, at desktop and phone width', asyn
     { name: 'admin-projects', path: '/admin/projects', ready: 'Projects' },
   ];
 
+  await freezeClock(page);
   await signIn(page, USERS.lead);
 
   // The design system page belongs in the set: it is the fastest way to see a
@@ -223,6 +232,8 @@ test('capture every screen in all four themes, at desktop and phone width', asyn
 });
 
 test('the login screen is captured too', async ({ page, problems }) => {
+  await freezeClock(page);
+
   for (const viewport of VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     for (const theme of THEMES) {
@@ -245,6 +256,7 @@ test('the login screen is captured too', async ({ page, problems }) => {
  * wrong, because each one puts a surface on top of another surface.
  */
 test('capture the open and dragging states', async ({ page }) => {
+  await freezeClock(page);
   await signIn(page, USERS.lead);
   await page.setViewportSize({ width: 1280, height: 900 });
 
@@ -297,6 +309,7 @@ test('capture the open and dragging states', async ({ page }) => {
 });
 
 test('the top bar fits without clipping at every desktop width', async ({ page }) => {
+  await freezeClock(page);
   await signIn(page, USERS.lead);
 
   for (const width of [1280, 1366, 1440]) {

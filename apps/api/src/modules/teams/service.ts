@@ -11,16 +11,28 @@ export async function listTeams(actor: Actor): Promise<TeamDetail[]> {
   const rows = await db.select().from(teams).orderBy(asc(teams.name));
 
   // A member only sees the teams they are part of.
-  const visible =
+  const mine =
     actor.role === 'SUPER_ADMIN'
       ? rows
       : rows.filter((t) => actor.teamIds.includes(t.id) || actor.ledTeamIds.includes(t.id));
+
+  /*
+   * An internal team is kept out of the picker, so it cannot be chosen on
+   * the dashboard and its numbers never land in anybody's view. Whoever is
+   * actually on it still sees it: that is the smoke account, and it needs
+   * to be able to reach its own work.
+   */
+  const visible = mine.filter((t) => !t.isInternal || actor.teamIds.includes(t.id));
 
   return Promise.all(visible.map((row) => buildTeamDetail(row.id)));
 }
 
 export async function getTeam(actor: Actor, teamId: string): Promise<TeamDetail> {
-  if (actor.role !== 'SUPER_ADMIN' && !actor.teamIds.includes(teamId) && !actor.ledTeamIds.includes(teamId)) {
+  if (
+    actor.role !== 'SUPER_ADMIN' &&
+    !actor.teamIds.includes(teamId) &&
+    !actor.ledTeamIds.includes(teamId)
+  ) {
     authorize(actor, 'team.manage', { kind: 'team', teamId });
   }
   return buildTeamDetail(teamId);
@@ -36,12 +48,13 @@ async function buildTeamDetail(teamId: string): Promise<TeamDetail> {
     .where(eq(teamMembers.teamId, teamId));
 
   const members = await usersByIdList(memberRows.map((m) => m.userId));
-  const lead = team.leadId ? (await usersByIdList([team.leadId]))[0] ?? null : null;
+  const lead = team.leadId ? ((await usersByIdList([team.leadId]))[0] ?? null) : null;
 
   return {
     id: team.id,
     name: team.name,
     leadId: team.leadId,
+    isInternal: team.isInternal,
     createdAt: team.createdAt.toISOString(),
     lead,
     members,
@@ -54,7 +67,11 @@ export async function createTeam(actor: Actor, input: CreateTeamInput): Promise<
   const teamId = await withTransaction(async (tx) => {
     const [created] = await tx
       .insert(teams)
-      .values({ name: input.name, leadId: input.leadId ?? null })
+      .values({
+        name: input.name,
+        leadId: input.leadId ?? null,
+        isInternal: input.isInternal ?? false,
+      })
       .returning({ id: teams.id });
 
     if (!created) throw new Error('Team insert returned no row');
@@ -83,9 +100,14 @@ export async function updateTeam(
     const changes: Record<string, unknown> = {};
     if (input.name !== undefined) changes.name = input.name;
     if (input.leadId !== undefined) changes.leadId = input.leadId;
+    if (input.isInternal !== undefined) changes.isInternal = input.isInternal;
 
     if (Object.keys(changes).length > 0) {
-      const updated = await tx.update(teams).set(changes).where(eq(teams.id, teamId)).returning({ id: teams.id });
+      const updated = await tx
+        .update(teams)
+        .set(changes)
+        .where(eq(teams.id, teamId))
+        .returning({ id: teams.id });
       if (updated.length === 0) throw new NotFoundError('That team');
     }
 
@@ -107,7 +129,11 @@ export async function addMember(actor: Actor, teamId: string, userId: string): P
   return buildTeamDetail(teamId);
 }
 
-export async function removeMember(actor: Actor, teamId: string, userId: string): Promise<TeamDetail> {
+export async function removeMember(
+  actor: Actor,
+  teamId: string,
+  userId: string,
+): Promise<TeamDetail> {
   authorize(actor, 'team.manage', { kind: 'team', teamId });
 
   await db

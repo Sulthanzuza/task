@@ -4,10 +4,21 @@ import { BASE_URL, SMOKE_USER } from '../smoke.config';
 /**
  * Does the deployment work?
  *
- * Everything here is read-only apart from one task transition and its reversal,
- * on a task the smoke account owns. A smoke test that leaves rubbish behind
+ * It writes, because a read-only check cannot tell a working deployment from
+ * one whose database is mounted read-only. What it writes goes into the
+ * Smoke project, inside a team marked internal, which the dashboard pickers,
+ * the daily digest and the overdue alerts all leave out: otherwise the
+ * numbers a lead reads would drift with how often the pipeline runs, and
+ * somebody would be paged about a task that existed for ninety seconds.
+ *
+ * And it deletes what it made. A smoke test that leaves rubbish behind
  * becomes a thing people ignore, and then it stops being run at all.
  */
+
+/** Named so that anything left behind by a crashed run is obvious. */
+const SMOKE_PROJECT = process.env.SMOKE_PROJECT ?? 'Smoke';
+const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+const SMOKE_TASK = 'Smoke test ' + stamp;
 
 test.beforeAll(() => {
   if (!SMOKE_USER.email || !SMOKE_USER.password) {
@@ -67,44 +78,65 @@ test('the task list loads real data', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible();
   // Either rows, or an honest empty state. A spinner that never resolves is
   // the failure this catches.
-  await expect(
-    page.locator('tbody tr').first().or(page.getByText('No tasks match')),
-  ).toBeVisible();
+  await expect(page.locator('tbody tr').first().or(page.getByText('No tasks match'))).toBeVisible();
 });
 
-test('a task can be opened and moved, and moved back', async ({ page }) => {
+test('a task can be created, moved and deleted', async ({ page }) => {
   await signIn(page);
-  await page.goto('/my-tasks');
+  await page.goto('/tasks');
+  await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible();
 
-  await expect(page.getByRole('heading', { name: 'My tasks' })).toBeVisible();
+  // ----------------------------------------------------------------- create
+  await page.getByRole('button', { name: /New task/i }).click();
+  const drawer = page.getByRole('dialog', { name: 'New task' });
+  await expect(drawer, 'the create drawer did not open').toBeVisible();
 
-  // Wait for the list to render before deciding there is nothing in it;
-  // counting immediately would skip whenever the network was merely slow.
-  const firstTask = page.locator('a[href^="/tasks/"]').first();
-  const hasWork = await firstTask
-    .waitFor({ state: 'visible', timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false);
+  await drawer.getByRole('button', { name: /^Project:/ }).click();
+  const project = page.getByRole('option', { name: new RegExp(SMOKE_PROJECT) });
+  await expect(
+    project,
+    'no "' + SMOKE_PROJECT + '" project: create it in an internal team first, see docs/deploy.md',
+  ).toBeVisible();
+  await project.click();
 
-  test.skip(!hasWork, 'the smoke account has no tasks assigned to it');
+  await drawer.getByLabel('Title').fill(SMOKE_TASK);
+  await drawer.getByRole('button', { name: /^Create/ }).click();
+  await expect(drawer).toBeHidden();
 
-  await firstTask.click();
-  await expect(page.getByRole('heading').first()).toBeVisible();
+  // ------------------------------------------------------------------- open
+  const row = page.getByRole('link', { name: SMOKE_TASK }).first();
+  await expect(row, 'the task was created but never appeared in the list').toBeVisible();
+  await row.click();
+  await expect(page.getByRole('heading', { name: SMOKE_TASK })).toBeVisible();
 
-  // The buttons come from the server's own view of the workflow, so their
-  // presence proves the whole chain is working.
+  // ------------------------------------------------------------------- move
+  /*
+   * The buttons come from the server's own view of the workflow, so pressing
+   * one proves the whole chain: permissions, the transition table, the
+   * write, and the activity row that follows it.
+   */
+  const assign = page.getByRole('button', { name: 'Assign to me', exact: true });
+  if ((await assign.count()) > 0) await assign.click();
+
   const start = page.getByRole('button', { name: 'Start', exact: true });
   if ((await start.count()) > 0) {
     await start.click();
     await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible();
-
-    // Put it back, so the next run starts where this one did.
-    const back = page.getByRole('button', { name: 'Move back to assigned', exact: true });
-    if ((await back.count()) > 0) await back.click();
-  } else {
-    // Nothing to move: at least prove the detail page rendered.
-    await expect(page.getByText(/Timeline/i)).toBeVisible();
   }
+
+  // ----------------------------------------------------------------- delete
+  await page
+    .getByRole('button', { name: /^Delete/ })
+    .first()
+    .click();
+  const confirm = page.getByRole('dialog');
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: /Delete/ }).click();
+
+  // Gone from the list it was just in. A soft delete that does not hide the
+  // row is the same bug as no delete at all.
+  await page.goto('/tasks');
+  await expect(page.getByText(SMOKE_TASK)).toHaveCount(0);
 });
 
 test('the notification bell is present and the socket connects', async ({ page }) => {

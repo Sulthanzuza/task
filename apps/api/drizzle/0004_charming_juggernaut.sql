@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "is_internal" boolean DEFAULT false NOT NULL;

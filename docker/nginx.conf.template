@@ -3,24 +3,66 @@
 # Serving both from here is what makes the session cookie a first-party cookie
 # and removes CORS from the picture entirely. It is also what the Vite dev
 # proxy imitates, so development and production behave the same way.
+#
+# A template, not a finished file: ${SERVER_NAME} comes from the environment,
+# because the certificate paths contain the domain and hard-coding it here
+# would mean rebuilding the image to deploy anywhere else. nginx's own
+# entrypoint substitutes it. $host and the rest are nginx variables and are
+# left alone: only names that exist in the environment are replaced.
 
 upstream api_upstream {
     server api:4000;
     keepalive 16;
 }
 
+# ---------------------------------------------------------------------------
+# Port 80: the ACME challenge, and a push to HTTPS for everything else.
+# ---------------------------------------------------------------------------
 server {
     listen 80;
-    server_name _;
+    server_name ${SERVER_NAME};
 
-    # TLS is terminated here in a real deployment. The certificate paths are
-    # left commented because they depend on how certbot is run; see deploy.md.
-    #
-    # listen 443 ssl http2;
-    # ssl_certificate     /etc/letsencrypt/live/tasks.example.com/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/tasks.example.com/privkey.pem;
-    # ssl_protocols       TLSv1.2 TLSv1.3;
-    # ssl_prefer_server_ciphers off;
+    # Certbot writes its challenge files into this volume and Let's Encrypt
+    # reads them over plain HTTP. This has to stay reachable without TLS, and
+    # it has to come before the redirect, or renewal breaks the moment the
+    # first certificate is installed.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+        access_log off;
+    }
+
+    # The container health check, before the redirect: a 301 is not a health
+    # check passing.
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Port 443: the application.
+# ---------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    # On a first boot these point at the self-signed placeholder the
+    # entrypoint generates, so nginx starts and can answer the ACME
+    # challenge. Certbot replaces them with the real certificate, and
+    # nothing here changes when it does.
+    ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -35,6 +77,10 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy no-referrer always;
+    # Only ever sent from the TLS server. A browser that has seen this will
+    # refuse plain HTTP to this host for a year, so it must not be sent by
+    # anything that might still be answering on port 80.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     gzip on;
     gzip_vary on;

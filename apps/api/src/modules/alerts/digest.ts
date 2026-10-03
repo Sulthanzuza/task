@@ -65,11 +65,22 @@ async function actorFor(userId: string): Promise<Actor & { name: string; email: 
   if (!person) throw new Error('No such user: ' + userId);
 
   const { teamMembers } = await import('../../db/schema');
+  /*
+   * Internal teams are left out of the digest for the same reason they are
+   * left out of the alerts: nobody wants a daily summary of what the smoke
+   * test did. The join is on teams rather than team_members alone so the
+   * flag can be read.
+   */
   const memberRows = await db
     .select({ teamId: teamMembers.teamId })
     .from(teamMembers)
-    .where(eq(teamMembers.userId, userId));
-  const ledRows = await db.select({ id: teams.id }).from(teams).where(eq(teams.leadId, userId));
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+    .where(and(eq(teamMembers.userId, userId), eq(teams.isInternal, false)));
+
+  const ledRows = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.leadId, userId), eq(teams.isInternal, false)));
 
   const ledTeamIds = ledRows.map((t) => t.id);
   return {

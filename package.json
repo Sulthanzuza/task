@@ -17,6 +17,7 @@
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "test": "pnpm -r test",
+    "env:check": "pnpm --filter @tm/api env:check",
     "db:generate": "pnpm --filter @tm/api db:generate",
     "db:migrate": "pnpm --filter @tm/api db:migrate",
     "db:seed": "pnpm --filter @tm/api db:seed",

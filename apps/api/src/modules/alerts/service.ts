@@ -6,7 +6,11 @@ import { logger } from '../../lib/logger';
 import { toDateOnly, type DateOnly } from '../../lib/date-utils';
 import { getOrgContext } from '../org/service';
 import type { TaskResource } from '../permissions/authorize';
-import { notify, emitCreatedNotifications, type CreatedNotification } from '../notifications/service';
+import {
+  notify,
+  emitCreatedNotifications,
+  type CreatedNotification,
+} from '../notifications/service';
 import {
   aliased,
   buildPredicateContext,
@@ -86,7 +90,10 @@ async function candidatesFor(condition: ReturnType<typeof isOverdue>): Promise<A
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
     JOIN teams tm ON tm.id = p.team_id
-    WHERE t.deleted_at IS NULL AND ${condition}
+    -- An internal team is the deploy pipeline's, not a person's. Paging
+    -- somebody about a task the smoke test created ninety seconds ago is
+    -- how an alert channel gets muted.
+    WHERE t.deleted_at IS NULL AND tm.is_internal = false AND ${condition}
   `);
 
   return (result.rows as Array<Record<string, unknown>>).map((row) => ({
@@ -299,9 +306,7 @@ export async function runAlertScan(options: ScanOptions = {}): Promise<AlertResu
           ALERT_TYPES.reviewWaiting,
           today,
           recipients,
-          'Waiting for review for over ' +
-            settings.reviewWaitingThresholdHours +
-            ' working hours',
+          'Waiting for review for over ' + settings.reviewWaitingThresholdHours + ' working hours',
           now,
         ),
       );
@@ -322,8 +327,8 @@ export async function runAlertScan(options: ScanOptions = {}): Promise<AlertResu
           task.status === 'BLOCKED'
             ? 'Escalated: blocked for too long'
             : 'Escalated: overdue by ' +
-              settings.overdueEscalationWorkingDays +
-              ' working days or more',
+                settings.overdueEscalationWorkingDays +
+                ' working days or more',
           now,
         ),
       );

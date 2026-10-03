@@ -71,6 +71,19 @@ export const teams = pgTable('teams', {
   // A lead can be unset while the team is being reorganised; deleting a user must not
   // silently orphan their team, so this is RESTRICT at the user end.
   leadId: uuid('lead_id').references(() => users.id, { onDelete: 'restrict' }),
+  /**
+   * A team that exists for the machinery, not for people.
+   *
+   * The smoke test signs in after every deploy and creates a task, moves it
+   * and deletes it. Without this flag that traffic lands in the dashboard
+   * averages, the daily digest and the overdue alerts, so the numbers a lead
+   * reads drift with how often the deploy pipeline runs, and somebody gets
+   * paged about a task that only ever existed for ninety seconds.
+   *
+   * Excluded from every aggregate and every notification. Never from
+   * permissions: an internal team is a normal team to authorize().
+   */
+  isInternal: boolean('is_internal').notNull().default(false),
   createdAt: createdAt(),
 });
 

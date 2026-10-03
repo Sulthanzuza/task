@@ -9,35 +9,159 @@ one worker, Postgres, MinIO, a backup job and a watchdog, all from
 
 ---
 
-## Before the first deploy
+## Before you start
 
-1. A domain pointing at the server, and port 80 and 443 open.
-2. Docker and the Compose plugin installed.
-3. An SMTP provider with **SPF and DKIM** set up (see below). Without them,
-   invitations and alerts land in spam, and the product looks broken on day one.
+A fresh **Ubuntu 24.04 LTS** box. One VPS with 2 vCPU and 4GB is comfortable
+for a team of eight to thirty.
+
+**1. A user that is not root.** Everything below is run as this user.
+
+```bash
+adduser deploy && usermod -aG sudo deploy
+rsync --archive --chown=deploy:deploy ~/.ssh /home/deploy
+```
+
+Then, in `/etc/ssh/sshd_config`, `PermitRootLogin no` and
+`PasswordAuthentication no`, and `sudo systemctl restart ssh`. Keep your
+current session open while you test the new login from another terminal: a
+typo here locks you out of the server.
+
+**2. Docker Engine and the Compose plugin.** Not `docker.io` from the Ubuntu
+archive, which is older than the Compose file expects.
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker deploy && newgrp docker
+docker compose version          # v2.x
+```
+
+**3. A firewall that allows three ports.** Docker publishes ports by writing
+its own iptables rules, which bypass ufw: a container published as `5432:5432`
+is reachable from the internet even with ufw denying it. This deployment
+publishes only 80 and 443, so that trap is avoided by configuration rather
+than by the firewall, but the firewall is still what stops anything you add
+later from being exposed by accident.
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status verbose
+```
+
+**4. DNS pointing here, before certbot runs.** Let's Encrypt resolves the name
+itself, so a record that has not propagated is a failed issuance and a rate
+limit you then wait out.
+
+```bash
+dig +short tasks.example.com          # must print this server's public IP
+curl -fsS https://ifconfig.me && echo  # which is this
+```
+
+**5. The code.**
+
+```bash
+sudo mkdir -p /srv/taskmanager && sudo chown deploy:deploy /srv/taskmanager
+git clone <repo> /srv/taskmanager
+cd /srv/taskmanager
+git checkout v1.0.0-rc2
+```
+
+**6. An SMTP provider with SPF and DKIM** (see below). Without them,
+invitations and alerts land in spam and the product looks broken on day one.
 
 ---
 
 ## First deploy
 
+### 1. Configuration
+
 ```bash
-git clone <repo> /srv/taskmanager && cd /srv/taskmanager
+cd /srv/taskmanager
 cp .env.production.example .env.production
+```
 
-# Generate real secrets. The API refuses to start with the example values.
-openssl rand -hex 32   # JWT_ACCESS_SECRET
-openssl rand -hex 24   # POSTGRES_PASSWORD
-openssl rand -hex 24   # S3_SECRET_ACCESS_KEY
+Every value the API will not start without, and how to make it:
 
-$EDITOR .env.production
+| Variable | How to produce it | What rejects it |
+| --- | --- | --- |
+| `SERVER_NAME` | your domain, e.g. `tasks.example.com` | nginx cannot find its certificate without it; Compose refuses to start |
+| `WEB_ORIGIN` | `https://` + the same domain | must be `https` in production |
+| `DATABASE_URL` | `postgres://USER:PASSWORD@postgres:5432/DB`, matching the three `POSTGRES_*` values | must parse as a URL |
+| `POSTGRES_USER` | anything, e.g. `taskmanager` | — |
+| `POSTGRES_PASSWORD` | `openssl rand -hex 24` | — |
+| `POSTGRES_DB` | anything, e.g. `taskmanager` | — |
+| `JWT_ACCESS_SECRET` | `openssl rand -hex 32` | under 32 characters, or left as the development default |
+| `S3_ACCESS_KEY_ID` | `openssl rand -hex 16` | — |
+| `S3_SECRET_ACCESS_KEY` | `openssl rand -hex 24` | — |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION` | leave the defaults for the bundled MinIO | — |
+| `STORAGE_DRIVER` | `s3` | `local` is refused: it keeps uploads on one container's disk |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | from your mail provider | — |
+| `MAIL_FROM` | `Task Manager <no-reply@yourdomain>` | — |
+| `MAIL_ENABLED` | `true` | `false` is refused in production |
+| `JOB_QUEUE_ENABLED` | `true` | `false` is refused in production |
+| `BACKUP_S3_ENDPOINT` | your off-site provider's S3 endpoint | the backup job will not run without it |
+| `BACKUP_S3_BUCKET` | the bucket you made there | as above |
+| `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | from that provider | as above |
+| `WORKER_HEALTH_PORT` | `4001` | unset means the worker serves no health endpoint and the watchdog cannot see it |
+| `NODE_ENV` | `production` | anything else turns the production checks off |
 
+The rest have working defaults. `CORS_ORIGINS` stays empty: the app and the
+API are the same origin, so there is no cross-origin request to allow.
+
+Check it before starting anything. This runs the same Zod schema and the same
+production rules the API applies at boot, against the file, and prints what is
+wrong:
+
+```bash
+pnpm install --frozen-lockfile    # once, for the tooling
+pnpm env:check
+```
+
+### 2. Start
+
+```bash
 docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
 ```
 
 The `migrate` service runs to completion before the API starts, so the schema
-is always applied before anything serves.
+is always applied before anything serves. On this first boot nginx writes
+itself a self-signed placeholder certificate so it can start at all; the next
+step replaces it.
 
-### The first administrator
+### 3. TLS, before anybody signs in
+
+Webroot mode: nginx keeps running and serves the challenge out of a shared
+volume. The alternative, `--standalone`, wants port 80 to itself, which means
+taking the site down to renew it.
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+  --webroot --webroot-path /var/www/certbot \
+  -d tasks.example.com \
+  --email you@example.com --agree-tos --no-eff-email
+
+# Pick up the real certificate.
+docker compose -f docker-compose.prod.yml exec web nginx -s reload
+
+curl -fsSI https://tasks.example.com | head -1     # HTTP/2 200
+curl -fsSI http://tasks.example.com  | head -1     # 301 to https
+```
+
+Renewal runs by itself: the `certbot` service wakes twice a day and renews
+anything inside thirty days of expiry, and the web container reloads nginx
+every twelve hours so a renewed certificate is picked up without a restart.
+Prove it works now rather than in ninety days:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm certbot renew --dry-run
+```
+
+### 4. The first administrator
 
 Every account is invited from the UI, which needs somebody signed in to do the
 inviting. The first one is made on the server:
@@ -50,6 +174,27 @@ docker compose -f docker-compose.prod.yml run --rm api \
 There is deliberately no unauthenticated "create the first admin" page: that is
 a race with whoever finds the deployment first. Everyone else is invited from
 **Settings → People**, which emails them a link to set their own password.
+
+### 5. The smoke team
+
+The smoke test writes: it creates a task, moves it and deletes it, because a
+read-only check cannot tell a working deployment from one whose database is
+mounted read-only. That traffic needs somewhere to go that is not a real
+team's board.
+
+In **Settings → Teams**, create a team called `Smoke` with **Internal team**
+ticked. An internal team is an ordinary team for every permission question
+and is left out of the dashboard pickers, the daily digest and the overdue
+alerts, so the pipeline cannot move the numbers a lead reads or page anybody
+about a task that existed for ninety seconds.
+
+Then:
+
+1. **Settings → Projects**: a project called `Smoke`, key `SMOKE`, in that team.
+2. **Settings → People**: invite `smoke@yourdomain`, role Team Lead, and make
+   it the lead of the Smoke team so it can create and delete there.
+3. Set its password from the invitation email and keep it in your secret
+   store. It is not a real person's login and must not be an administrator.
 
 ### Seeds do not run here
 
@@ -73,24 +218,6 @@ The file name has no content hash in it, so Nginx caches `/fonts/` for thirty
 days rather than the year it gives `/assets/`: long enough that nobody
 refetches it, short enough that replacing the file reaches people without a
 rename.
-
-### TLS
-
-```bash
-docker run --rm -p 80:80 -v /srv/taskmanager/certs:/etc/letsencrypt \
-  certbot/certbot certonly --standalone -d tasks.example.com
-```
-
-Then uncomment the `listen 443` block in `docker/nginx.conf` and the `443` port
-in `docker-compose.prod.yml`, and `docker compose up -d web`.
-
-Renewal, monthly, from the host crontab:
-
-```
-0 3 1 * * cd /srv/taskmanager && docker run --rm -v /srv/taskmanager/certs:/etc/letsencrypt certbot/certbot renew --quiet && docker compose -f docker-compose.prod.yml restart web
-```
-
----
 
 ## Email: SPF and DKIM
 
@@ -169,36 +296,47 @@ guard, so no job can act twice.
 
 ## Backups
 
-The `backup` service takes a compressed `pg_dump` at start-up and then daily,
-into `./backups`, keeping fourteen days. Set `S3_BACKUP_BUCKET` to also copy
-off-site; a backup on the same disk as the database protects against very
-little.
+The copy that counts is the one that is not on this server. A backup beside
+the database survives a disk failure and nothing else: not a deleted provider
+account, not ransomware, which reaches a local folder first, and not somebody
+running the wrong `docker compose down -v`.
+
+So the nightly job does three things: dumps the database, copies the dump to
+a **different provider**, and mirrors the attachments bucket there too. A
+restore with every file on every task broken is a restore that fails review.
+
+Configure `BACKUP_S3_*` in `.env.production` with a bucket at Backblaze B2,
+Cloudflare R2, Wasabi or anything else with an S3 endpoint. Use credentials
+scoped to that one bucket, so a key taken from this server cannot reach
+anything else.
+
+Retention is 14 days off-site and 3 days locally, the local copies being a
+convenience for a fast restore rather than the backup.
 
 ```bash
-# On demand
-docker compose -f docker-compose.prod.yml exec backup sh /scripts/backup.sh
+# On demand, rather than waiting for the nightly run
+docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
 
-# What is there
-ls -lh backups/
+# What is off-site
+docker compose -f docker-compose.prod.yml exec backup \
+  mc ls backup/$BACKUP_S3_BUCKET/database/
 ```
 
 ### Restoring
 
-`scripts/restore.sh` refuses any target database whose name does not end in
-`_restore`, `_scratch` or `_verify`. The point of practising a restore is not to
-destroy the thing you are protecting.
+The drill restores from the **remote** copy, not from the folder on this
+server. Restoring the file still sitting here proves the dump is readable and
+nothing whatever about whether the backup that matters actually arrived.
 
 ```bash
-docker compose -f docker-compose.prod.yml exec postgres \
-  psql -U taskmanager -d postgres -c "CREATE DATABASE taskmanager_restore;"
-
+# Newest off-site dump, into a scratch database. The script refuses any
+# target whose name does not end _restore, _scratch or _verify.
 docker compose -f docker-compose.prod.yml exec backup \
-  sh /scripts/restore.sh /backups/<file>.dump \
-  "postgres://taskmanager:<password>@postgres:5432/taskmanager_restore"
+  /scripts/restore.sh remote "postgres://USER:PASSWORD@postgres:5432/taskmanager_restore"
 ```
 
-It counts the users and tasks it restored and fails if there are none, so
-"finished without error" cannot be mistaken for "worked".
+It prints how many users and tasks came back and fails if the answer is none.
+Do this on the day you deploy, and then once a quarter.
 
 ### Restore drill log
 
@@ -217,10 +355,16 @@ was rejected with *"Refusing to restore into 'taskmanager': name it *_restore,
 
 ## Before the first real user signs in
 
-- [x] Nightly backup has run at least once, and the file is a plausible size.
-- [x] A restore into a scratch database has succeeded and been verified.
-- [ ] SPF and DKIM pass on a test email.
-- [ ] TLS certificate installed and renewal scheduled.
+- [x] Nightly backup has run at least once, and the dump is in the off-site bucket.
+- [x] A restore **from the off-site copy** into a scratch database has succeeded.
+- [ ] A test email has actually arrived. **Settings → Email → Send a test
+      email**, to an address on a different provider from your own, and check
+      it landed in the inbox rather than in spam.
+- [ ] SPF and DKIM pass on that email (view the headers; both should say
+      `pass`).
+- [ ] TLS certificate installed, HTTP redirects to HTTPS, and
+      `certbot renew --dry-run` passes.
+- [ ] An external uptime check is watching `/api/v1/ready`.
 - [ ] The first administrator created, and a second admin account exists so one
       lost password is not a lockout.
 - [ ] Smoke tests pass against the live URL (below).
@@ -233,7 +377,15 @@ GitHub Actions builds and deploys on a tag. By hand:
 
 ```bash
 cd /srv/taskmanager
-git fetch --tags && git checkout <tag>
+
+# Always first. Migrations do not roll back, so this is the only way out of
+# a release that turns out to have changed the schema destructively. It takes
+# seconds and it is off-site before the deploy starts.
+docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
+
+git fetch --tags
+git checkout <tag>
+pnpm env:check                      # the release may have added a variable
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f --tail=50 api worker
 ```
@@ -244,27 +396,69 @@ Migrations run automatically, before the API starts.
 
 ```bash
 BASE_URL=https://tasks.example.com \
-SMOKE_EMAIL=smoke@example.com \
+SMOKE_EMAIL=smoke@yourdomain \
 SMOKE_PASSWORD=<password> \
 pnpm smoke
 ```
 
-Use a **dedicated account** with ordinary member rights, not an administrator
-and not a real person's login. Create it from Settings like any other invite.
+It signs in, checks the security headers and the readiness endpoint, then
+creates a task in the **Smoke** project, moves it through the workflow and
+deletes it again. Writing is the point: a read-only check passes against a
+database mounted read-only.
+
+Everything it writes is inside the internal Smoke team, so none of it reaches
+the dashboard, the digest or the alerts, and it cleans up after itself. If a
+run is interrupted, anything left behind is named `Smoke test <timestamp>` in
+that project and can be deleted by hand.
+
+Set `SMOKE_PROJECT` if you called the project something else.
 
 ### Rolling back
 
-Images are tagged with the release, so a rollback is a checkout and a rebuild:
+Every release is tagged, and a rollback is a checkout of **the previous
+release tag** followed by a rebuild. Read the tag list rather than guessing a
+name:
 
 ```bash
-git checkout <previous-tag>
+git tag -l 'v*' --sort=-creatordate | head
+git checkout <the-tag-before-this-one>
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+Two things this does not cover.
+
+**The first deploy has no rollback.** There is no previous release on the
+server to go back to. If the first one is broken, fix forward, or restore
+from backup and start again.
+
 **Migrations do not roll back.** Drizzle migrations here are additive, so an
-older application runs against a newer schema; if a release ever adds a
-destructive migration, that release cannot be rolled back this way, and the
-path is restore-from-backup. Say so in the release notes when it happens.
+older application runs against a newer schema and a rollback is safe. A
+release that ever adds a destructive migration breaks that, cannot be rolled
+back this way, and has to say so in its own notes; the path then is
+restore-from-backup.
+
+Which is why every deploy takes a backup first — see the update steps above.
+
+## Watching it from outside
+
+The health checks in the table above are all *inside* the server. They
+cannot tell you the box is off, the disk is full or DNS has expired, which
+are the outages that actually happen.
+
+Point an external monitor at **`https://tasks.example.com/api/v1/ready`**,
+every minute, alerting after two consecutive failures. UptimeRobot, Better
+Stack and Healthchecks.io all have a free tier that covers this.
+
+`/ready` rather than `/health`: it returns 503 when the database or the job
+queue is unreachable, so an API that is answering but cannot send an
+invitation still counts as down. `/health` would say 200 through that.
+
+Two more worth having, if the monitor supports them:
+
+- **Certificate expiry**, warning at 14 days. Renewal is automatic, and this
+  is what tells you when it has silently stopped working.
+- **Keyword check** on `"ready":true`, so a cached or proxied 200 with the
+  wrong body does not read as healthy.
 
 ---
 
@@ -274,6 +468,17 @@ Logs are JSON on stdout in production:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f api worker
+```
+
+Every service caps its log at 10MB x 3 files, set once as an anchor at the
+top of the Compose file. Docker's default is to keep container logs forever,
+and a JSON log file is the usual way a small server fills its disk and stops
+accepting writes at four in the morning. If you add a service, give it
+`logging: *default-logging` too.
+
+```bash
+# What the logs are costing
+sudo du -sh /var/lib/docker/containers/*/*-json.log | sort -h | tail
 ```
 
 `LOG_LEVEL` controls verbosity. Authorization headers, cookies and anything

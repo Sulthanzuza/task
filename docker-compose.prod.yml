@@ -4,6 +4,15 @@
 # so a second instance would leave clients connected to a process that never
 # hears about their events. See docs/deploy.md before scaling out.
 
+# Docker keeps container logs forever by default, and a JSON log file will
+# quietly fill the disk on a server nobody is watching. Thirty megabytes per
+# container is enough to debug yesterday and bounded enough to forget about.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -24,6 +33,7 @@ services:
     expose:
       - '5432'
 
+    logging: *default-logging
   # Runs once, to completion, before the API starts.
   migrate:
     build:
@@ -36,6 +46,7 @@ services:
       postgres:
         condition: service_healthy
 
+    logging: *default-logging
   api:
     build:
       context: .
@@ -55,6 +66,7 @@ services:
     expose:
       - '4000'
 
+    logging: *default-logging
   worker:
     build:
       context: .
@@ -81,6 +93,7 @@ services:
       start_period: 20s
       retries: 3
 
+    logging: *default-logging
   web:
     build:
       context: .
@@ -89,11 +102,34 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    environment:
+      # The certificate paths contain the domain, so nginx is templated.
+      SERVER_NAME: ${SERVER_NAME:?SERVER_NAME must be set in .env.production}
     ports:
       - '80:80'
-      # - '443:443'
+      - '443:443'
     volumes:
-      - ./certs:/etc/letsencrypt:ro
+      # Read-write: the entrypoint writes a self-signed placeholder here on
+      # the very first boot so nginx can start and answer the ACME challenge.
+      - ./certs:/etc/letsencrypt
+      - ./certbot-www:/var/www/certbot:ro
+    logging: *default-logging
+
+  # Issues the first certificate and renews it afterwards. Webroot mode, so
+  # nginx keeps running throughout: standalone mode wants port 80 to itself,
+  # which means taking the site down to renew.
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot-www:/var/www/certbot
+    # Twice a day is what Let's Encrypt asks for. `renew` is a no-op until a
+    # certificate is inside thirty days of expiry, so this is almost always
+    # a few milliseconds and a log line.
+    entrypoint: /bin/sh
+    command: -c 'trap exit TERM; while :; do certbot renew --webroot --webroot-path /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    logging: *default-logging
 
   minio:
     image: minio/minio:latest
@@ -112,6 +148,7 @@ services:
     expose:
       - '9000'
 
+    logging: *default-logging
   # restart: unless-stopped only covers a process that exits. A container that
   # is running but failing its health check would sit there indefinitely, which
   # is exactly the case a health check exists to catch, so something has to act
@@ -126,18 +163,24 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
+    logging: *default-logging
   # Nightly pg_dump, kept for fourteen days. See scripts/backup.sh.
   backup:
-    image: postgres:16-alpine
+    # Built, not pulled: the job needs pg_dump and an S3 client in the same
+    # place, and the stock postgres image has no way to reach the off-site
+    # bucket.
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
     restart: unless-stopped
     env_file: [.env.production]
     volumes:
       - ./backups:/backups
       - ./scripts:/scripts:ro
-    entrypoint: ['/bin/sh', '/scripts/backup-loop.sh']
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
 
 volumes:
   pgdata:

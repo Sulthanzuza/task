@@ -23,6 +23,7 @@ export function TeamsPage() {
   const banner = useBanner();
 
   const [newName, setNewName] = useState('');
+  const [newInternal, setNewInternal] = useState(false);
   const [creating, setCreating] = useState(false);
 
   return (
@@ -44,9 +45,13 @@ export function TeamsPage() {
             onSubmit={async (event) => {
               event.preventDefault();
               try {
-                await createTeam.mutateAsync({ name: newName.trim() });
+                await createTeam.mutateAsync({
+                  name: newName.trim(),
+                  isInternal: newInternal,
+                });
                 banner.show('success', newName.trim() + ' has been created.');
                 setNewName('');
+                setNewInternal(false);
                 setCreating(false);
               } catch (error) {
                 banner.show('error', error instanceof Error ? error.message : 'That did not work.');
@@ -63,6 +68,21 @@ export function TeamsPage() {
                 />
               </Field>
             </div>
+            {/*
+              Rare, so it is a checkbox on the create form rather than
+              anything more prominent: most people will make one of these
+              once, for the deploy pipeline's smoke account, and never again.
+            */}
+            <label className="flex items-center gap-2 pb-2 text-xs text-ink-muted">
+              <input
+                type="checkbox"
+                checked={newInternal}
+                onChange={(event) => setNewInternal(event.target.checked)}
+                className="accent-[var(--color-accent)]"
+              />
+              Internal team
+            </label>
+
             <Button type="submit" disabled={createTeam.isPending}>
               Create
             </Button>
@@ -176,6 +196,35 @@ function TeamCard({
                 </option>
               ))}
             </Select>
+          </Field>
+
+          <Field label="Internal" hint="kept out of the dashboard, the digest and the alerts">
+            <label className="flex h-9 items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                aria-label={'Treat ' + team.name + ' as an internal team'}
+                checked={team.isInternal}
+                onChange={async (event) => {
+                  try {
+                    await updateTeam.mutateAsync({
+                      teamId: team.id,
+                      isInternal: event.target.checked,
+                    });
+                    onSaved(
+                      event.target.checked
+                        ? team.name + ' is now an internal team.'
+                        : team.name + ' counts towards the dashboard again.',
+                    );
+                  } catch (error) {
+                    fail(error);
+                  }
+                }}
+                className="accent-[var(--color-accent)]"
+              />
+              <span className="text-ink-muted">
+                {team.isInternal ? 'Excluded from reporting' : 'Counted everywhere'}
+              </span>
+            </label>
           </Field>
         </div>
       </div>

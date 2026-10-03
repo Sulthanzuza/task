@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-01. Branch `master`, tagged **v1.0.0-rc1**.
+Last updated: 2026-10-03. Branch `master`, tagged **v1.0.0-rc2**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -47,7 +47,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `a23a195` | The fixes from the first screenshot review (below) |
 | `2c6ec0c` | The second review round (below) |
 | `e04853f` | The third review round, and the font (below) |
-| _this one_ | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
+| `eefb658` | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
+| _this one_ | First-deploy runbook fixes, v1.0.0-rc2 (below) |
 
 ### The design system, applied (three design prompts)
 
@@ -102,6 +103,28 @@ What those two found, all fixed in the app rather than in the test:
 - `aria-expanded` on the mention textarea is not allowed on a textbox; the open state
   moved to a live region.
 - The logo link had no accessible name below 1366, where the wordmark is hidden.
+
+### The deploy runbook
+
+Going through `docs/deploy.md` against the code found more than documentation
+drift. What the runbook needed the product to grow:
+
+- **`pnpm env:check`**, so a bad `.env.production` is caught before the first
+  `docker compose up` rather than by a crash-loop.
+- **`teams.is_internal`**, so the smoke test can write without its traffic
+  reaching the dashboard, the digest or the alerts. The alternative was a
+  read-only smoke test, which cannot tell a working deployment from one whose
+  database is mounted read-only.
+- **TLS that issues itself.** The deadlock is that nginx will not start
+  without a certificate and certbot cannot get one without nginx; a
+  short-lived self-signed placeholder written by the entrypoint breaks it,
+  and webroot mode keeps the site up through every renewal afterwards.
+- **A backup image.** The off-site copy in the old script shelled out to an
+  `aws` binary that the postgres image does not contain, so `set -eu` meant
+  the whole backup reported failure the moment a bucket was configured. It
+  had therefore never worked. The job now runs from its own image with `mc`,
+  copies the attachments as well as the dump, and the restore drill pulls
+  from the remote copy.
 
 ### Release prep
 
@@ -311,7 +334,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
-| `apps/api` integration | 20 | 376 |
+| `apps/api` integration | 20 | 379 |
 | `apps/web` end-to-end | 13 | 58 |
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a

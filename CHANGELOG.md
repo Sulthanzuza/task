@@ -2,6 +2,64 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-rc2 — 2026-10-03
+
+A first-deploy runbook that someone can actually follow, and the code changes
+it turned out to need.
+
+### Added
+
+- **`pnpm env:check`** validates `.env.production` with the same Zod schema
+  and the same production rules the API applies at boot, without starting
+  anything. Finding out that a secret is sixteen bytes by watching a
+  container crash-loop is a poor way to learn it.
+- **An internal flag on a team** (`teams.is_internal`, a checkbox in
+  Settings → Teams). An internal team is ordinary for every permission
+  question and is left out of the dashboard pickers, the daily digest and the
+  overdue alerts, so the deploy pipeline's smoke traffic cannot move the
+  numbers a lead reads or page anybody about a task that existed for ninety
+  seconds. Three integration tests cover the exclusions.
+- **Automatic TLS.** certbot issues and renews in webroot mode, so nginx
+  keeps serving throughout; `--standalone` wants port 80 to itself, which
+  means taking the site down to renew. nginx writes itself a short-lived
+  self-signed placeholder on the first boot, which is what breaks the
+  deadlock between "nginx will not start without a certificate" and "certbot
+  cannot get one without nginx".
+- **Docker log rotation** on every service, 10MB x 3. The default is to keep
+  container logs forever, which is the usual way a small server fills its
+  disk.
+
+### Changed
+
+- **Backups go off the server.** The nightly job copies the dump *and* the
+  attachments bucket to a separate S3-compatible provider, with 14-day
+  retention there and 3 days locally. The restore drill pulls from the remote
+  copy: restoring the file still sitting on the server proves the dump is
+  readable and nothing about whether the backup that matters arrived
+  anywhere. The job runs from its own image, because the stock postgres image
+  has no way to reach a bucket — the previous off-site line invoked an `aws`
+  binary that was never installed.
+- **The smoke test writes and cleans up.** It creates a task in the internal
+  Smoke project, moves it through the workflow and deletes it. A read-only
+  check cannot tell a working deployment from one whose database is mounted
+  read-only.
+- **Rollback is a documented policy**, not a named tag: every release is
+  tagged, rollback is a checkout of the previous release tag, and the first
+  deploy has no rollback at all. Every deploy now takes a backup before the
+  migrations run.
+- **nginx is a template.** The certificate paths carry the domain, so
+  `SERVER_NAME` comes from the environment rather than being baked into the
+  image.
+
+### Documentation
+
+`docs/deploy.md` gains a "Before you start" section (Ubuntu 24.04, a non-root
+sudo user, Docker Engine, ufw, a DNS check with `dig`), a table of every
+variable `.env.production` needs with how to generate each one and what
+rejects it, a numbered first-deploy order that reaches HTTPS before the first
+administrator is created, and an external uptime check on `/api/v1/ready`
+rather than `/health`, which answers 200 through a dead job queue.
+
 ## v1.0.0-rc1 — 2026-10-01
 
 Everything since `v0.1-core`, which was the API, the data model and the first

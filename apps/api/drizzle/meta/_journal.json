@@ -29,6 +29,13 @@
       "when": 1790677246103,
       "tag": "0003_nebulous_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791024058146,
+      "tag": "0004_charming_juggernaut",
+      "breakpoints": true
     }
   ]
 }

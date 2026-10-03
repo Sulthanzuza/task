@@ -132,7 +132,10 @@ describe('a long weekend', () => {
 
     const rows = await alertRows();
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.sentOn === TUESDAY), 'sent_on must be the org date').toBe(true);
+    expect(
+      rows.every((r) => r.sentOn === TUESDAY),
+      'sent_on must be the org date',
+    ).toBe(true);
   });
 
   it('lets the same alert fire again on a later day', async () => {
@@ -238,5 +241,76 @@ describe('alerts go through the notification service', () => {
     // The alert was claimed, but the person who asked not to hear gets nothing.
     expect((await alertRows()).filter((r) => r.alertType === 'OVERDUE')).toHaveLength(1);
     expect(await notificationsFor(fx.member.id, 'ALERT_OVERDUE')).toHaveLength(0);
+  });
+});
+
+describe('an internal team', () => {
+  /**
+   * The deploy pipeline signs in after every release, makes a task, moves it
+   * and deletes it. That is not work anybody should be alerted about, and
+   * averaging it into a lead's dashboard makes the numbers drift with how
+   * often the pipeline happens to run.
+   */
+  async function markInternal(teamId: string): Promise<void> {
+    const { db } = await import('../src/db/client');
+    const { teams } = await import('../src/db/schema');
+    const { eq } = await import('drizzle-orm');
+    await db.update(teams).set({ isInternal: true }).where(eq(teams.id, teamId));
+  }
+
+  it('raises no alert, where an ordinary team would', async () => {
+    // First prove the alert fires at all, so the second half cannot pass by
+    // simply being broken.
+    const noisy = await inProgressTask(await at(FRIDAY, 16));
+    await scanTwice(await at(TUESDAY, 18));
+    expect(
+      (await alertRows()).filter((r) => r.taskId === noisy.id),
+      'an ordinary team should alert here',
+    ).toHaveLength(1);
+
+    await harness.reset();
+    fx = await seedFixture(harness.app);
+    await setHoliday('2026-10-05');
+    await markInternal(fx.team.id);
+
+    const quiet = await inProgressTask(await at(FRIDAY, 16));
+    await scanTwice(await at(TUESDAY, 18));
+    expect(
+      (await alertRows()).filter((r) => r.taskId === quiet.id),
+      'an internal team must never raise an alert',
+    ).toHaveLength(0);
+  });
+
+  it('leaves its lead with nothing to report in the digest', async () => {
+    await markInternal(fx.team.id);
+    await inProgressTask(await at(FRIDAY, 16));
+
+    const { buildDigest } = await import('../src/modules/alerts/digest');
+    const digest = await buildDigest(fx.lead.id, await at(TUESDAY, 8));
+
+    /*
+     * With their only team internal, the lead no longer leads anything the
+     * digest knows about, so they get the member digest, and it is empty:
+     * the overdue task in the internal project is not theirs to be told
+     * about.
+     */
+    expect(digest.kind).toBe('member');
+    if (digest.kind === 'member') {
+      expect(digest.overdue).toHaveLength(0);
+      expect(digest.dueToday).toHaveLength(0);
+      expect(digest.awaitingMyReview).toHaveLength(0);
+    }
+  });
+
+  it('is not offered as a team to view', async () => {
+    await markInternal(fx.team.id);
+
+    const response = await as(harness.app, fx.admin).get('/api/v1/teams').expect(200);
+    const names = (response.body as { items: Array<{ name: string }> }).items.map(
+      (team) => team.name,
+    );
+
+    expect(names, 'an internal team should not be in the picker').not.toContain('Team A');
+    expect(names, 'the ordinary team is still there').toContain('Team B');
   });
 });

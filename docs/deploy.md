@@ -35,12 +35,23 @@ sudo usermod -aG docker deploy && newgrp docker
 docker compose version          # v2.x
 ```
 
-**3. A firewall that allows three ports.** Docker publishes ports by writing
-its own iptables rules, which bypass ufw: a container published as `5432:5432`
-is reachable from the internet even with ufw denying it. This deployment
-publishes only 80 and 443, so that trap is avoided by configuration rather
-than by the firewall, but the firewall is still what stops anything you add
-later from being exposed by accident.
+**3. A firewall that allows three ports.**
+
+> **Docker bypasses ufw.** Publishing a port writes an iptables rule in the
+> `DOCKER` chain, which is consulted before ufw's. A container published as
+> `5432:5432` is reachable from the internet with ufw showing `deny
+> incoming` and no warning anywhere. The only reliable defence is not to
+> publish the port: bind it to `127.0.0.1:5432:5432` if you ever need it
+> locally, and never to `0.0.0.0`.
+>
+> In this deployment **only nginx may publish a port**, and it publishes 80
+> and 443. Postgres, MinIO, the API and the worker talk to each other over
+> the Compose network and are not reachable from outside the host. If you
+> add a service, do not give it a `ports:` entry.
+
+ufw is still worth having for everything that is not Docker — ssh, anything
+you install later — and for the day somebody adds a published port by
+mistake and you want the rest of the box covered.
 
 ```bash
 sudo ufw default deny incoming
@@ -52,7 +63,32 @@ sudo ufw enable
 sudo ufw status verbose
 ```
 
-**4. DNS pointing here, before certbot runs.** Let's Encrypt resolves the name
+**4. Swap, so a build does not kill the box.** 4GB is enough to run this and
+not enough to run `pnpm build` inside Docker at the same time as Postgres.
+Without swap the kernel's OOM killer picks a victim, and it is usually
+Postgres.
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h                                 # Swap: 2.0Gi
+```
+
+**5. Security updates, applied on their own.**
+
+```bash
+sudo apt update && sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure --priority=low unattended-upgrades    # answer Yes
+systemctl status unattended-upgrades --no-pager | head -3
+```
+
+This takes security patches only, and does not reboot by itself. Kernel
+updates still need a reboot you schedule.
+
+**6. DNS pointing here, before certbot runs.** Let's Encrypt resolves the name
 itself, so a record that has not propagated is a failed issuance and a rate
 limit you then wait out.
 
@@ -61,7 +97,7 @@ dig +short tasks.example.com          # must print this server's public IP
 curl -fsS https://ifconfig.me && echo  # which is this
 ```
 
-**5. The code.**
+**7. The code.**
 
 ```bash
 sudo mkdir -p /srv/taskmanager && sudo chown deploy:deploy /srv/taskmanager
@@ -70,7 +106,7 @@ cd /srv/taskmanager
 git checkout v1.0.0-rc2
 ```
 
-**6. An SMTP provider with SPF and DKIM** (see below). Without them,
+**8. An SMTP provider with SPF and DKIM** (see below). Without them,
 invitations and alerts land in spam and the product looks broken on day one.
 
 ---
@@ -112,14 +148,20 @@ Every value the API will not start without, and how to make it:
 The rest have working defaults. `CORS_ORIGINS` stays empty: the app and the
 API are the same origin, so there is no cross-origin request to allow.
 
-Check it before starting anything. This runs the same Zod schema and the same
-production rules the API applies at boot, against the file, and prints what is
-wrong:
+Check it before starting anything. There is no Node and no pnpm on this
+server and there is no reason to install them: the check ships inside the API
+image and runs the same Zod schema and the same production rules the API
+applies at boot.
 
 ```bash
-pnpm install --frozen-lockfile    # once, for the tooling
-pnpm env:check
+docker compose -f docker-compose.prod.yml build api
+docker compose -f docker-compose.prod.yml run --rm --no-deps api \
+  node dist/cli/envCheck.js
 ```
+
+`--no-deps` because this must not start Postgres to tell you a secret is too
+short. It prints every problem at once and exits non-zero, so it also works
+as a gate in a deploy script.
 
 ### 2. Start
 
@@ -137,7 +179,16 @@ step replaces it.
 
 Webroot mode: nginx keeps running and serves the challenge out of a shared
 volume. The alternative, `--standalone`, wants port 80 to itself, which means
-taking the site down to renew it.
+taking the site down to issue and again to renew.
+
+On this first boot nginx is serving a **self-signed placeholder**, written to
+`/etc/nginx/placeholder/` inside the container. It has to serve something, or
+it will not start, and then it cannot answer the challenge that would get it
+a real certificate. The placeholder deliberately does **not** live in
+`/etc/letsencrypt/live/<domain>/`: that directory belongs to certbot, and
+certbot finding it already populated would quietly issue to
+`<domain>-0001` instead and leave nginx serving the self-signed one forever.
+nginx reads `/etc/nginx/tls`, a symlink, which is what moves.
 
 ```bash
 docker compose -f docker-compose.prod.yml run --rm certbot certonly \
@@ -145,37 +196,104 @@ docker compose -f docker-compose.prod.yml run --rm certbot certonly \
   -d tasks.example.com \
   --email you@example.com --agree-tos --no-eff-email
 
-# Pick up the real certificate.
-docker compose -f docker-compose.prod.yml exec web nginx -s reload
-
-curl -fsSI https://tasks.example.com | head -1     # HTTP/2 200
-curl -fsSI http://tasks.example.com  | head -1     # 301 to https
+# Point the symlink at the real certificate and reload. Without this you
+# wait up to six hours for the watcher to do it.
+docker compose -f docker-compose.prod.yml exec web /usr/local/bin/use-real-cert
 ```
 
-Renewal runs by itself: the `certbot` service wakes twice a day and renews
-anything inside thirty days of expiry, and the web container reloads nginx
-every twelve hours so a renewed certificate is picked up without a restart.
-Prove it works now rather than in ninety days:
+Now prove it, rather than trusting it. The failure mode here is silent: the
+site is up, and only a browser tells you the certificate is wrong.
+
+```bash
+./scripts/check-tls.sh tasks.example.com
+```
+
+That checks three things: that `certs/live/tasks.example.com/` exists with no
+`-0001` sibling, that the certificate actually on the wire is issued by
+Let's Encrypt rather than being self-signed, and that HTTP redirects to
+HTTPS. By hand, the same question:
+
+```bash
+echo | openssl s_client -servername tasks.example.com \
+  -connect tasks.example.com:443 2>/dev/null | openssl x509 -noout -issuer -dates
+# issuer=C=US, O=Let's Encrypt, CN=...     <- not "CN=tasks.example.com"
+ls certs/live/                              # exactly one directory
+```
+
+**What renews it.** The `certbot` service runs
+`certbot renew --webroot` in a loop with `sleep 12h`, so twice a day; `renew`
+does nothing until a certificate is inside thirty days of expiry. Its
+`--deploy-hook` writes `certs/last-renewal`, which is how you tell a renewal
+happened. nginx picks the new file up because the web container runs
+`use-real-cert` every six hours
+(`docker/entrypoint.d/20-watch-for-renewals.sh`), re-pointing the symlink and
+reloading. The reload is done from inside the web container on purpose:
+doing it from certbot would mean giving the container that talks to the
+public internet access to the Docker socket.
+
+Test the renewal path now, not in ninety days:
 
 ```bash
 docker compose -f docker-compose.prod.yml run --rm certbot renew --dry-run
+docker compose -f docker-compose.prod.yml logs --tail=20 certbot
 ```
 
 ### 4. The first administrator
 
-Every account is invited from the UI, which needs somebody signed in to do the
-inviting. The first one is made on the server:
+The CLI sets the password itself: it prompts for one and writes the hash. It
+sends **no email**, so this works before SMTP is proven and nothing here
+depends on a set-password link arriving.
+
+Everyone *else* is invited from the UI, and an invitation is an email, so
+mail has to work before you invite anybody — including the smoke account in
+step 6.
 
 ```bash
 docker compose -f docker-compose.prod.yml run --rm api \
   node dist/cli/createUser.js --email you@example.com --name "Your Name" --role SUPER_ADMIN
 ```
 
-There is deliberately no unauthenticated "create the first admin" page: that is
-a race with whoever finds the deployment first. Everyone else is invited from
-**Settings → People**, which emails them a link to set their own password.
+Omit `--password` and it prompts, which keeps it out of your shell history.
+It must be at least 10 characters with an upper case letter, a lower case
+letter and a digit.
 
-### 5. The smoke team
+There is deliberately no unauthenticated "create the first admin" page: that
+is a race with whoever finds the deployment first.
+
+### 5. Organisation settings and holidays
+
+Do this before anybody is invited. Every business date in the product —
+overdue, due today, working days, the digest hour, the heat map — is computed
+from these, and changing them later silently moves dates on work that already
+exists.
+
+Signed in as the administrator:
+
+**Settings → Organisation**
+
+- Time zone: `Asia/Kolkata`
+- Weekend days: Saturday and Sunday
+- Working hours per day: `8`
+- Daily digest at: `09:00`
+- Week starts on: Monday
+
+**Settings → Holidays**
+
+Add this year's public holidays. A task is not overdue because of a day
+nobody was working, and the alerts, the digest and the due-load heat map all
+count working days against this list. Add next year's in December.
+
+### 6. Email, before the first invitation
+
+**Settings → Email → Send a test email**, to an address at a different
+provider from your own. Then open the message and read its headers: both SPF
+and DKIM must say `pass`. Mail that fails either lands in spam, and the first
+thing anybody experiences of this product is an invitation that never
+arrived.
+
+Fix SPF and DKIM at your DNS provider before going on (see below).
+
+### 7. The smoke team
 
 The smoke test writes: it creates a task, moves it and deletes it, because a
 read-only check cannot tell a working deployment from one whose database is
@@ -195,6 +313,12 @@ Then:
    it the lead of the Smoke team so it can create and delete there.
 3. Set its password from the invitation email and keep it in your secret
    store. It is not a real person's login and must not be an administrator.
+
+### 8. Prove the backups
+
+See **Backups** below, and do the restore drill now rather than later.
+
+---
 
 ### Seeds do not run here
 
@@ -317,9 +441,12 @@ convenience for a fast restore rather than the backup.
 # On demand, rather than waiting for the nightly run
 docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
 
-# What is off-site
+# What is off-site. Single quotes and sh -c, so $BACKUP_S3_BUCKET is
+# expanded inside the container where it has a value: your shell would
+# expand it to nothing and you would list the wrong path and see nothing,
+# which looks exactly like a backup that is not running.
 docker compose -f docker-compose.prod.yml exec backup \
-  mc ls backup/$BACKUP_S3_BUCKET/database/
+  sh -c 'mc ls backup/$BACKUP_S3_BUCKET/database/'
 ```
 
 ### Restoring
@@ -328,15 +455,30 @@ The drill restores from the **remote** copy, not from the folder on this
 server. Restoring the file still sitting here proves the dump is readable and
 nothing whatever about whether the backup that matters actually arrived.
 
+The database password must not go on the command line: it would be in your
+shell history, in `ps` output while the command runs, and in the Compose
+logs. The container already has it, so build the URL in there.
+
 ```bash
-# Newest off-site dump, into a scratch database. The script refuses any
-# target whose name does not end _restore, _scratch or _verify.
-docker compose -f docker-compose.prod.yml exec backup \
-  /scripts/restore.sh remote "postgres://USER:PASSWORD@postgres:5432/taskmanager_restore"
+# 1. A scratch database to restore into.
+docker compose -f docker-compose.prod.yml exec postgres \
+  sh -c 'createdb -U "$POSTGRES_USER" taskmanager_restore'
+
+# 2. Restore the newest off-site dump into it. The URL is assembled inside
+#    the container from variables it already holds, so nothing secret is
+#    typed. The script refuses any target not ending _restore, _scratch or
+#    _verify, so it cannot be pointed at the live database by a typo.
+docker compose -f docker-compose.prod.yml exec backup sh -c \
+  '/scripts/restore.sh remote "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/taskmanager_restore"'
+
+# 3. Drop it. A second copy of everybody's data, sitting on the same server
+#    with nobody looking after it, is not something to leave behind.
+docker compose -f docker-compose.prod.yml exec postgres \
+  sh -c 'dropdb -U "$POSTGRES_USER" taskmanager_restore'
 ```
 
-It prints how many users and tasks came back and fails if the answer is none.
-Do this on the day you deploy, and then once a quarter.
+Step 2 prints how many users and tasks came back and fails if the answer is
+none. Do this on the day you deploy, and then once a quarter.
 
 ### Restore drill log
 
@@ -385,7 +527,10 @@ docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
 
 git fetch --tags
 git checkout <tag>
-pnpm env:check                      # the release may have added a variable
+docker compose -f docker-compose.prod.yml build api
+docker compose -f docker-compose.prod.yml build api
+docker compose -f docker-compose.prod.yml run --rm --no-deps api \
+  node dist/cli/envCheck.js         # the release may have added a variable
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f --tail=50 api worker
 ```
@@ -394,12 +539,30 @@ Migrations run automatically, before the API starts.
 
 ### Smoke test after deploying
 
+Run it from your own machine, not the server: it needs Node, and the point
+is to exercise the site the way a browser outside the network reaches it.
+
+PowerShell, on Windows:
+
+```powershell
+$env:BASE_URL="https://tasks.example.com"
+$env:SMOKE_EMAIL="smoke@yourdomain"
+$env:SMOKE_PASSWORD="<password>"
+pnpm smoke
+```
+
+macOS or Linux:
+
 ```bash
 BASE_URL=https://tasks.example.com \
 SMOKE_EMAIL=smoke@yourdomain \
 SMOKE_PASSWORD=<password> \
 pnpm smoke
 ```
+
+PowerShell has no inline `VAR=value command` form, so the bash version does
+nothing useful there: it sets no variables, and `pnpm smoke` then stops on
+an empty `SMOKE_EMAIL`.
 
 It signs in, checks the security headers and the readiness endpoint, then
 creates a task in the **Smoke** project, moves it through the workflow and

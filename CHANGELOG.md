@@ -2,6 +2,56 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-rc3 — 2026-10-03
+
+Review of the rc2 runbook, which found one real bug and several commands
+that would not have worked as written.
+
+### Fixed
+
+- **The placeholder certificate was written into certbot's own directory.**
+  `/etc/letsencrypt/live/<domain>/` belongs to certbot; finding it already
+  populated, certbot issues to `<domain>-0001` and leaves the original
+  alone, so nginx would have gone on serving a self-signed certificate
+  forever with the site up and untrusted and nothing in any log. The
+  placeholder now lives in `/etc/nginx/placeholder/` and nginx reads
+  `/etc/nginx/tls`, a symlink that the entrypoint points at the real
+  certificate as soon as one exists. `scripts/check-tls.sh` checks for a
+  `-0001` sibling and reads the issuer off the wire with `openssl s_client`,
+  because this failure is invisible from the server side.
+- **The env check needed Node on the server.** It ships in the API image now
+  and runs as `docker compose run --rm --no-deps api node dist/cli/envCheck.js`.
+  With no file to read it validates the environment Compose handed it, which
+  is the same thing the API will see a second later.
+- **`exec backup mc ls backup/$BACKUP_S3_BUCKET/...`** expanded the variable
+  in the host's shell, where it is empty, so it listed the wrong path and
+  printed nothing — indistinguishable from a backup that is not running.
+- **The restore drill put the database password in shell history**, in `ps`
+  output and in the Compose logs. The URL is assembled inside the container
+  now, from variables it already holds, and the scratch database is dropped
+  afterwards.
+
+### Added
+
+- A 2GB swap file and `unattended-upgrades` in the server preparation, and a
+  warning that **Docker bypasses ufw** for published ports: only nginx may
+  ever publish one.
+- Organisation settings and holidays as an explicit step, before anybody is
+  invited. Every business date in the product is computed from them, and
+  changing them later silently moves dates on work that already exists.
+- The PowerShell form of the smoke-test command, since PowerShell has no
+  inline `VAR=value command` and the bash line silently sets nothing there.
+- `certbot renew` gained a `--deploy-hook` that records the time of the last
+  renewal, and the nginx reload loop runs every six hours against a certbot
+  that renews twice a day.
+
+### Changed
+
+- The first administrator's password is set at a prompt by the CLI, which
+  sends no email. The runbook now says so, and puts the SPF/DKIM test email
+  before the first *invitation* rather than before the admin, which was
+  where it actually mattered.
+
 ## v1.0.0-rc2 — 2026-10-03
 
 A first-deploy runbook that someone can actually follow, and the code changes

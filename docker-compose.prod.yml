@@ -126,9 +126,21 @@ services:
       - ./certbot-www:/var/www/certbot
     # Twice a day is what Let's Encrypt asks for. `renew` is a no-op until a
     # certificate is inside thirty days of expiry, so this is almost always
-    # a few milliseconds and a log line.
+    # a few milliseconds and a line in the log.
+    #
+    # The deploy hook only leaves a note. Reloading nginx from in here would
+    # mean reaching into another container, which needs the Docker socket,
+    # and handing the socket to the thing that talks to the public internet
+    # is a poor trade for a reload. The web container watches instead: see
+    # docker/entrypoint.d/20-watch-for-renewals.sh.
     entrypoint: /bin/sh
-    command: -c 'trap exit TERM; while :; do certbot renew --webroot --webroot-path /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    command: >
+      -c 'trap exit TERM;
+      while :; do
+      certbot renew --webroot --webroot-path /var/www/certbot --quiet
+      --deploy-hook "date -u +%FT%TZ > /etc/letsencrypt/last-renewal";
+      sleep 12h & wait $${!};
+      done'
     logging: *default-logging
 
   minio:

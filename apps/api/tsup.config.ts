@@ -3,7 +3,13 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   // migrate runs as a one-off container before the API starts; createUser is
   // the command that makes the first administrator.
-  entry: ['src/server.ts', 'src/worker.ts', 'src/db/migrate.ts', 'src/cli/createUser.ts'],
+  entry: [
+    'src/server.ts',
+    'src/worker.ts',
+    'src/db/migrate.ts',
+    'src/cli/createUser.ts',
+    'src/cli/envCheck.ts',
+  ],
   format: ['esm'],
   target: 'node22',
   platform: 'node',

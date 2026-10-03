@@ -53,12 +53,14 @@ server {
     http2 on;
     server_name ${SERVER_NAME};
 
-    # On a first boot these point at the self-signed placeholder the
-    # entrypoint generates, so nginx starts and can answer the ACME
-    # challenge. Certbot replaces them with the real certificate, and
-    # nothing here changes when it does.
-    ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
+    # A symlink, not certbot's own path. On the first boot it points at a
+    # self-signed placeholder, so nginx can start at all and answer the ACME
+    # challenge; the entrypoint re-points it at the real certificate as soon
+    # as one exists. Writing that placeholder into /etc/letsencrypt/live/
+    # instead would make certbot issue to <domain>-0001 and leave nginx
+    # serving the self-signed one forever, with the site up and untrusted.
+    ssl_certificate     /etc/nginx/tls/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache   shared:SSL:10m;

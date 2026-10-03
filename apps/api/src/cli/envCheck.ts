@@ -7,11 +7,23 @@
  * the same production checks against a file on disk and prints what is
  * wrong, before the first `docker compose up`.
  *
+ * On the server there is no Node and no pnpm, so it ships in the API image
+ * and is run through Compose:
+ *
+ *   docker compose -f docker-compose.prod.yml run --rm --no-deps api  *     node dist/cli/envCheck.js
+ *
+ * In the container the file arrives through env_file, so there is nothing to
+ * read off disk: with no argument and no readable file it falls back to
+ * checking the environment it was given, which is the same thing the API
+ * will see a second later.
+ *
+ * Locally:
+ *
  *   pnpm env:check                      # .env.production
  *   pnpm env:check .env.staging
  */
 import { readFileSync } from 'node:fs';
-import type * as Config from './env';
+import type * as Config from '../config/env';
 import { isAbsolute, resolve } from 'node:path';
 
 /*
@@ -27,13 +39,24 @@ const file = given
     : resolve(root, given)
   : resolve(root, '.env.production');
 
-let contents: string;
+let contents = '';
+let fromFile = true;
+
+/** What to call the thing being checked, which may be a file or an environment. */
+const subject = (): string => (fromFile ? file : 'The container environment');
 try {
   contents = readFileSync(file, 'utf8');
 } catch {
-  console.error('Cannot read ' + file);
-  console.error('Copy .env.production.example and fill it in first.');
-  process.exit(1);
+  /*
+   * Compose has already put the variables in the environment, so an
+   * unreadable file is normal inside the container and fatal outside it.
+   */
+  if (!process.env.DATABASE_URL) {
+    console.error('Cannot read ' + file + ', and the environment is empty too.');
+    console.error('Copy .env.production.example and fill it in first.');
+    process.exit(1);
+  }
+  fromFile = false;
 }
 
 /*
@@ -58,19 +81,26 @@ for (const line of contents.split('\n')) {
   parsed[key] = value;
 }
 
-// A fresh environment, so nothing already exported can paper over a gap.
-const inherited = { PATH: process.env.PATH, HOME: process.env.HOME };
-for (const key of Object.keys(process.env)) delete process.env[key];
-Object.assign(process.env, inherited, parsed);
-process.env.NODE_ENV = parsed.NODE_ENV ?? 'production';
+/*
+ * Reading a file: start from a clean environment, so nothing already
+ * exported in the shell can paper over a gap in it. Reading the
+ * environment: leave it exactly as given, because that is the thing under
+ * test.
+ */
+if (fromFile) {
+  const inherited = { PATH: process.env.PATH, HOME: process.env.HOME };
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, inherited, parsed);
+}
+process.env.NODE_ENV = process.env.NODE_ENV ?? 'production';
 
 async function main(): Promise<void> {
   let config: typeof Config;
   try {
     // Imported after process.env is set: the module validates on load.
-    config = await import('./env');
+    config = await import('../config/env');
   } catch (error) {
-    console.error('\n' + file + ' is not valid:\n');
+    console.error('\n' + subject() + ' is not valid:\n');
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
@@ -79,7 +109,7 @@ async function main(): Promise<void> {
   const unsafe = config.unsafeProductionSettings();
 
   if (problems.length > 0) {
-    console.error('\n' + file + ' would be refused in production:\n');
+    console.error('\n' + subject() + ' would be refused in production:\n');
     for (const problem of problems) console.error('  - ' + problem);
   }
 
@@ -90,7 +120,7 @@ async function main(): Promise<void> {
 
   if (problems.length > 0) process.exit(1);
 
-  process.stdout.write(file + ' is valid.\n');
+  process.stdout.write(subject() + ' is valid.\n');
   if (unsafe.length > 0) {
     process.stdout.write('Warnings above are not fatal, but read them before deploying.\n');
   }

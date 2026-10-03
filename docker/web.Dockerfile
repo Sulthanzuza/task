@@ -27,7 +27,8 @@ RUN apk add --no-cache openssl
 # over /etc/nginx/templates and writes the result into conf.d.
 COPY docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY docker/entrypoint.d/ /docker-entrypoint.d/
-RUN chmod +x /docker-entrypoint.d/*.sh
+COPY docker/use-real-cert.sh /usr/local/bin/use-real-cert
+RUN chmod +x /docker-entrypoint.d/*.sh /usr/local/bin/use-real-cert
 
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 

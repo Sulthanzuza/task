@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-03. Branch `master`, tagged **v1.0.0-rc2**.
+Last updated: 2026-10-03. Branch `master`, tagged **v1.0.0-rc3**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -48,7 +48,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `2c6ec0c` | The second review round (below) |
 | `e04853f` | The third review round, and the font (below) |
 | `eefb658` | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
-| _this one_ | First-deploy runbook fixes, v1.0.0-rc2 (below) |
+| `c84f2fc` | First-deploy runbook fixes, v1.0.0-rc2 |
+| _this one_ | rc3: the placeholder-certificate bug, and runbook corrections |
 
 ### The design system, applied (three design prompts)
 
@@ -103,6 +104,24 @@ What those two found, all fixed in the app rather than in the test:
 - `aria-expanded` on the mention textarea is not allowed on a textbox; the open state
   moved to a live region.
 - The logo link had no accessible name below 1366, where the wordmark is hidden.
+
+### rc3: reviewing the runbook
+
+One real bug, found by asking where the placeholder certificate was written.
+
+**It was written into `/etc/letsencrypt/live/<domain>/`, which certbot owns.**
+Certbot finding that directory already populated issues to `<domain>-0001`
+and leaves the original in place, so nginx would have served the self-signed
+placeholder indefinitely: site up, certificate untrusted, nothing in any log.
+The placeholder moved to `/etc/nginx/placeholder/`, nginx reads a symlink at
+`/etc/nginx/tls`, and `scripts/check-tls.sh` looks for the `-0001` sibling
+and reads the issuer off the wire, because nothing on the server can see this
+go wrong.
+
+Three commands in the runbook also could not have worked: the env check
+needed Node on a server that has none (it is in the API image now), an
+`mc ls` expanded `$BACKUP_S3_BUCKET` in the host shell where it is empty, and
+the restore drill put the database password into shell history.
 
 ### The deploy runbook
 

@@ -2,87 +2,15 @@ import { createServer, type Server } from 'node:http';
 import { assertProductionConfig, env } from './config/env';
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
-import { purgeExpired } from './modules/auth/service';
-import { purgeOldNotifications } from './modules/notifications/service';
-import { QUEUES, getQueue, stopQueue } from './jobs/queue';
-import { SCHEDULES, registerSchedules, runHousekeeping } from './jobs/scheduler';
-import { runAlertScan } from './modules/alerts/service';
-import { runDigest } from './modules/alerts/digest';
-import { sendNotificationEmail, type NotificationEmailJob } from './jobs/notificationEmail';
+import { runWorker } from './jobs/runWorker';
 
 /**
- * The background worker. It runs the same code as the API, started from a different
- * entry point, so jobs reuse the services and rules rather than reimplementing them.
+ * The background worker as a process of its own, for the Docker deployment.
  *
- * Scheduled alerts, the daily digest and recurring tasks (prompts 13 and 16) register here.
- * For now it only does housekeeping, on a plain interval; pg-boss takes over when the
- * alert jobs land.
+ * It runs the same code as the API, started from a different entry point, so jobs
+ * reuse the services and rules rather than reimplementing them. On a host with a
+ * single process, server.ts runs the same thing with RUN_MODE=all.
  */
-
-const HOUSEKEEPING_INTERVAL_MS = 60 * 60 * 1000;
-
-async function housekeeping(): Promise<void> {
-  const removed = await purgeExpired();
-  if (removed.sessions > 0 || removed.resets > 0) {
-    logger.info(removed, 'Purged expired sessions and reset tokens.');
-  }
-  await purgeOldNotifications();
-}
-
-/**
- * Email is sent here, never inside a request.
- *
- * The job was enqueued in the same transaction as the change, so by the time it
- * runs the change is certainly committed. pg-boss debounces on the person and
- * the task, so a burst of edits becomes one email rather than a stream.
- */
-async function startJobWorkers(): Promise<void> {
-  const boss = await getQueue();
-
-  await boss.work<NotificationEmailJob>(
-    QUEUES.notificationEmail,
-    { batchSize: 10 },
-    async (jobs) => {
-      for (const job of jobs) {
-        try {
-          await sendNotificationEmail(job.data);
-        } catch (error) {
-          // Throwing would fail the whole batch; pg-boss retries this one job.
-          logger.error(
-            { err: error, userId: job.data.userId, taskId: job.data.taskId },
-            'Could not send a notification email.',
-          );
-          throw error;
-        }
-      }
-    },
-  );
-
-  /*
-   * The scheduled work. Each handler is safe to run twice and safe to run in
-   * two workers at once: alerts claim through alert_log, digests through
-   * digest_log, and both claims happen in the same transaction as the
-   * notifications they guard.
-   */
-  await boss.work(SCHEDULES.alertScan, async () => {
-    const sent = await runAlertScan();
-    if (sent.length > 0) logger.info({ sent: sent.length }, 'Alert scan finished.');
-  });
-
-  await boss.work(SCHEDULES.dailyDigest, async () => {
-    const results = await runDigest();
-    logger.info({ sent: results.filter((r) => r.sent).length }, 'Digest run finished.');
-  });
-
-  await boss.work(SCHEDULES.housekeeping, async () => {
-    await runHousekeeping();
-    await housekeeping();
-  });
-
-  await registerSchedules();
-
-  logger.info({ queue: QUEUES.notificationEmail }, 'Job worker listening.');
-}
 
 /**
  * A worker has no HTTP interface of its own, but something has to be able to ask
@@ -112,19 +40,12 @@ async function main(): Promise<void> {
   assertProductionConfig();
   logger.info('Worker started.');
   const health = startHealthEndpoint();
-  await startJobWorkers();
-  await housekeeping();
-  const timer = setInterval(() => {
-    housekeeping().catch((error: unknown) => {
-      logger.error({ err: error }, 'Housekeeping failed.');
-    });
-  }, HOUSEKEEPING_INTERVAL_MS);
+  const stopWorker = await runWorker();
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Worker shutting down.');
-    clearInterval(timer);
     health?.close();
-    await stopQueue();
+    await stopWorker();
     await closeDatabase();
     process.exit(0);
   };

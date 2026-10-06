@@ -3,7 +3,14 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
-import { allowedOrigins, env, isProduction, isTest, trustedProxyHops } from './config/env';
+import {
+  allowedOrigins,
+  env,
+  isProduction,
+  isTest,
+  runsEverything,
+  trustedProxyHops,
+} from './config/env';
 import { logger } from './lib/logger';
 import { pingDatabase } from './db/client';
 import { pingQueue } from './jobs/queue';
@@ -20,6 +27,7 @@ import { attachmentsRouter, taskAttachmentsRouter } from './modules/attachments/
 import { importRouter } from './modules/import/routes';
 import { notificationsRouter } from './modules/notifications/routes';
 import { orgRouter } from './modules/org/routes';
+import { serveWebApp } from './webApp';
 
 export function createApp(): Express {
   const app = express();
@@ -28,6 +36,9 @@ export function createApp(): Express {
   app.set('trust proxy', trustedProxyHops);
   app.disable('x-powered-by');
 
+  // One process, one origin: the web app comes from here too (RUN_MODE=all).
+  if (runsEverything && env.WEB_DIST_DIR) serveWebApp(app, env.WEB_DIST_DIR);
+
   /*
    * A real policy rather than the default.
    *
@@ -35,10 +46,7 @@ export function createApp(): Express {
    * default-src 'none' is the honest answer, with connect-src opened only for
    * the socket and the object store the web app actually talks to.
    */
-  const socketOrigins = allowedOrigins.flatMap((origin) => [
-    origin,
-    origin.replace(/^http/, 'ws'),
-  ]);
+  const socketOrigins = allowedOrigins.flatMap((origin) => [origin, origin.replace(/^http/, 'ws')]);
   const storageOrigin = env.STORAGE_DRIVER === 's3' && env.S3_ENDPOINT ? [env.S3_ENDPOINT] : [];
 
   app.use(

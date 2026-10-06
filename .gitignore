@@ -18,7 +18,15 @@ apps/web/e2e/.report/
 apps/web/e2e/.smoke-artifacts/
 apps/web/e2e/.smoke-report/
 backups/
-.env.production
+
+# Every env file holds or will hold secrets; only the two templates are tracked.
+.env*
+!.env.example
+!.env.production.example
+
+# Let's Encrypt keys and the ACME webroot, on the server.
+certs/
+certbot-www/
 
 # Ad-hoc review captures, not a repeatable artefact.
 apps/web/e2e/.shots/

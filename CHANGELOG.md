@@ -2,6 +2,90 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-render-rc1 — 2026-10-06
+
+A second way to deploy, free and with no credit card: one Render web service,
+Supabase for the database and files, Brevo's HTTP API for mail, GitHub
+Actions for backups to Backblaze B2, UptimeRobot to watch it and keep it
+awake. Step by step in `docs/deploy-render.md`. The Docker deployment is
+unchanged apart from one new required setting, `MAIL_TRANSPORT=smtp`.
+
+### Added
+
+- **`RUN_MODE=all`.** `dist/server.js` runs the HTTP server, Socket.IO and the
+  pg-boss worker in one process, and serves the built web app with an SPA
+  fallback, on one origin. The static files get the headers and caching
+  Nginx gives them in Docker; the API's `default-src 'none'` policy is kept
+  off the HTML. `dist/server.js` and `dist/worker.js` still run separately
+  for Docker (`jobs/runWorker.ts` is shared). With `JOB_QUEUE_ENABLED=false`
+  the in-process worker does not start, so it cannot take jobs meant for
+  another process.
+- **`MAIL_TRANSPORT=brevo-api`** sends through Brevo's transactional API, for
+  hosts that block SMTP. Same templates; a refusal throws, so notification
+  emails are retried by pg-boss as before.
+- **`DATABASE_MAX_CONNECTIONS`**: one budget for the app's pool and pg-boss's
+  together (3 + 2 at 5), for Supabase's Session pooler.
+- **`ARGON2_MEMORY_COST`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`**, defaulting
+  to OWASP's minimum (19 MiB, 2, 1), refused below it in production. A
+  sign-in with a hash made at other settings replaces it.
+- **`TRUST_PROXY_HOPS`**, defaulting to one in production as before.
+- `render.yaml`, `docker/render.Dockerfile` (migrations, then the server),
+  `.github/workflows/backup.yml` (nightly at 02:30 IST) and
+  `restore-drill.yml` (into a throwaway Postgres or a scratch Supabase
+  project), and `pnpm e2e:all`, the end-to-end suite against one process.
+
+### Changed
+
+- **Attachment downloads are streamed** from storage instead of read into
+  memory first.
+- Production refuses to start without `MAIL_TRANSPORT`, with the Brevo
+  transport and no key, with `STORAGE_DRIVER=s3` and no keys, or with
+  `RUN_MODE=all` and no built web app.
+- **Backups:** `PG_DUMP_SCHEMAS` limits a dump to the app's schemas (on
+  Supabase, the platform's own would not restore anywhere else); the backup
+  image takes `PG_MAJOR`. **Restores** start from emptied app schemas rather
+  than `pg_restore --clean`, which could not drop pg-boss's partitioned
+  tables, so a second drill into the same database failed; they create the
+  `citext` and `pg_trgm` extensions first; and they refuse the production
+  database by identity even when a scratch target is opted in by name.
+- Development: MinIO is gone from `docker-compose.yml` (its image no longer
+  exists); attachments are stored on disk. `.gitignore` covers every `.env*`
+  file except the two templates, and `certs/` and `certbot-www/`.
+
+### Fixed
+
+- **Scheduled queues were polled before they existed** on a fresh database,
+  logging an error per queue on the first boot. `registerSchedules` now runs
+  before the scheduled workers start.
+- **Reloading quickly could sign a person out everywhere.** A reload aborts
+  the page's refresh after the server has rotated the token, and a refresh
+  queued behind it can do the same, so the browser comes back holding a token
+  two rotations old. Reuse detection took that for theft and revoked every
+  session. A replay inside the grace window now moves that token's successor
+  pointer to the session it produced, so repeated replays of one token are
+  recognised as one browser losing responses. Presenting a *successor* still
+  moves the chain on and is still treated as theft, and the window is still
+  measured from the original rotation. Found by the `RUN_MODE=all` suite,
+  where the faster single process lets the aborted requests land.
+- **Out-of-month days on the calendar failed contrast** (2.4 to 2.7:1 in all
+  four themes): the cell was faded with `opacity-60`, which no text colour
+  inside it could survive. The fade is gone; the day number is set back from
+  ink to muted instead. Exposed by the calendar fix in `e48beb7`, which made the page
+  render for people it had been stuck loading for.
+
+### Verified
+
+Typecheck, lint, unit and integration tests, the end-to-end suite, and the
+same suite against `RUN_MODE=all`. A rehearsal of the Render deployment with
+stand-ins: the Render image at 512 MB and 0.1 CPU behind PgBouncer in session
+mode (as Supabase's pooler) on Postgres 17, an S3 server, and a Brevo stub.
+Ready in 28 seconds, idle at about 50 MB, exactly 5 database connections;
+the first admin created from outside, sign-in, an invitation and a pg-boss
+notification email through the Brevo stub, an attachment stored and
+streamed back byte for byte, a restart re-running migrations harmlessly; a
+backup with `PG_DUMP_SCHEMAS`, and restores into a fresh Postgres 17 and an
+opted-in scratch database, each twice, with the production database refused.
+
 ## v1.0.0-rc4 — 2026-10-06
 
 The runbook rewritten for Oracle Cloud Always Free (Ampere A1, arm64), and

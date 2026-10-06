@@ -14,7 +14,7 @@ Requirements: Node 22+, pnpm 10+, Docker.
 
 ```bash
 cp .env.example .env            # the defaults work for local development
-docker compose up -d postgres mailpit
+docker compose up -d            # Postgres and Mailpit
 pnpm install
 pnpm db:migrate
 pnpm db:seed
@@ -33,6 +33,10 @@ Then open **http://localhost:5174**.
 | Postgres       | localhost:**5433**                  |
 
 Postgres is on 5433 rather than 5432 so it does not clash with a local install.
+
+Attachments are stored on disk in development, in `apps/api/uploads/`
+(`STORAGE_DRIVER=local`), so no object store runs locally. Production keeps them
+in an S3-compatible bucket; see `docs/deploy.md`.
 
 ### Ports and origins
 
@@ -237,8 +241,15 @@ The median, not the mean, so one unusual task does not distort the figure.
 
 ## Production
 
-Deployment, TLS, SPF and DKIM, backups and the restore drill are in
-[docs/deploy.md](docs/deploy.md). In short:
+Two ways to run it, from the same code:
+
+- **Free, no credit card:** one Render web service with Supabase, Brevo's API,
+  Backblaze B2 and UptimeRobot, everything in one process (`RUN_MODE=all`).
+  Step by step in [docs/deploy-render.md](docs/deploy-render.md); the service is
+  defined in [render.yaml](render.yaml).
+- **Docker on a VM of your own:** nginx, the API and the worker as separate
+  containers. Deployment, TLS, SPF and DKIM, backups and the restore drill are in
+  [docs/deploy.md](docs/deploy.md). In short:
 
 ```bash
 cp .env.production.example .env.production   # then fill in real secrets

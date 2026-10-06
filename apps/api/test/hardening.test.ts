@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PASSWORD, as, seedFixture, startHarness, type Fixture, type Harness } from './harness';
+import type * as Config from '../src/config/env';
 
 /**
  * Production hardening: the things that are invisible when they work and
@@ -30,7 +31,9 @@ describe('the rate limiter behind a proxy', () => {
    * and one person getting their password wrong five times locks out everyone.
    */
   /** A bare app, so the probe route is not behind the real app's 404 handler. */
-  async function probe(trustProxy: number | false): Promise<(forwardedFor: string) => Promise<string>> {
+  async function probe(
+    trustProxy: number | false,
+  ): Promise<(forwardedFor: string) => Promise<string>> {
     const express = (await import('express')).default;
     const { clientKey } = await import('../src/middleware/rateLimit');
 
@@ -172,6 +175,9 @@ describe('the production configuration guard', () => {
     JOB_QUEUE_ENABLED: 'true',
     AUTH_RATE_LIMIT_PER_MINUTE: '5',
     STORAGE_DRIVER: 's3',
+    S3_ACCESS_KEY_ID: 'access-key',
+    S3_SECRET_ACCESS_KEY: 'secret-key',
+    MAIL_TRANSPORT: 'smtp',
   };
 
   it('accepts a properly configured production environment', async () => {
@@ -208,6 +214,85 @@ describe('the production configuration guard', () => {
   it('refuses uploads on a container disk', async () => {
     const errors = await errorsFor({ ...baseline, STORAGE_DRIVER: 'local' });
     expect(errors.join(' ')).toContain('STORAGE_DRIVER');
+  });
+
+  it('refuses an object store with no keys', async () => {
+    const { S3_SECRET_ACCESS_KEY: _omit, ...rest } = baseline;
+    const errors = await errorsFor({ ...rest, S3_SECRET_ACCESS_KEY: '' });
+    expect(errors.join(' ')).toContain('S3_SECRET_ACCESS_KEY');
+  });
+
+  it('refuses to guess how mail leaves', async () => {
+    const { MAIL_TRANSPORT: _omit, ...rest } = baseline;
+    expect((await errorsFor(rest)).join(' ')).toContain('MAIL_TRANSPORT must be set');
+  });
+
+  it('refuses the Brevo transport without its key, and accepts it with one', async () => {
+    const missing = await errorsFor({ ...baseline, MAIL_TRANSPORT: 'brevo-api' });
+    expect(missing.join(' ')).toContain('BREVO_API_KEY');
+
+    expect(
+      await errorsFor({ ...baseline, MAIL_TRANSPORT: 'brevo-api', BREVO_API_KEY: 'xkeysib-1' }),
+    ).toEqual([]);
+  });
+
+  it('refuses RUN_MODE=all without a built web app to serve', async () => {
+    const errors = await errorsFor({ ...baseline, RUN_MODE: 'all', WEB_DIST_DIR: '/nowhere' });
+    expect(errors.join(' ')).toContain('WEB_DIST_DIR');
+  });
+
+  it('accepts RUN_MODE=all pointed at a built web app', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'tm-dist-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html>');
+
+    expect(await errorsFor({ ...baseline, RUN_MODE: 'all', WEB_DIST_DIR: dir })).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses a password hash cost below the OWASP minimum', async () => {
+    expect((await errorsFor({ ...baseline, ARGON2_MEMORY_COST: '8192' })).join(' ')).toContain(
+      'ARGON2_MEMORY_COST',
+    );
+    expect((await errorsFor({ ...baseline, ARGON2_TIME_COST: '1' })).join(' ')).toContain(
+      'ARGON2_TIME_COST',
+    );
+  });
+});
+
+describe('deployment shape', () => {
+  async function freshEnv(overrides: Record<string, string>) {
+    const before = { ...process.env };
+    Object.assign(process.env, overrides);
+    const module = await import('../src/config/env?shape=' + Math.random().toString(36).slice(2));
+    process.env = before;
+    return module as typeof Config;
+  }
+
+  it('lets TRUST_PROXY_HOPS override the one-proxy production default', async () => {
+    const production = {
+      NODE_ENV: 'production',
+      JWT_ACCESS_SECRET: 'a-real-secret-of-more-than-32-bytes-length',
+      WEB_ORIGIN: 'https://tasks.example.com',
+    };
+    expect((await freshEnv(production)).trustedProxyHops).toBe(1);
+    expect((await freshEnv({ ...production, TRUST_PROXY_HOPS: '2' })).trustedProxyHops).toBe(2);
+    expect((await freshEnv({ ...production, TRUST_PROXY_HOPS: '0' })).trustedProxyHops).toBe(false);
+  });
+
+  it('splits the connection budget so pg-boss and the app together stay inside it', async () => {
+    const { poolSizes } = await freshEnv({});
+    // Render on Supabase's session pooler: five in all.
+    expect(poolSizes(5)).toEqual({ app: 3, queue: 2 });
+    // The Docker deployment's long-standing 20 + 4.
+    expect(poolSizes(24)).toEqual({ app: 20, queue: 4 });
+    for (const total of [4, 5, 8, 12, 24, 50]) {
+      const { app, queue } = poolSizes(total);
+      expect(app + queue).toBe(total);
+      expect(app).toBeGreaterThanOrEqual(2);
+    }
   });
 });
 

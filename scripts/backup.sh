@@ -31,9 +31,20 @@ TARGET="$BACKUP_DIR/taskmanager-$STAMP.dump"
 
 echo "Backing up to $TARGET"
 
+# Only these schemas, when set. On Supabase the database also holds Supabase's
+# own (auth, storage, realtime, ...), which belong to roles and extensions
+# that exist nowhere else, so a whole-database dump would not restore into a
+# plain Postgres. The app's data is in public, pgboss and drizzle.
+SCHEMA_ARGS=""
+for schema in $(printf '%s' "${PG_DUMP_SCHEMAS:-}" | tr ',' ' '); do
+  SCHEMA_ARGS="$SCHEMA_ARGS --schema=$schema"
+done
+
 # Custom format: compressed, and restorable table by table if it ever matters.
+# SCHEMA_ARGS is a list of flags, split on purpose.
+# shellcheck disable=SC2086
 pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-privileges \
-  --file="$TARGET.partial"
+  $SCHEMA_ARGS --file="$TARGET.partial"
 
 # Only named once complete, so a half-written file is never mistaken for a backup.
 mv "$TARGET.partial" "$TARGET"

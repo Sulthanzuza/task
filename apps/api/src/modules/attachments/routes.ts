@@ -1,3 +1,4 @@
+import { pipeline } from 'node:stream/promises';
 import { Router } from 'express';
 import multer from 'multer';
 import { and, desc, eq } from 'drizzle-orm';
@@ -193,7 +194,7 @@ attachmentsRouter.get(
     if (!task) throw new NotFoundError('That task');
     authorize(actor, 'task.view', await toResource(db, task));
 
-    const body = await getStorage().get(row.storageKey);
+    const body = await getStorage().stream(row.storageKey);
 
     res.setHeader('Content-Type', row.mimeType);
     // Always a download. An uploaded SVG or HTML fragment must never be
@@ -204,7 +205,10 @@ attachmentsRouter.get(
     );
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Length', String(row.sizeBytes));
-    res.send(body);
+    // pipeline destroys both ends on failure: a broken storage read ends the
+    // response instead of leaving the download hanging, and a client that
+    // goes away stops the read from storage.
+    await pipeline(body, res);
   }),
 );
 

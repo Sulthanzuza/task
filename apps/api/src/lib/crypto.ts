@@ -1,12 +1,17 @@
 import argon2 from 'argon2';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { env } from '../config/env';
 
-/** argon2id with sensible memory cost; the library defaults are too low. */
+/**
+ * argon2id, at the cost set in ARGON2_* (OWASP's minimum by default: 19 MiB,
+ * two passes, one lane). Memory is the cost that matters on a 512 MB host:
+ * each sign-in holds this much for as long as the hash takes.
+ */
 const ARGON_OPTIONS = {
   type: argon2.argon2id,
-  memoryCost: 19 * 1024,
-  timeCost: 2,
-  parallelism: 1,
+  memoryCost: env.ARGON2_MEMORY_COST,
+  timeCost: env.ARGON2_TIME_COST,
+  parallelism: env.ARGON2_PARALLELISM,
 } as const;
 
 export async function hashPassword(password: string): Promise<string> {
@@ -17,6 +22,21 @@ export async function hashPassword(password: string): Promise<string> {
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {
   try {
     return await argon2.verify(hash, password);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a stored hash was made with different parameters from today's.
+ *
+ * A hash carries its own parameters, so changing ARGON2_* never breaks a
+ * sign-in; this is how the old hash is replaced, at the one moment the plain
+ * password is in hand.
+ */
+export function passwordNeedsRehash(hash: string): boolean {
+  try {
+    return argon2.needsRehash(hash, ARGON_OPTIONS);
   } catch {
     return false;
   }

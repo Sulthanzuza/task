@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `master`, tagged **v1.0.0-rc4**.
+Last updated: 2026-10-06. Branch `master` (renamed to `main` when first pushed; see `docs/deploy-render.md`), tagged **v1.0.0-render-rc1**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -13,7 +13,7 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | # | Prompt | State | Where |
 |---|--------|-------|-------|
 | 1 | CLAUDE.md | Done — project rules, 15 of them; rule 15 defines DONE as API + UI + test | `CLAUDE.md` |
-| 2 | Scaffold the monorepo | Done — pnpm workspaces (`apps/api`, `apps/web`, `packages/shared`), Docker Compose (Postgres 5433, Mailpit 1025/8025, MinIO 9000/9001), ESLint, Prettier, CI | `pnpm-workspace.yaml`, `docker-compose.yml`, `.github/` |
+| 2 | Scaffold the monorepo | Done — pnpm workspaces (`apps/api`, `apps/web`, `packages/shared`), Docker Compose (Postgres 5433, Mailpit 1025/8025; MinIO until rc5), ESLint, Prettier, CI | `pnpm-workspace.yaml`, `docker-compose.yml`, `.github/` |
 | 3 | Database schema, migrations, seed | Done — Drizzle schema split by domain, generated migrations, idempotent seed of 7 users / 2 teams / 3 projects / 20 tasks | `apps/api/src/db/` |
 | 4 | Authentication | Done — login, refresh with rotation and reuse detection, logout, set/reset password, rate limits, cross-tab refresh via `navigator.locks` | `apps/api/src/modules/auth/`, `apps/web/src/lib/api.ts` |
 | 5 | Permissions, teams, projects | Done — one `authorize(actor, action, resource)` matrix; teams and members; projects with immutable keys and archive; labels | `apps/api/src/modules/permissions/authorize.ts`, `modules/teams/`, `modules/projects/` |
@@ -51,7 +51,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `c84f2fc` | First-deploy runbook fixes, v1.0.0-rc2 |
 | `543670c` | rc3: the placeholder-certificate bug, and runbook corrections |
 | `e48beb7` | Calendar takes today from `/org/calendar` (it hung for members and the admin); dashboard team picker for the admin; the More menu was clipped by the scrolling nav; Team page shows load errors |
-| _this one_ | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
+| `4d8e19c` | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
+| _this one_ | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
 
 ### The design system, applied (three design prompts)
 
@@ -289,6 +290,15 @@ These are decided, not oversights. Do not "fix" them without asking.
 
 None of these is blocking. Each is a real gap, checked against the code today.
 
+- **The Render deployment has not met the real services yet.** It was rehearsed end to end
+  with stand-ins: the Render image capped at 512 MB and 0.1 CPU, PgBouncer in session mode
+  for Supabase's pooler, an S3 server for Supabase Storage and B2, and a stub for Brevo's
+  API. Not exercised: Supabase's TLS on the pooler, Supabase Storage's S3 quirks, Brevo's
+  real API, and the two GitHub workflows on GitHub itself (the repository is not pushed).
+- **Database TLS is encrypted but not verified** on the Render deployment
+  (`uselibpqcompat=true&sslmode=require`). Verifying needs Supabase's CA certificate shipped
+  with the image.
+
 - **Calendar bars.** `CalendarPage` groups tasks by `dueDate` only, so a task with a
   start date and a due date shows as a single dot on the last day instead of a bar
   across the range.
@@ -309,10 +319,6 @@ None of these is blocking. Each is a real gap, checked against the code today.
   time and said nothing new, so it was removed. What belongs there is how full each
   person's week is, and that needs the capacity-aware workload service.
 
-- **Dev Compose still lists MinIO.** `docker-compose.yml` has a `minio/minio` service,
-  and that image no longer exists on Docker Hub, so `docker compose up -d` fails on a
-  machine that has not already cached it. Dev uses `STORAGE_DRIVER=local`, so the
-  service can simply be removed; production no longer uses it (rc4).
 - **The dashboard team picker has no test.** Added with `e48beb7`; by rule 15 that
   makes it PARTIAL until a web test covers choosing a team.
 - **The Oracle runbook has not been run on a real A1 instance yet.** The images are
@@ -324,11 +330,12 @@ error, and `buildDigest` no longer throws for them.
 
 ## Running it
 
-Docker Desktop must be running first — the dev database, Mailpit and MinIO all live in
-Compose, and Testcontainers needs the daemon for the integration tests.
+Docker Desktop must be running first — the dev database and Mailpit live in Compose,
+and Testcontainers needs the daemon for the integration tests. Attachments are stored
+on local disk in development (`apps/api/uploads/`), so there is no object store.
 
 ```sh
-docker compose up -d          # Postgres 5433, Mailpit 1025 + UI 8025, MinIO 9000/9001
+docker compose up -d          # Postgres 5433, Mailpit 1025 + UI 8025
 pnpm install
 pnpm db:migrate               # after pulling new migrations
 pnpm db:seed                  # 7 users, password Password123!
@@ -359,14 +366,15 @@ is dropped and rebuilt every run.
 Other commands: `pnpm build`, `pnpm smoke` (against a deployed site, with a dedicated
 smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset`.
 
-## Test counts as of 2026-09-30
+## Test counts as of 2026-10-06
 
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
-| `apps/api` integration | 20 | 379 |
-| `apps/web` end-to-end | 13 | 58 |
+| `apps/api` integration | 22 | 404 |
+| `apps/web` end-to-end (`pnpm e2e`) | 13 | 58 |
+| `apps/web` end-to-end, one process (`pnpm e2e:all`, `RUN_MODE=all`) | 13 | 58 |
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.

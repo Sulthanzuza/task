@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
 /**
@@ -8,8 +9,14 @@ import { fileURLToPath, URL } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
-export const E2E_API_PORT = Number(process.env.E2E_API_PORT ?? 4100);
+/**
+ * RUN_MODE=all: one process serves the app, the API and the jobs on one port,
+ * as on Render. Set by all.config.ts before this module is loaded.
+ */
+const ALL_IN_ONE = process.env.E2E_RUN_MODE === 'all';
+
 export const E2E_WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5199);
+export const E2E_API_PORT = ALL_IN_ONE ? E2E_WEB_PORT : Number(process.env.E2E_API_PORT ?? 4100);
 export const E2E_WORKER_PORT = Number(process.env.E2E_WORKER_PORT ?? 4101);
 export const E2E_BASE_URL = 'http://localhost:' + E2E_WEB_PORT;
 export const E2E_API_URL = 'http://localhost:' + E2E_API_PORT;
@@ -148,50 +155,82 @@ export function createConfig(shots: boolean) {
       },
     ],
 
-    webServer: [
-      {
-        // The database is built here, not in globalSetup: Playwright starts the
-        // webServer processes first, so the API needs its database already present.
-        command: 'pnpm --filter @tm/api db:prepare-e2e && pnpm --filter @tm/api dev',
-        cwd: repoRoot,
-        url: E2E_API_URL + '/api/v1/health',
-        reuseExistingServer: false,
-        timeout: 120_000,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...apiEnv, E2E_DEMO: shots ? '1' : '' },
-      },
-      {
-        // The worker is what actually sends email; the API only enqueues.
-        command: 'pnpm --filter @tm/api dev:worker',
-        cwd: repoRoot,
-        // Its own health endpoint: waiting on the API's would let Playwright think
-        // the worker had started when only the API was up.
-        url: 'http://localhost:' + E2E_WORKER_PORT + '/health',
-        reuseExistingServer: false,
-        timeout: 120_000,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...apiEnv, E2E_DEMO: '', WORKER_HEALTH_PORT: String(E2E_WORKER_PORT) },
-      },
-      {
-        // Build and serve, rather than run the dev server: the suite tests the real
-        // bundle, and no file watcher runs to fall over mid-run on Windows.
-        command: 'pnpm --filter @tm/web build && pnpm --filter @tm/web preview',
-        cwd: repoRoot,
-        url: E2E_BASE_URL,
-        reuseExistingServer: false,
-        timeout: 180_000,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: {
-          ...process.env,
-          WEB_PORT: String(E2E_WEB_PORT),
-          API_URL: E2E_API_URL,
-        },
-      },
-    ],
+    webServer: ALL_IN_ONE
+      ? allInOneServer()
+      : [
+          {
+            // The database is built here, not in globalSetup: Playwright starts the
+            // webServer processes first, so the API needs its database already present.
+            command: 'pnpm --filter @tm/api db:prepare-e2e && pnpm --filter @tm/api dev',
+            cwd: repoRoot,
+            url: E2E_API_URL + '/api/v1/health',
+            reuseExistingServer: false,
+            timeout: 120_000,
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { ...apiEnv, E2E_DEMO: shots ? '1' : '' },
+          },
+          {
+            // The worker is what actually sends email; the API only enqueues.
+            command: 'pnpm --filter @tm/api dev:worker',
+            cwd: repoRoot,
+            // Its own health endpoint: waiting on the API's would let Playwright think
+            // the worker had started when only the API was up.
+            url: 'http://localhost:' + E2E_WORKER_PORT + '/health',
+            reuseExistingServer: false,
+            timeout: 120_000,
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { ...apiEnv, E2E_DEMO: '', WORKER_HEALTH_PORT: String(E2E_WORKER_PORT) },
+          },
+          {
+            // Build and serve, rather than run the dev server: the suite tests the real
+            // bundle, and no file watcher runs to fall over mid-run on Windows.
+            command: 'pnpm --filter @tm/web build && pnpm --filter @tm/web preview',
+            cwd: repoRoot,
+            url: E2E_BASE_URL,
+            reuseExistingServer: false,
+            timeout: 180_000,
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: {
+              ...process.env,
+              WEB_PORT: String(E2E_WEB_PORT),
+              API_URL: E2E_API_URL,
+            },
+          },
+        ],
   });
+}
+
+/**
+ * The whole product as one process, built the way docker/render.Dockerfile
+ * builds it: the web bundle, the API bundle, then dist/server.js with
+ * RUN_MODE=all serving both and running the job worker. No Vite preview and
+ * no separate worker, so the suite proves the single-process deployment
+ * rather than the three-process one.
+ */
+function allInOneServer() {
+  return [
+    {
+      command:
+        'pnpm --filter @tm/web build && pnpm --filter @tm/api build && ' +
+        'pnpm --filter @tm/api db:prepare-e2e && node apps/api/dist/server.js',
+      cwd: repoRoot,
+      url: E2E_BASE_URL + '/api/v1/ready',
+      reuseExistingServer: false,
+      timeout: 240_000,
+      stdout: 'pipe' as const,
+      stderr: 'pipe' as const,
+      env: {
+        ...apiEnv,
+        E2E_DEMO: '',
+        RUN_MODE: 'all',
+        WEB_DIST_DIR: join(repoRoot, 'apps', 'web', 'dist'),
+        PORT: String(E2E_WEB_PORT),
+      },
+    },
+  ];
 }
 
 export default createConfig(false);

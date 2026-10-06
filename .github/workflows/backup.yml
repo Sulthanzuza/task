@@ -1,0 +1,71 @@
+name: Backup
+
+# Nightly backup of the Render deployment: the Supabase database and the
+# Supabase Storage bucket, copied to Backblaze B2, kept for fourteen days.
+#
+# It runs here rather than on Render because the free web service has no
+# cron and no disk, and a backup taken by the thing it protects is not much
+# of a backup anyway. The scripts are the same ones the Docker deployment
+# runs (scripts/backup.sh), in the same image, built for Postgres 17.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   DATABASE_URL            Supabase Session pooler connection string
+#   S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
+#                           Supabase Storage, as on Render
+#   BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_BUCKET,
+#   BACKUP_S3_ACCESS_KEY, BACKUP_S3_SECRET_KEY
+#                           the Backblaze B2 bucket and its one-bucket key
+
+on:
+  schedule:
+    # 02:30 in India is 21:00 UTC the evening before. GitHub may start a
+    # scheduled run some minutes late at busy times.
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+# Never two at once: a manual run during the nightly one would race it.
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the backup image (pg_dump 17, rclone)
+        run: docker build -f docker/backup.Dockerfile --build-arg PG_MAJOR=17 -t backup .
+
+      - name: Dump the database, copy the files, prune old dumps
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+          BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+          BACKUP_RETENTION_DAYS: '14'
+          # The app's schemas only; Supabase's own would not restore elsewhere.
+          PG_DUMP_SCHEMAS: public,pgboss,drizzle
+        # -e NAME with no value passes the variable through from this step's
+        # environment, so no secret appears on a command line or in the log.
+        run: |
+          mkdir -p "$RUNNER_TEMP/backups"
+          docker run --rm \
+            -e DATABASE_URL -e PG_DUMP_SCHEMAS -e BACKUP_RETENTION_DAYS \
+            -e S3_ENDPOINT -e S3_REGION -e S3_BUCKET -e S3_ACCESS_KEY_ID -e S3_SECRET_ACCESS_KEY \
+            -e BACKUP_S3_ENDPOINT -e BACKUP_S3_REGION -e BACKUP_S3_BUCKET \
+            -e BACKUP_S3_ACCESS_KEY -e BACKUP_S3_SECRET_KEY \
+            -v "$PWD/scripts:/scripts:ro" \
+            -v "$RUNNER_TEMP/backups:/backups" \
+            --entrypoint sh backup /scripts/backup.sh

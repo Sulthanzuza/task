@@ -24,6 +24,7 @@
     "db:reset": "pnpm --filter @tm/api db:reset",
     "prepare": "husky || true",
     "e2e": "pnpm --filter @tm/web e2e",
+    "e2e:all": "pnpm --filter @tm/web e2e:all",
     "shots": "pnpm --filter @tm/web shots",
     "e2e:ui": "pnpm --filter @tm/web e2e:ui",
     "admin:create-user": "pnpm --filter @tm/api admin:create-user",

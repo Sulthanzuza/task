@@ -392,6 +392,26 @@ describe('concurrent refresh across tabs', () => {
     await refreshWith(recovered).expect(200);
   });
 
+  it('survives the same token replayed again and again inside the window', async () => {
+    /*
+     * What a reload does to a page mid-refresh: the request reaches the server
+     * and rotates the token, but the response, and its cookie, never arrive.
+     * A second refresh queued behind it does the same. After the reload the
+     * browser still holds the original. Three presentations of one token, all
+     * moments apart, are one browser losing responses, not two holders.
+     */
+    const cookie = await loginAndGetCookie();
+
+    await refreshWith(cookie).expect(200);
+    await refreshWith(cookie).expect(200);
+    const third = await refreshWith(cookie).expect(200);
+    const fourth = await refreshWith(cookie).expect(200);
+
+    // Whichever cookie was handed back last is live.
+    await refreshWith(refreshCookie(fourth)).expect(200);
+    expect(third.body.accessToken).toBeTruthy();
+  });
+
   it('revokes everything when the token is replayed after the grace window', async () => {
     const cookie = await loginAndGetCookie();
     const rotated = await refreshWith(cookie).expect(200);
@@ -433,5 +453,73 @@ describe('concurrent refresh across tabs', () => {
 
   it('still refuses a token that never existed', async () => {
     await refreshWith('tm_refresh=' + 'z'.repeat(60)).expect(401);
+  });
+});
+
+describe('password hash upgrades', () => {
+  async function storedHash(email: string): Promise<string> {
+    const { db } = await import('../src/db/client');
+    const { users } = await import('../src/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db
+      .select({ hash: users.passwordHash })
+      .from(users)
+      .where(eq(users.email, email));
+    return row?.hash ?? '';
+  }
+
+  it('signs in with an older, cheaper hash and replaces it with the current cost', async () => {
+    const argon2 = (await import('argon2')).default;
+    const { db } = await import('../src/db/client');
+    const { users } = await import('../src/db/schema');
+    const { eq } = await import('drizzle-orm');
+
+    // As it would have been stored under different ARGON2_* settings.
+    const old = await argon2.hash(PASSWORD, {
+      type: argon2.argon2id,
+      memoryCost: 8192,
+      timeCost: 1,
+      parallelism: 1,
+    });
+    await db.update(users).set({ passwordHash: old }).where(eq(users.email, 'rahul@test.local'));
+
+    await request(harness.app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'rahul@test.local', password: PASSWORD })
+      .expect(200);
+
+    const upgraded = await storedHash('rahul@test.local');
+    expect(upgraded, 'the old hash must be replaced').not.toBe(old);
+    // The parameters are encoded in the hash; their order varies by version.
+    const params = /^\$argon2id\$v=19\$([^$]+)\$/.exec(upgraded)?.[1]?.split(',').sort();
+    expect(params).toEqual(['m=19456', 'p=1', 't=2']);
+
+    // And the replacement is a hash of the same password.
+    await request(harness.app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'rahul@test.local', password: PASSWORD })
+      .expect(200);
+  });
+
+  it('leaves a hash made at the current cost alone', async () => {
+    const before = await storedHash('arun@test.local');
+
+    await request(harness.app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'arun@test.local', password: PASSWORD })
+      .expect(200);
+
+    expect(await storedHash('arun@test.local')).toBe(before);
+  });
+
+  it('does not touch the hash on a wrong password', async () => {
+    const before = await storedHash('arun@test.local');
+
+    await request(harness.app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'arun@test.local', password: 'Not-the-password-1' })
+      .expect(401);
+
+    expect(await storedHash('arun@test.local')).toBe(before);
   });
 });

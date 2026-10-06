@@ -4,7 +4,13 @@ import { db, withTransaction } from '../../db/client';
 import { passwordResetTokens, sessions, teamMembers, teams, users } from '../../db/schema';
 import { env } from '../../config/env';
 import { UnauthenticatedError, ValidationError } from '../../lib/errors';
-import { generateToken, hashPassword, hashToken, verifyPasswordConstantTime } from '../../lib/crypto';
+import {
+  generateToken,
+  hashPassword,
+  hashToken,
+  passwordNeedsRehash,
+  verifyPasswordConstantTime,
+} from '../../lib/crypto';
 import { signAccessToken } from '../../lib/jwt';
 import { logger } from '../../lib/logger';
 import { disconnectUser } from '../../realtime/gateway';
@@ -15,16 +21,15 @@ export interface SessionContext {
 }
 
 /** Teams the user belongs to, and the subset they lead. */
-async function loadTeamMembership(userId: string): Promise<{ teamIds: string[]; ledTeamIds: string[] }> {
+async function loadTeamMembership(
+  userId: string,
+): Promise<{ teamIds: string[]; ledTeamIds: string[] }> {
   const memberRows = await db
     .select({ teamId: teamMembers.teamId })
     .from(teamMembers)
     .where(eq(teamMembers.userId, userId));
 
-  const ledRows = await db
-    .select({ teamId: teams.id })
-    .from(teams)
-    .where(eq(teams.leadId, userId));
+  const ledRows = await db.select({ teamId: teams.id }).from(teams).where(eq(teams.leadId, userId));
 
   const ledTeamIds = ledRows.map((r) => r.teamId);
   // Leading a team implies belonging to it, even without a membership row.
@@ -99,7 +104,17 @@ export async function login(
     throw new UnauthenticatedError('That email and password do not match.');
   }
 
-  await db.update(users).set({ lastLoginAt: now }).where(eq(users.id, row.id));
+  // The password is known to be right, so this is the moment to bring an old
+  // hash up to the current cost.
+  const rehashed =
+    row.passwordHash && passwordNeedsRehash(row.passwordHash)
+      ? { passwordHash: await hashPassword(password) }
+      : {};
+
+  await db
+    .update(users)
+    .set({ lastLoginAt: now, ...rehashed })
+    .where(eq(users.id, row.id));
 
   const { refreshToken } = await issueSession(row.id, context, now);
   return { response: await buildLoginResponse(row.id), refreshToken };
@@ -116,6 +131,13 @@ async function rotateSession(
   userId: string,
   context: SessionContext,
   now: Date,
+  /**
+   * Set when this rotation is on behalf of an older token replayed inside the
+   * grace window. That token's successor pointer moves to the new session, so
+   * a third or fourth replay of it, as a page aborted by a reload produces,
+   * still finds a live successor instead of looking like theft.
+   */
+  replayedSessionId?: string,
 ): Promise<string | null> {
   return withTransaction(async (tx) => {
     // Lock the row first: two requests arriving together must not both rotate it,
@@ -150,6 +172,17 @@ async function rotateSession(
       .update(sessions)
       .set({ revokedAt: now, replacedBySessionId: successor.id })
       .where(eq(sessions.id, sessionId));
+
+    // Only the pointer moves. revokedAt stays as it was, so the grace window
+    // is still measured from the replayed token's own rotation and repeated
+    // replays cannot stretch it. A successor that is *presented* still moves
+    // the chain on without this, which is the theft signal.
+    if (replayedSessionId) {
+      await tx
+        .update(sessions)
+        .set({ replacedBySessionId: successor.id })
+        .where(eq(sessions.id, replayedSessionId));
+    }
 
     return refreshToken;
   });
@@ -239,7 +272,13 @@ export async function refresh(
        * share a cookie jar, setting the newest value here is what makes the
        * situation self-correcting.
        */
-      const rotatedToken = await rotateSession(successorId, session.userId, context, now);
+      const rotatedToken = await rotateSession(
+        successorId,
+        session.userId,
+        context,
+        now,
+        session.id,
+      );
       if (rotatedToken) {
         return { response: await buildLoginResponse(session.userId), refreshToken: rotatedToken };
       }
@@ -274,7 +313,9 @@ export async function logout(presentedToken: string | undefined, now = new Date(
   const revoked = await db
     .update(sessions)
     .set({ revokedAt: now })
-    .where(and(eq(sessions.refreshTokenHash, hashToken(presentedToken)), isNull(sessions.revokedAt)))
+    .where(
+      and(eq(sessions.refreshTokenHash, hashToken(presentedToken)), isNull(sessions.revokedAt)),
+    )
     .returning({ userId: sessions.userId });
 
   const userId = revoked[0]?.userId;
@@ -383,7 +424,9 @@ export async function changePassword(
 }
 
 /** Housekeeping for the worker: drop sessions and reset tokens that no longer matter. */
-export async function purgeExpired(now = new Date()): Promise<{ sessions: number; resets: number }> {
+export async function purgeExpired(
+  now = new Date(),
+): Promise<{ sessions: number; resets: number }> {
   const removedSessions = await db
     .delete(sessions)
     .where(lt(sessions.expiresAt, now))

@@ -1,0 +1,95 @@
+name: Restore drill
+
+# Restores the newest off-site dump (or a named one) from Backblaze B2 and
+# proves it: users and tasks come back, or the run fails.
+#
+#   target: local     into a throwaway Postgres 17 inside this run. Needs only
+#                     the B2 secrets. The quarterly drill.
+#   target: scratch   into a second, empty Supabase project, through its
+#                     Session pooler (secret SCRATCH_DATABASE_URL). Proves the
+#                     dump restores onto Supabase itself. Refused if that URL
+#                     is the production database.
+#
+# Never into production: restore.sh refuses the production database by
+# identity, whatever the target is called.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Where to restore
+        type: choice
+        options: [local, scratch]
+        default: local
+      dump:
+        description: Dump file name, or "latest"
+        type: string
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: drill
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U drill" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+
+    env:
+      BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+      BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+      BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+      BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+      RESTORE_FORBIDDEN_URL: ${{ secrets.DATABASE_URL }}
+      DUMP: ${{ inputs.dump == 'latest' && 'remote' || format('remote:{0}', inputs.dump) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the backup image (psql and pg_restore 17, rclone)
+        run: docker build -f docker/backup.Dockerfile --build-arg PG_MAJOR=17 -t backup .
+
+      - name: Restore into a throwaway Postgres
+        if: inputs.target == 'local'
+        env:
+          TARGET_URL: postgres://drill:drill@localhost:5432/taskmanager_restore
+        run: |
+          docker run --rm --network host --entrypoint psql backup \
+            postgres://drill:drill@localhost:5432/postgres -qc 'CREATE DATABASE taskmanager_restore'
+          docker run --rm --network host \
+            -e BACKUP_S3_ENDPOINT -e BACKUP_S3_REGION -e BACKUP_S3_BUCKET \
+            -e BACKUP_S3_ACCESS_KEY -e BACKUP_S3_SECRET_KEY -e RESTORE_FORBIDDEN_URL \
+            -v "$PWD/scripts:/scripts:ro" \
+            --entrypoint sh backup /scripts/restore.sh "$DUMP" "$TARGET_URL"
+
+      - name: Restore into the scratch Supabase project
+        if: inputs.target == 'scratch'
+        env:
+          SCRATCH_DATABASE_URL: ${{ secrets.SCRATCH_DATABASE_URL }}
+        run: |
+          if [ -z "$SCRATCH_DATABASE_URL" ]; then
+            echo "Set the SCRATCH_DATABASE_URL secret to a second Supabase project's Session pooler URL." >&2
+            exit 1
+          fi
+          if [ -z "$RESTORE_FORBIDDEN_URL" ]; then
+            echo "Set the DATABASE_URL secret too, so the drill can refuse to restore into it." >&2
+            exit 1
+          fi
+          docker run --rm \
+            -e BACKUP_S3_ENDPOINT -e BACKUP_S3_REGION -e BACKUP_S3_BUCKET \
+            -e BACKUP_S3_ACCESS_KEY -e BACKUP_S3_SECRET_KEY -e RESTORE_FORBIDDEN_URL \
+            -e RESTORE_ALLOW_DATABASE=postgres -e SCRATCH_DATABASE_URL \
+            -v "$PWD/scripts:/scripts:ro" \
+            --entrypoint sh backup -c '/scripts/restore.sh "$0" "$SCRATCH_DATABASE_URL"' "$DUMP"

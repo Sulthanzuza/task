@@ -3,6 +3,10 @@
 Written for whoever runs this on a server, including the version of you that
 has forgotten how it works.
 
+> This is the **Docker deployment** on a VM of your own. For the free,
+> no-credit-card deployment on Render and Supabase, see
+> [`deploy-render.md`](deploy-render.md).
+
 The target is **Oracle Cloud Always Free**: one Ampere A1 VM (arm64, Ubuntu
 24.04, 2 OCPU / 6 GB) in Mumbai or Hyderabad, which is enough for a team of
 eight to thirty. Around it:
@@ -354,6 +358,7 @@ Every value the API will not start without, and how to make it:
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` | OCI Object Storage: see **Oracle Cloud: the server**, step 5 | — |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | the Customer Secret Key of `taskmanager-storage` | — |
 | `STORAGE_DRIVER` | `s3` | `local` is refused: it keeps uploads on one container's disk |
+| `MAIL_TRANSPORT` | `smtp` | unset is refused in production |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | `smtp-relay.brevo.com`, `587`, `false` (STARTTLS) | — |
 | `SMTP_USER` / `SMTP_PASS` | Brevo's SMTP login and an SMTP key: see **Email: Brevo** | — |
 | `MAIL_FROM` | `Task Manager <no-reply@example.com>`, at the domain authenticated in Brevo | — |

@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { env } from '../config/env';
 import { logger } from './logger';
@@ -21,6 +23,11 @@ export interface StoredObject {
 export interface StorageAdapter {
   put(buffer: Buffer, options: { contentType: string; fileName: string }): Promise<StoredObject>;
   get(key: string): Promise<Buffer>;
+  /**
+   * The bytes as a stream, for downloads. A 25 MB file read into memory per
+   * request is a real share of a 512 MB host; streamed, it never is.
+   */
+  stream(key: string): Promise<Readable>;
   remove(key: string): Promise<void>;
 }
 
@@ -64,6 +71,10 @@ class LocalDiskAdapter implements StorageAdapter {
 
   async get(key: string) {
     return readFile(this.pathFor(key));
+  }
+
+  async stream(key: string) {
+    return createReadStream(this.pathFor(key));
   }
 
   async remove(key: string) {
@@ -121,14 +132,20 @@ class S3Adapter implements StorageAdapter {
   async get(key: string) {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3');
     const client = await this.getClient();
-    const response = await client.send(
-      new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }),
-    );
+    const response = await client.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
     const chunks: Buffer[] = [];
     for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
+  }
+
+  async stream(key: string) {
+    const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const client = await this.getClient();
+    const response = await client.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    // In Node the SDK hands back an http response, which is already a Readable.
+    return response.Body as Readable;
   }
 
   async remove(key: string) {

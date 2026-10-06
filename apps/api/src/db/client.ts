@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
-import { env, isTest } from '../config/env';
+import { env, poolSizes } from '../config/env';
 import * as schema from './schema';
 
 /**
@@ -14,7 +14,8 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number.parseInt(value,
 
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
-  max: isTest ? 5 : 20,
+  // Our share of DATABASE_MAX_CONNECTIONS; pg-boss holds the rest.
+  max: poolSizes().app,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
 });

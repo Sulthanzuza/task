@@ -243,7 +243,8 @@ export function CalendarPage() {
                 onClick={() => setPicked(date)}
                 className={cn(
                   'min-h-24 border-r border-b border-border-subtle p-1.5 text-left last:border-r-0',
-                  outside && 'opacity-60',
+                  // No opacity: it fades the text inside below contrast. The
+                  // muted day number is what sets a neighbouring month back.
                   view === 'week' && 'min-h-64',
                   // Below 640 a cell is barely wider than a thumb.
                   'max-sm:min-h-14',
@@ -268,10 +269,14 @@ export function CalendarPage() {
                   <span
                     className={cn(
                       'inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs tabular-nums',
+                      // Days from the neighbouring months are set back by one
+                      // step, ink to muted, not to faint: faint is decoration
+                      // and fails contrast on a number someone has to read.
                       isToday
                         ? 'accent-gradient font-semibold text-[var(--color-accent-ink)]'
-                        : 'text-ink-muted',
-                      outside && 'text-ink-faint',
+                        : outside
+                          ? 'text-ink-muted'
+                          : 'text-ink',
                     )}
                   >
                     {Number(date.slice(8, 10))}

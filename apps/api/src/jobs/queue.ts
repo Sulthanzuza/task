@@ -1,6 +1,6 @@
 import { PgBoss } from 'pg-boss';
 import type { IDatabase } from 'pg-boss/dist/types';
-import { env, jobQueueEnabled } from '../config/env';
+import { env, jobQueueEnabled, poolSizes } from '../config/env';
 import { logger } from '../lib/logger';
 import type { QueueConnection } from '../db/client';
 
@@ -27,9 +27,10 @@ export async function getQueue(): Promise<PgBoss> {
   starting ??= (async () => {
     const instance = new PgBoss({
       connectionString: env.DATABASE_URL,
-      // The API only enqueues; the worker process does the fetching.
       schema: 'pgboss',
-      max: 4,
+      // Its share of DATABASE_MAX_CONNECTIONS, so the two pools together stay
+      // inside a pooler's allowance.
+      max: poolSizes().queue,
     });
 
     instance.on('error', (error: unknown) => {

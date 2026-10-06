@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadEnvFiles } from './loadEnvFile';
 
@@ -8,6 +10,38 @@ loadEnvFiles();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+
+  /**
+   * What server.ts runs. `api` is the HTTP server and Socket.IO, with the jobs
+   * in a separate worker process (dist/worker.js), as in the Docker
+   * deployment. `all` adds the job worker and the built web app to the same
+   * process, for a host that gives you exactly one: Render's free tier.
+   */
+  RUN_MODE: z.enum(['api', 'all']).default('api'),
+  /** The built web app (apps/web/dist), served by the API when RUN_MODE=all. */
+  WEB_DIST_DIR: z.string().optional(),
+
+  /**
+   * Reverse proxies in front of this process. Unset means one in production
+   * (Nginx in Docker, the load balancer on Render) and none elsewhere.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
+
+  /**
+   * Every Postgres connection this process may hold, the job queue's
+   * included. A pooled host counts them against a small allowance, so the
+   * total is what matters, not the size of each pool. See poolSizes.
+   */
+  DATABASE_MAX_CONNECTIONS: z.coerce.number().int().min(4).max(200).optional(),
+
+  /**
+   * argon2id cost for new password hashes. Existing hashes carry their own
+   * parameters and keep verifying; a sign-in rehashes them when these change.
+   * The defaults are OWASP's minimum: 19 MiB, two passes, one lane.
+   */
+  ARGON2_MEMORY_COST: z.coerce.number().int().min(1024).max(1_048_576).default(19_456),
+  ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(2),
+  ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
   /**
    * When set, the worker serves GET /health on this port. Container health
    * checks and the e2e runner both need a way to tell that it is alive.
@@ -94,6 +128,16 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   MAIL_FROM: z.string().default('Task Manager <no-reply@taskmanager.local>'),
 
+  /**
+   * How mail leaves. `smtp` for Docker and development (Mailpit); `brevo-api`
+   * for a host that blocks outbound SMTP, as Render's free tier does, where
+   * the same messages go over HTTPS to Brevo instead.
+   */
+  MAIL_TRANSPORT: z.enum(['smtp', 'brevo-api']).optional(),
+  BREVO_API_KEY: z.string().optional(),
+  /** Overridable so a test can point it at a local stand-in. */
+  BREVO_API_URL: z.string().url().default('https://api.brevo.com/v3/smtp/email'),
+
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./uploads'),
   S3_ENDPOINT: z.string().optional(),
@@ -105,7 +149,10 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  MAX_UPLOAD_BYTES: z.coerce.number().int().default(25 * 1024 * 1024),
+  MAX_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .default(25 * 1024 * 1024),
 
   SEED_TIMEZONE: z.string().default('Asia/Kolkata'),
   SEED_PASSWORD: z.string().default('Password123!'),
@@ -130,18 +177,39 @@ export const isTest = env.NODE_ENV === 'test';
 /**
  * How many reverse proxies sit in front of this process.
  *
- * One in production, because there is exactly one Nginx. Trusting every hop
- * would let a caller forge X-Forwarded-For and dodge the rate limiter;
- * trusting none would make every request look like it came from Nginx, so one
- * person's failed sign-ins would lock out the whole team.
+ * One in production: Nginx in the Docker deployment, the load balancer on
+ * Render, which appends one address to X-Forwarded-For and passes on whatever
+ * the client sent before it. Trusting every hop would let a caller forge that
+ * header and dodge the rate limiter; trusting none would make every request
+ * look like it came from the proxy, so one person's failed sign-ins would
+ * lock out the whole team.
  */
-export const trustedProxyHops: number | false = isProduction ? 1 : false;
+const proxyHops = env.TRUST_PROXY_HOPS ?? (isProduction ? 1 : 0);
+export const trustedProxyHops: number | false = proxyHops > 0 ? proxyHops : false;
+
+export const runsEverything = env.RUN_MODE === 'all';
+
+export const mailTransport = env.MAIL_TRANSPORT ?? 'smtp';
+
+/**
+ * The connection budget, split between the app's pool and pg-boss's.
+ *
+ * pg-boss keeps its own pool, so capping only ours would still overrun a
+ * pooler's allowance. The queue gets two connections when the budget is
+ * small (enough to poll and to send) and four otherwise.
+ */
+export function poolSizes(total = env.DATABASE_MAX_CONNECTIONS ?? (isTest ? 9 : 24)): {
+  app: number;
+  queue: number;
+} {
+  const queue = total > 10 ? 4 : 2;
+  return { app: total - queue, queue };
+}
 
 export const jobQueueEnabled =
   env.JOB_QUEUE_ENABLED !== undefined ? env.JOB_QUEUE_ENABLED === 'true' : !isTest;
 
-export const mailEnabled =
-  env.MAIL_ENABLED !== undefined ? env.MAIL_ENABLED === 'true' : !isTest;
+export const mailEnabled = env.MAIL_ENABLED !== undefined ? env.MAIL_ENABLED === 'true' : !isTest;
 
 /**
  * Settings that are fine in development and dangerous in production.
@@ -189,8 +257,30 @@ export function productionConfigErrors(): string[] {
     );
   }
 
-  if (env.NODE_ENV === 'production' && env.STORAGE_DRIVER === 'local') {
+  if (env.STORAGE_DRIVER === 'local') {
     errors.push('STORAGE_DRIVER=local keeps uploads on a single container disk; use s3');
+  } else if (!env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
+    errors.push('S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set for STORAGE_DRIVER=s3');
+  }
+
+  // Chosen on purpose, not inherited: the wrong default would mean mail that
+  // silently never leaves a host that blocks SMTP.
+  if (!env.MAIL_TRANSPORT) {
+    errors.push('MAIL_TRANSPORT must be set in production: smtp or brevo-api');
+  } else if (env.MAIL_TRANSPORT === 'brevo-api' && !env.BREVO_API_KEY) {
+    errors.push('BREVO_API_KEY is required when MAIL_TRANSPORT=brevo-api');
+  }
+
+  if (env.RUN_MODE === 'all') {
+    const index = env.WEB_DIST_DIR ? join(resolve(env.WEB_DIST_DIR), 'index.html') : null;
+    if (!index || !existsSync(index)) {
+      errors.push('RUN_MODE=all serves the web app, but WEB_DIST_DIR has no index.html');
+    }
+  }
+
+  // OWASP's minimum for argon2id is 19 MiB with two passes.
+  if (env.ARGON2_MEMORY_COST < 19_456 || env.ARGON2_TIME_COST < 2) {
+    errors.push('ARGON2_MEMORY_COST must be at least 19456 and ARGON2_TIME_COST at least 2');
   }
 
   return errors;
@@ -236,7 +326,10 @@ export function unsafeProductionSettings(): string[] {
   }
   if (env.API_RATE_LIMIT_PER_MINUTE > defaults.api) {
     warnings.push(
-      'API_RATE_LIMIT_PER_MINUTE is ' + env.API_RATE_LIMIT_PER_MINUTE + ', above the default of ' + defaults.api,
+      'API_RATE_LIMIT_PER_MINUTE is ' +
+        env.API_RATE_LIMIT_PER_MINUTE +
+        ', above the default of ' +
+        defaults.api,
     );
   }
   if (env.UPLOAD_RATE_LIMIT_PER_MINUTE > defaults.upload) {

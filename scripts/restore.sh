@@ -53,17 +53,61 @@ if [ ! -s "$DUMP" ]; then
 fi
 
 DB_NAME="$(basename "$TARGET_URL" | sed 's/?.*//')"
+
+# user@host:port/database, without the password: what makes two URLs the same
+# database. On Supabase two projects share the pooler's host name, and only
+# the user (postgres.<project-ref>) tells them apart.
+identity() {
+  printf '%s' "$1" | sed -E 's#^[a-z]+://([^:@/]+)(:[^@]*)?@([^/?]+)/([^?]*).*#\1@\3/\4#'
+}
+
+# Never the live database, however the target is named.
+if [ -n "${RESTORE_FORBIDDEN_URL:-}" ] && [ "$(identity "$TARGET_URL")" = "$(identity "$RESTORE_FORBIDDEN_URL")" ]; then
+  echo "Refusing to restore into the production database ($(identity "$TARGET_URL"))" >&2
+  exit 1
+fi
+
 case "$DB_NAME" in
   *_restore|*_scratch|*_verify) ;;
   *)
-    echo "Refusing to restore into '$DB_NAME': name it *_restore, *_scratch or *_verify" >&2
-    exit 1
+    # A scratch Supabase project's database is always called postgres, so it
+    # cannot carry the suffix; naming it here is the explicit opt-in, and is
+    # only accepted together with RESTORE_FORBIDDEN_URL.
+    if [ -n "${RESTORE_ALLOW_DATABASE:-}" ] && [ "$DB_NAME" = "$RESTORE_ALLOW_DATABASE" ] &&
+      [ -n "${RESTORE_FORBIDDEN_URL:-}" ]; then
+      :
+    else
+      echo "Refusing to restore into '$DB_NAME': name it *_restore, *_scratch or *_verify" >&2
+      exit 1
+    fi
     ;;
 esac
 
 echo "Restoring $DUMP into $DB_NAME"
 
-pg_restore --dbname="$TARGET_URL" --clean --if-exists --no-owner --no-privileges "$DUMP"
+# Start from empty schemas rather than pg_restore --clean. --clean cannot
+# take pg-boss's partitioned job tables apart in the right order, so a second
+# drill into the same scratch database would fail. The target has already
+# been checked: it is a *_restore database or an opted-in scratch project,
+# never the live one, so wiping the app's three schemas is the point.
+#
+# A dump of selected schemas also carries no CREATE EXTENSION, and the tables
+# need these two: citext for email addresses, pg_trgm for search.
+psql "$TARGET_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+DROP SCHEMA IF EXISTS pgboss CASCADE;
+DROP SCHEMA IF EXISTS drizzle CASCADE;
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+SQL
+
+# Everything in the dump except the public schema itself, which now exists.
+LIST="$(mktemp)"
+pg_restore --list "$DUMP" | grep -v ' SCHEMA - public ' > "$LIST"
+
+pg_restore --dbname="$TARGET_URL" --no-owner --no-privileges --exit-on-error   --use-list="$LIST" "$DUMP"
+rm -f "$LIST"
 
 # A restore that finishes without error can still have restored nothing.
 COUNT="$(psql "$TARGET_URL" -tAc "SELECT count(*) FROM tasks")"

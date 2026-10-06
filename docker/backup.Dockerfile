@@ -9,7 +9,11 @@
 # runs on, arm64 included. (It replaced MinIO's mc, whose downloads were
 # withdrawn in 2025: a build that fetches a binary from a vendor's URL breaks
 # the day the vendor changes its mind.)
-FROM postgres:16-alpine
+# pg_dump must be at least as new as the server it dumps: 16 for the Docker
+# deployment's Postgres, 17 for Supabase (the GitHub Actions backup builds
+# with --build-arg PG_MAJOR=17). A newer pg_dump reads an older server fine.
+ARG PG_MAJOR=16
+FROM postgres:${PG_MAJOR}-alpine
 
 RUN apk add --no-cache ca-certificates rclone \
  && rclone version

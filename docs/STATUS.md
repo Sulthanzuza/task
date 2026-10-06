@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `master`, tagged **v1.0.0-rc3**.
+Last updated: 2026-10-06. Branch `master`, tagged **v1.0.0-rc4**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -50,7 +50,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `eefb658` | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
 | `c84f2fc` | First-deploy runbook fixes, v1.0.0-rc2 |
 | `543670c` | rc3: the placeholder-certificate bug, and runbook corrections |
-| _uncommitted_ | Calendar takes today from `/org/calendar` (it hung for members and the admin, who have no dashboard); the More menu was clipped by the scrolling nav; Team page shows load errors instead of "not on a team"; dashboard team picker, so the admin (who leads no team) gets a dashboard instead of an endless "Loading" |
+| `e48beb7` | Calendar takes today from `/org/calendar` (it hung for members and the admin); dashboard team picker for the admin; the More menu was clipped by the scrolling nav; Team page shows load errors |
+| _this one_ | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
 
 ### The design system, applied (three design prompts)
 
@@ -307,6 +308,16 @@ None of these is blocking. Each is a real gap, checked against the code today.
   It briefly had a "Share of open work" bar, but that drew the Active count a second
   time and said nothing new, so it was removed. What belongs there is how full each
   person's week is, and that needs the capacity-aware workload service.
+
+- **Dev Compose still lists MinIO.** `docker-compose.yml` has a `minio/minio` service,
+  and that image no longer exists on Docker Hub, so `docker compose up -d` fails on a
+  machine that has not already cached it. Dev uses `STORAGE_DRIVER=local`, so the
+  service can simply be removed; production no longer uses it (rc4).
+- **The dashboard team picker has no test.** Added with `e48beb7`; by rule 15 that
+  makes it PARTIAL until a web test covers choosing a team.
+- **The Oracle runbook has not been run on a real A1 instance yet.** The images are
+  proven on emulated arm64 and the backup scripts against a stand-in S3 server; the
+  Oracle, Brevo and B2 console steps are written from their documentation.
 
 Also worth knowing: a super admin on no team now gets a member digest rather than an
 error, and `buildDigest` no longer throws for them.

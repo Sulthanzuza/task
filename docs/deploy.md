@@ -3,70 +3,286 @@
 Written for whoever runs this on a server, including the version of you that
 has forgotten how it works.
 
-One VPS is enough for a team of eight to thirty. The stack is Nginx, one API,
-one worker, Postgres, MinIO, a backup job and a watchdog, all from
-`docker-compose.prod.yml`.
+The target is **Oracle Cloud Always Free**: one Ampere A1 VM (arm64, Ubuntu
+24.04, 2 OCPU / 6 GB) in Mumbai or Hyderabad, which is enough for a team of
+eight to thirty. Around it:
+
+| What | Where | Free tier |
+| --- | --- | --- |
+| The app: nginx, API, worker, Postgres, backup job, watchdog | the VM, from `docker-compose.prod.yml` | Always Free A1 |
+| Task attachments | OCI Object Storage, through its S3 API | 20 GB, 50,000 requests a month |
+| Email | Brevo SMTP relay, port 587 | 300 emails a day |
+| Off-site backups | Backblaze B2, through its S3 API | 10 GB |
+| Uptime monitoring | UptimeRobot | 50 monitors, 5-minute checks |
+
+Placeholders used throughout: `tasks.example.com` is your app's domain,
+`example.com` the domain you send mail from, `<SERVER_IP>` the VM's public IP.
+**The whole sequence**, at the end, lists every command in order.
+
+---
+
+## Oracle Cloud: the server
+
+Done once, in the Oracle console and then on the VM. Everything after this
+section is the same on any Ubuntu 24.04 server.
+
+### Everything runs on arm64
+
+The A1 shape is Ampere ARM, so every image must have a `linux/arm64` build.
+They do:
+
+| Image | arm64 |
+| --- | --- |
+| `api`, `worker`, `migrate` (`docker/api.Dockerfile`, on `node:22-alpine`) | built on the server, natively |
+| `web` (`docker/web.Dockerfile`, on `nginx:1.27-alpine`) | built on the server, natively |
+| `backup` (`docker/backup.Dockerfile`, on `postgres:16-alpine`, rclone from the Alpine archive) | built on the server, natively |
+| `postgres:16-alpine`, `certbot/certbot`, `willfarrell/autoheal` | published for `linux/arm64` |
+
+The one native module, **argon2**, ships prebuilt binaries for
+`linux-arm64` on both glibc and musl, so nothing is compiled during
+`pnpm install`.
+
+There is no MinIO any more. Its server image and its `mc` client stopped being
+published in 2025 (Docker Hub returns 404, `dl.min.io` returns 410), so a
+fresh server could neither start the old stack nor build the backup image.
+Attachments moved to OCI Object Storage, and the backup scripts use rclone.
+
+To prove an arm64 build from an x86 machine before the server exists (Docker
+Desktop emulates arm64, so it is slow but faithful):
+
+```bash
+docker buildx build --platform linux/arm64 -f docker/api.Dockerfile    -t tm-api:arm64    --load .
+docker buildx build --platform linux/arm64 -f docker/web.Dockerfile    -t tm-web:arm64    --load .
+docker buildx build --platform linux/arm64 -f docker/backup.Dockerfile -t tm-backup:arm64 --load .
+
+# argon2 really loads and hashes on arm64:
+docker run --rm --platform linux/arm64 --entrypoint sh tm-api:arm64 -c \
+  'uname -m; node --input-type=module -e "import a from \"argon2\"; console.log(await a.verify(await a.hash(\"x\"), \"x\"))"'
+# aarch64
+# true
+```
+
+`.dockerignore` keeps the host's `node_modules` out of the build context. A
+Windows or macOS checkout's links and native binaries copied into a Linux
+image are what break a build made on a laptop.
+
+### 1. Create the instance
+
+**Compute → Instances → Create instance**:
+
+- **Name:** `taskmanager`.
+- **Image:** Canonical Ubuntu 24.04 (the full image, not "Minimal"). With an
+  Ampere shape selected, the console picks the aarch64 build.
+- **Shape:** Ampere → `VM.Standard.A1.Flex`, **2 OCPU, 6 GB** memory. It
+  should say "Always Free-eligible".
+- **Networking:** create a new VCN with a public subnet, and tick **Assign a
+  public IPv4 address**.
+- **SSH keys:** **Upload public key files** and choose your public key
+  (`~/.ssh/id_ed25519.pub`; on Windows,
+  `C:\Users\<you>\.ssh\id_ed25519.pub`). Never the private one.
+- **Boot volume:** the default 50 GB is fine and within the free 200 GB.
+
+"Out of capacity" for A1 is common in the Indian regions. It is not your
+configuration: try again later, or in another availability domain if the
+region shows one.
+
+When it is running, note the **public IP** on the instance page and sign in:
+
+```bash
+ssh ubuntu@<SERVER_IP>
+```
+
+The public IP stays through reboots and stop/start. It is released only if
+the instance is terminated.
+
+### 2. Open 80 and 443 in the VCN security list
+
+Oracle filters traffic twice: once in the network (the security list) and
+again on the VM (iptables, next step). Both must allow a port.
+
+**Networking → Virtual cloud networks → (your VCN) → Security → Default
+Security List → Add Ingress Rules**, twice:
+
+| Source CIDR | IP protocol | Destination port |
+| --- | --- | --- |
+| `0.0.0.0/0` | TCP | `80` |
+| `0.0.0.0/0` | TCP | `443` |
+
+Leave **Stateless** unticked. Port 22 is already there. Nothing else gets a
+rule: Postgres and the API are not published, and must stay that way.
+
+### 3. Open 80 and 443 on the VM: iptables, not ufw
+
+Oracle's Ubuntu images ship their own iptables rules in
+`/etc/iptables/rules.v4`, loaded at boot by `netfilter-persistent`. The
+`INPUT` chain allows SSH and ends with
+`REJECT --reject-with icmp-host-prohibited`, and `FORWARD` ends with the same
+REJECT.
+
+**Use iptables alone. Do not enable ufw.** ufw would write a second set of
+rules over Oracle's, and Oracle's documentation warns that editing these rules
+with ufw can stop the instance from booting. The rules also carry the
+`InstanceServices` chain the VM needs to reach Oracle's metadata service and
+its boot volume.
+
+**Do this before installing Docker**, for the reason in the paragraph after
+the commands.
+
+```bash
+# The REJECT is the last INPUT rule; insert the two ACCEPTs just above it.
+sudo iptables -L INPUT -n --line-numbers
+N=$(sudo iptables -L INPUT -n --line-numbers | awk '$2 == "REJECT" { print $1; exit }')
+echo "$N"                     # e.g. 6; must not be empty
+sudo iptables -I INPUT "$N" -p tcp -m state --state NEW --dport 443 -j ACCEPT
+sudo iptables -I INPUT "$N" -p tcp -m state --state NEW --dport 80  -j ACCEPT
+sudo iptables -L INPUT -n --line-numbers    # 80 and 443 now come before REJECT
+
+# Write them into /etc/iptables/rules.v4, so they come back after a reboot.
+sudo netfilter-persistent save
+grep -E 'dport (80|443)' /etc/iptables/rules.v4
+```
+
+**Never run `netfilter-persistent save` again once Docker is running.** It
+would write Docker's own chains into `rules.v4`. They would then be loaded at
+boot before Docker starts and creates them again, leaving duplicate and stale
+rules. To change the host's rules later, edit `/etc/iptables/rules.v4` by
+hand, and apply the same change live with `iptables -I`.
+
+Strictly, these two rules are not what lets nginx answer. Docker publishes
+nginx's ports with a DNAT rule, so that traffic goes through `FORWARD`, where
+Docker inserts its own ACCEPT rules above Oracle's REJECT, rather than through
+`INPUT`. The INPUT rules are for anything that listens on the host itself, and
+they make the host's rules say what the security list says.
+
+> **Docker bypasses the host firewall for published ports.** Publishing a
+> port writes DNAT and FORWARD rules that are consulted before anything in
+> `INPUT`. A container published as `5432:5432` is reachable from anywhere
+> the security list allows, whatever the host rules say. The only reliable
+> defence is not to publish the port. Bind it to `127.0.0.1:5432:5432` if you
+> ever need it locally, never to `0.0.0.0`.
+>
+> In this deployment **only nginx may publish a port**, and it publishes 80
+> and 443. Postgres, the API and the worker talk to each other over the
+> Compose network and are not reachable from outside the host. If you add a
+> service, do not give it a `ports:` entry. The security list, which allows
+> only 22, 80 and 443, is the second line of defence.
+
+### 4. Don't let Oracle reclaim it as idle
+
+Oracle reclaims an Always Free instance it considers idle. On A1 shapes that
+means that over **seven days, all three** of these stay under 20%: CPU
+utilisation (95th percentile), network utilisation, and memory utilisation.
+
+For a team this size, CPU and network will sit far below 20% almost all the
+time. **Memory is the one that decides**, so it is the one to check.
+
+The day after the stack is up and people have used it:
+
+```bash
+free -m
+# Memory in use, not counting cache the kernel can give back:
+free -m | awk '/^Mem:/ { printf "%.0f%% of %d MB in use\n", ($2 - $7) * 100 / $2, $2 }'
+```
+
+Oracle's own figure is in the console under **Instance → Monitoring → Memory
+Utilization**. If the two disagree, Oracle's is the one that counts.
+
+If it is **under 20%**, shrink the VM's memory so that what the stack uses is
+a larger share of it. Aim for about 25%, not just over 20%. For example, if
+1.0 GB is in use, 4 GB gives 25%.
+
+**Instance → Edit → Edit shape** → keep 2 OCPU, set memory to the new figure →
+**Save changes**. The instance reboots: do it outside working hours, take a
+backup first (see **Backups**), and run the smoke test afterwards. The 2 GB
+swap file set up below covers the occasional spike.
+
+Check `free -m` again a week later, since usage grows as the database does.
+
+### 5. A bucket for attachments: OCI Object Storage
+
+The API stores attachments through the S3 API, and Oracle's Object Storage
+offers one.
+
+1. **Find the namespace.** Profile menu → **Tenancy: <name>** → **Object
+   storage namespace**, a short random string. On the same page, under
+   **Object storage settings**, note the **Amazon S3 Compatibility API
+   designated compartment**, which is the root compartment unless you changed
+   it. The bucket must be in that compartment, or the S3 API cannot see it.
+2. **Create the bucket.** **Storage → Buckets** → that compartment → **Create
+   Bucket**: name `task-attachments`, default storage tier Standard. It is
+   private by default; keep it so. The API serves every file itself, after
+   checking permissions.
+3. **A user that can reach this bucket and nothing else.** A key made for
+   your own administrator account would open everything in the tenancy.
+   **Identity & Security → Domains → Default domain**:
+   - **Users → Create user**: `taskmanager-storage`, any email you control.
+   - **Groups → Create group**: `taskmanager-storage`, and add the user.
+   - **Identity & Security → Policies** (root compartment) **→ Create
+     Policy**, `taskmanager-storage`, in the manual editor:
+
+     ```
+     Allow group 'Default'/'taskmanager-storage' to read buckets in tenancy where target.bucket.name = 'task-attachments'
+     Allow group 'Default'/'taskmanager-storage' to manage objects in tenancy where target.bucket.name = 'task-attachments'
+     ```
+4. **Its key.** Open the user → **Customer secret keys → Generate secret
+   key**, named `taskmanager`. **Copy the secret now**, because it is shown
+   once. The **Access key** is the long ID in the list afterwards.
+
+These go into `.env.production` (region `ap-mumbai-1` or `ap-hyderabad-1`,
+matching the VM):
+
+```
+S3_ENDPOINT=https://<namespace>.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+S3_REGION=ap-mumbai-1
+S3_BUCKET=task-attachments
+S3_ACCESS_KEY_ID=<access key>
+S3_SECRET_ACCESS_KEY=<secret key>
+S3_FORCE_PATH_STYLE=true
+```
+
+The Always Free allowance is 20 GB and 50,000 requests a month. Every upload
+and download is a request, and so is each object the nightly backup checks.
+That is plenty for a team of thirty. If the console ever shows the count
+approaching the limit, the backup's copy of this bucket is the first thing
+to make less frequent.
 
 ---
 
 ## Before you start
 
-A fresh **Ubuntu 24.04 LTS** box. One VPS with 2 vCPU and 4GB is comfortable
-for a team of eight to thirty.
+The Oracle VM from the section above, signed in as `ubuntu`.
 
-**1. A user that is not root.** Everything below is run as this user.
+**1. A user that is not root, and not `ubuntu`.** Everything below is run as
+this user.
 
 ```bash
-adduser deploy && usermod -aG sudo deploy
-rsync --archive --chown=deploy:deploy ~/.ssh /home/deploy
+sudo adduser deploy                      # sets a password: sudo will ask for it
+sudo usermod -aG sudo deploy
+sudo rsync --archive --chown=deploy:deploy /home/ubuntu/.ssh /home/deploy
 ```
 
-Then, in `/etc/ssh/sshd_config`, `PermitRootLogin no` and
-`PasswordAuthentication no`, and `sudo systemctl restart ssh`. Keep your
+From your own machine, `ssh deploy@<SERVER_IP>` must now work. Then, in
+`/etc/ssh/sshd_config`, set `PermitRootLogin no` and
+`PasswordAuthentication no` (Oracle's image already sets the second, in
+`/etc/ssh/sshd_config.d/`), and run `sudo systemctl restart ssh`. Keep your
 current session open while you test the new login from another terminal: a
 typo here locks you out of the server.
 
-**2. Docker Engine and the Compose plugin.** Not `docker.io` from the Ubuntu
-archive, which is older than the Compose file expects.
+**2. Docker Engine and the Compose plugin**, after the iptables step above.
+Not `docker.io` from the Ubuntu archive, which is older than the Compose file
+expects. The convenience script installs the arm64 build by itself.
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker deploy && newgrp docker
-docker compose version          # v2.x
+docker compose version                       # v2.x
+docker info --format '{{.Architecture}}'     # aarch64
 ```
 
-**3. A firewall that allows three ports.**
-
-> **Docker bypasses ufw.** Publishing a port writes an iptables rule in the
-> `DOCKER` chain, which is consulted before ufw's. A container published as
-> `5432:5432` is reachable from the internet with ufw showing `deny
-> incoming` and no warning anywhere. The only reliable defence is not to
-> publish the port: bind it to `127.0.0.1:5432:5432` if you ever need it
-> locally, and never to `0.0.0.0`.
->
-> In this deployment **only nginx may publish a port**, and it publishes 80
-> and 443. Postgres, MinIO, the API and the worker talk to each other over
-> the Compose network and are not reachable from outside the host. If you
-> add a service, do not give it a `ports:` entry.
-
-ufw is still worth having for everything that is not Docker — ssh, anything
-you install later — and for the day somebody adds a published port by
-mistake and you want the rest of the box covered.
-
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-sudo ufw status verbose
-```
-
-**4. Swap, so a build does not kill the box.** 4GB is enough to run this and
-not enough to run `pnpm build` inside Docker at the same time as Postgres.
-Without swap the kernel's OOM killer picks a victim, and it is usually
-Postgres.
+**3. Swap, so a build does not kill the box.** 6 GB runs the stack easily,
+but building three images next to a running Postgres, or memory shrunk for
+the idle rule above, is when the kernel's OOM killer picks a victim, and it is
+usually Postgres.
 
 ```bash
 sudo fallocate -l 2G /swapfile
@@ -77,7 +293,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 free -h                                 # Swap: 2.0Gi
 ```
 
-**5. Security updates, applied on their own.**
+**4. Security updates, applied on their own.**
 
 ```bash
 sudo apt update && sudo apt install -y unattended-upgrades
@@ -86,28 +302,32 @@ systemctl status unattended-upgrades --no-pager | head -3
 ```
 
 This takes security patches only, and does not reboot by itself. Kernel
-updates still need a reboot you schedule.
+updates still need a reboot you schedule; `/var/run/reboot-required` exists
+when one is waiting.
 
-**6. DNS pointing here, before certbot runs.** Let's Encrypt resolves the name
-itself, so a record that has not propagated is a failed issuance and a rate
-limit you then wait out.
+**5. DNS pointing here, before certbot runs.** An `A` record for
+`tasks.example.com` with the value `<SERVER_IP>`. Let's Encrypt resolves the
+name itself, so a record that has not propagated is a failed issuance and a
+rate limit you then wait out.
 
 ```bash
 dig +short tasks.example.com          # must print this server's public IP
 curl -fsS https://ifconfig.me && echo  # which is this
 ```
 
-**7. The code.**
+**6. The code.**
 
 ```bash
 sudo mkdir -p /srv/taskmanager && sudo chown deploy:deploy /srv/taskmanager
 git clone <repo> /srv/taskmanager
 cd /srv/taskmanager
-git checkout v1.0.0-rc2
+git checkout v1.0.0-rc4
 ```
 
-**8. An SMTP provider with SPF and DKIM** (see below). Without them,
-invitations and alerts land in spam and the product looks broken on day one.
+**7. Brevo and Backblaze B2, set up.** See **Email: Brevo** and **Backups:
+Backblaze B2** below. Their values go into `.env.production` in the next
+step. Without SPF and DKIM, invitations and alerts land in spam and the
+product looks broken on day one.
 
 ---
 
@@ -131,21 +351,24 @@ Every value the API will not start without, and how to make it:
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` | — |
 | `POSTGRES_DB` | anything, e.g. `taskmanager` | — |
 | `JWT_ACCESS_SECRET` | `openssl rand -hex 32` | under 32 characters, or left as the development default |
-| `S3_ACCESS_KEY_ID` | `openssl rand -hex 16` | — |
-| `S3_SECRET_ACCESS_KEY` | `openssl rand -hex 24` | — |
-| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION` | leave the defaults for the bundled MinIO | — |
+| `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` | OCI Object Storage: see **Oracle Cloud: the server**, step 5 | — |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | the Customer Secret Key of `taskmanager-storage` | — |
 | `STORAGE_DRIVER` | `s3` | `local` is refused: it keeps uploads on one container's disk |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | from your mail provider | — |
-| `MAIL_FROM` | `Task Manager <no-reply@yourdomain>` | — |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | `smtp-relay.brevo.com`, `587`, `false` (STARTTLS) | — |
+| `SMTP_USER` / `SMTP_PASS` | Brevo's SMTP login and an SMTP key: see **Email: Brevo** | — |
+| `MAIL_FROM` | `Task Manager <no-reply@example.com>`, at the domain authenticated in Brevo | — |
 | `MAIL_ENABLED` | `true` | `false` is refused in production |
 | `JOB_QUEUE_ENABLED` | `true` | `false` is refused in production |
-| `BACKUP_S3_ENDPOINT` | your off-site provider's S3 endpoint | the backup job will not run without it |
-| `BACKUP_S3_BUCKET` | the bucket you made there | as above |
-| `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | from that provider | as above |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_REGION` | `https://s3.<region>.backblazeb2.com` and `<region>`: see **Backups: Backblaze B2** | the backup job will not run without it |
+| `BACKUP_S3_BUCKET` | the B2 bucket | as above |
+| `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | the B2 application key's `keyID` / `applicationKey` | as above |
 | `WORKER_HEALTH_PORT` | `4001` | unset means the worker serves no health endpoint and the watchdog cannot see it |
 | `NODE_ENV` | `production` | anything else turns the production checks off |
 
-The rest have working defaults. `CORS_ORIGINS` stays empty: the app and the
+The rest have working defaults, including the two `AWS_*_CHECKSUM_*`
+settings: the AWS SDK's default checksums are not accepted by every
+S3-compatible store, so the example sends them only where S3 requires one.
+`CORS_ORIGINS` stays empty: the app and the
 API are the same origin, so there is no cross-origin request to allow.
 
 Check it before starting anything. There is no Node and no pnpm on this
@@ -241,8 +464,10 @@ docker compose -f docker-compose.prod.yml logs --tail=20 certbot
 ### 4. The first administrator
 
 The CLI sets the password itself: it prompts for one and writes the hash. It
-sends **no email**, so this works before SMTP is proven and nothing here
-depends on a set-password link arriving.
+sends **no email** and there is no set-password link to wait for, so the
+administrator comes first and the test email after: it is sent from the
+administrator's settings, in step 6. Had the CLI emailed a link, the order
+would have to be the other way round.
 
 Everyone *else* is invited from the UI, and an invitation is an email, so
 mail has to work before you invite anybody — including the smoke account in
@@ -267,7 +492,8 @@ overdue, due today, working days, the digest hour, the heat map — is computed
 from these, and changing them later silently moves dates on work that already
 exists.
 
-Signed in as the administrator:
+Signed in as the administrator. "Settings" is the **More** menu (the gear) in
+the top bar.
 
 **Settings → Organisation**
 
@@ -291,7 +517,9 @@ and DKIM must say `pass`. Mail that fails either lands in spam, and the first
 thing anybody experiences of this product is an invitation that never
 arrived.
 
-Fix SPF and DKIM at your DNS provider before going on (see below).
+Fix SPF and DKIM at your DNS provider before going on (see **Email: Brevo**).
+If Brevo refuses the login outright, its SMTP relay may not be activated yet on
+a new account: Brevo's support enables it on request.
 
 ### 7. The smoke team
 
@@ -343,32 +571,71 @@ days rather than the year it gives `/assets/`: long enough that nobody
 refetches it, short enough that replacing the file reaches people without a
 rename.
 
-## Email: SPF and DKIM
+## Email: Brevo
 
-Both are DNS records on the sending domain. Skipping them is the most common
-reason a new deployment's mail silently disappears.
+Mail goes through Brevo's SMTP relay on port 587 with STARTTLS. The free plan
+sends 300 emails a day, which a team of thirty does not approach: emails are
+collapsed to one per burst, and the digest is one a day per person. Oracle
+blocks outbound port 25, and 587 is open.
 
-**SPF** — one TXT record on the root, listing who may send as you:
+**1. The SMTP credentials.** In Brevo, **SMTP & API → SMTP**:
 
-```
-tasks.example.com.  TXT  "v=spf1 include:<your-provider-spf> -all"
-```
-
-**DKIM** — a TXT record on the selector your provider gives you:
-
-```
-<selector>._domainkey.tasks.example.com.  TXT  "v=DKIM1; k=rsa; p=<public key>"
-```
-
-**DMARC** — worth adding once the first two are in place:
+- **SMTP server** `smtp-relay.brevo.com`, **port** `587`.
+- **Login**: looks like `1a2b3c001@smtp-brevo.com`. This is `SMTP_USER`. It is
+  not your Brevo account email.
+- **Generate a new SMTP key**: this is `SMTP_PASS`. An SMTP key, not an API
+  key; the two are not interchangeable.
 
 ```
-_dmarc.tasks.example.com.  TXT  "v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com"
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_SECURE=false        # STARTTLS: starts plain, upgraded before login
+SMTP_USER=<brevo smtp login>
+SMTP_PASS=<brevo smtp key>
+MAIL_FROM="Task Manager <no-reply@example.com>"
 ```
 
-Verify by sending a test from **Settings → Notifications → Send a test email**,
-then checking the received message shows `spf=pass` and `dkim=pass` in its
-headers. Do this before inviting anybody.
+`SMTP_SECURE=true` would be TLS from the first byte, which is port 465. On
+587 it fails the handshake.
+
+**2. Authenticate the sending domain.** **Senders, Domains & Dedicated IPs →
+Domains → Add a domain**: the domain in `MAIL_FROM` (`example.com` here, not
+necessarily the app's `tasks.` subdomain). Brevo then lists the exact records
+to create. Copy its values, since the codes and the DKIM targets are specific
+to your account. They have this shape:
+
+```
+; Proves to Brevo you own the domain
+example.com.                    TXT    "brevo-code:<code from Brevo>"
+
+; DKIM: Brevo signs every message; these let receivers check the signature
+brevo1._domainkey.example.com.  CNAME  b1.example-com.dkim.brevo.com.
+brevo2._domainkey.example.com.  CNAME  b2.example-com.dkim.brevo.com.
+
+; SPF: Brevo may send as this domain
+example.com.                    TXT    "v=spf1 include:spf.brevo.com ~all"
+
+; DMARC: what receivers do with mail that fails both
+_dmarc.example.com.             TXT    "v=DMARC1; p=none; rua=mailto:postmaster@example.com"
+```
+
+- **One SPF record per name.** If `example.com` already has one (Google
+  Workspace, Microsoft 365), add `include:spf.brevo.com` to it rather than
+  creating a second. Two SPF records is a permanent SPF error, which is worse
+  than none.
+- **DKIM is what carries DMARC here.** Brevo sends from its own bounce domain,
+  so SPF passes for Brevo's domain, not yours. DMARC alignment comes from the
+  DKIM signature, which is why the two DKIM records are not optional.
+- Start DMARC at `p=none`, and move to `p=quarantine` once a few weeks of
+  reports show only Brevo sending as you.
+
+Then click **Authenticate this email domain** in Brevo. It checks the records
+itself, and DNS can take an hour.
+
+**3. Prove it.** After the administrator exists: **Settings → Email → Send a
+test email**, to an address at a different provider from your own. Open the
+received message's headers (Gmail: ⋮ → **Show original**) and check
+`spf=pass`, `dkim=pass` and `dmarc=pass`. Do this before inviting anybody.
 
 ---
 
@@ -429,13 +696,50 @@ So the nightly job does three things: dumps the database, copies the dump to
 a **different provider**, and mirrors the attachments bucket there too. A
 restore with every file on every task broken is a restore that fails review.
 
-Configure `BACKUP_S3_*` in `.env.production` with a bucket at Backblaze B2,
-Cloudflare R2, Wasabi or anything else with an S3 endpoint. Use credentials
-scoped to that one bucket, so a key taken from this server cannot reach
-anything else.
+The job runs once when the container starts and then every 24 hours
+(`BACKUP_INTERVAL_SECONDS`). It uses rclone, configured entirely from the
+`BACKUP_S3_*` and `S3_*` variables (`scripts/rclone-remotes.sh`), so no file
+on the server holds the keys.
 
-Retention is 14 days off-site and 3 days locally, the local copies being a
-convenience for a fast restore rather than the backup.
+### Backblaze B2
+
+Off-site means a different provider from Oracle. Losing the Oracle account,
+which on the free tier can happen without much warning, must not take the
+backups with it.
+
+1. **Create a bucket.** **Buckets → Create a Bucket**: a globally unique name
+   such as `<yourcompany>-taskmanager-backup`, **Private**, default encryption
+   on. The bucket page then shows **Endpoint:
+   `s3.<region>.backblazeb2.com`**. The middle part, e.g. `us-west-004` or
+   `eu-central-003`, is the region.
+2. **Lifecycle: "Keep only the last version of the file".** Bucket →
+   **Lifecycle Settings**. This matters: through the S3 API, B2 does not
+   delete a file, it *hides* it. Under the default "keep all versions", every
+   dump the script removes after 14 days would stay, and be billed, for ever.
+   With this setting a hidden file is gone a day later.
+3. **An application key for this bucket only.** **Application Keys → Add a New
+   Application Key**: **Allow access to Bucket(s)** → this bucket, **Type of
+   Access** → Read and Write. Copy `keyID` and `applicationKey` when shown;
+   the second is shown once. A key taken from this server then reaches one
+   bucket and nothing else in the account.
+
+```
+BACKUP_S3_ENDPOINT=https://s3.<region>.backblazeb2.com
+BACKUP_S3_REGION=<region>
+BACKUP_S3_BUCKET=<yourcompany>-taskmanager-backup
+BACKUP_S3_ACCESS_KEY=<keyID>
+BACKUP_S3_SECRET_KEY=<applicationKey>
+BACKUP_RETENTION_DAYS=14
+```
+
+**Retention: 14 days off-site, 3 days locally.** The script deletes off-site
+dumps older than `BACKUP_RETENTION_DAYS`, and the lifecycle rule above turns
+those deletions into freed space. The local copies are a convenience for a
+fast restore rather than the backup. Attachments are copied, never synced,
+so a file deleted in the app stays in the backup.
+
+At this size a dump is a few megabytes, and B2's free 10 GB covers 14 days of
+them many times over. The attachments copy is what grows.
 
 ```bash
 # On demand, rather than waiting for the nightly run
@@ -446,7 +750,7 @@ docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
 # expand it to nothing and you would list the wrong path and see nothing,
 # which looks exactly like a backup that is not running.
 docker compose -f docker-compose.prod.yml exec backup \
-  sh -c 'mc ls backup/$BACKUP_S3_BUCKET/database/'
+  sh -c '. /scripts/rclone-remotes.sh && rclone lsl "backup:$BACKUP_S3_BUCKET/database"'
 ```
 
 ### Restoring
@@ -497,8 +801,11 @@ was rejected with *"Refusing to restore into 'taskmanager': name it *_restore,
 
 ## Before the first real user signs in
 
-- [x] Nightly backup has run at least once, and the dump is in the off-site bucket.
-- [x] A restore **from the off-site copy** into a scratch database has succeeded.
+- [ ] Nightly backup has run at least once, and the dump is in the off-site bucket.
+- [ ] A restore **from the off-site copy** into a scratch database has
+      succeeded, and the scratch database has been dropped.
+- [ ] An attachment uploaded in the app downloads again (OCI Object Storage
+      works), and appears under `files/` in the B2 bucket after the next backup.
 - [ ] A test email has actually arrived. **Settings → Email → Send a test
       email**, to an address on a different provider from your own, and check
       it landed in the inbox rather than in spam.
@@ -506,7 +813,8 @@ was rejected with *"Refusing to restore into 'taskmanager': name it *_restore,
       `pass`).
 - [ ] TLS certificate installed, HTTP redirects to HTTPS, and
       `certbot renew --dry-run` passes.
-- [ ] An external uptime check is watching `/api/v1/ready`.
+- [ ] UptimeRobot is watching `/api/v1/ready` (see **Watching it from outside**).
+- [ ] `free -m` checked after day one against the idle-reclamation rule.
 - [ ] The first administrator created, and a second admin account exists so one
       lost password is not a lockout.
 - [ ] Smoke tests pass against the live URL (below).
@@ -527,7 +835,6 @@ docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
 
 git fetch --tags
 git checkout <tag>
-docker compose -f docker-compose.prod.yml build api
 docker compose -f docker-compose.prod.yml build api
 docker compose -f docker-compose.prod.yml run --rm --no-deps api \
   node dist/cli/envCheck.js         # the release may have added a variable
@@ -608,20 +915,26 @@ The health checks in the table above are all *inside* the server. They
 cannot tell you the box is off, the disk is full or DNS has expired, which
 are the outages that actually happen.
 
-Point an external monitor at **`https://tasks.example.com/api/v1/ready`**,
-every minute, alerting after two consecutive failures. UptimeRobot, Better
-Stack and Healthchecks.io all have a free tier that covers this.
+**UptimeRobot**, free plan. **Add New Monitor**:
+
+- **Monitor type:** Keyword.
+- **URL:** `https://tasks.example.com/api/v1/ready`.
+- **Keyword:** `"ready":true`, alert when it **does not exist**. A keyword
+  check rather than a plain HTTP one, so a cached or proxied 200 with the
+  wrong body does not read as healthy.
+- **Interval:** 5 minutes, the free plan's shortest.
+- **Alert contacts:** your email, and the UptimeRobot mobile app if you want a
+  push notification.
 
 `/ready` rather than `/health`: it returns 503 when the database or the job
 queue is unreachable, so an API that is answering but cannot send an
 invitation still counts as down. `/health` would say 200 through that.
 
-Two more worth having, if the monitor supports them:
-
-- **Certificate expiry**, warning at 14 days. Renewal is automatic, and this
-  is what tells you when it has silently stopped working.
-- **Keyword check** on `"ready":true`, so a cached or proxied 200 with the
-  wrong body does not read as healthy.
+Certificate-expiry alerts are a paid UptimeRobot feature, and Let's Encrypt
+no longer emails expiry warnings. Renewal is automatic (see **TLS**). To check
+it is still working, `./scripts/check-tls.sh tasks.example.com` prints the
+expiry date: run it monthly. If renewal does stop, the keyword monitor fails
+on the day the certificate expires.
 
 ---
 
@@ -652,3 +965,160 @@ Worth watching:
 - `Unsafe setting for production` — a relaxed test setting reached the server.
 - `A revoked refresh token was replayed` — possible stolen session cookie.
 - `Could not send a notification email` — SMTP trouble, before users report it.
+
+---
+
+## The whole sequence
+
+Every step of a first deploy, in order, with nothing explained: the sections
+above say why. Replace:
+
+| Placeholder | Is |
+| --- | --- |
+| `<SERVER_IP>` | the VM's public IP |
+| `tasks.example.com` | the app's domain |
+| `example.com` | the domain mail is sent from |
+| `you@example.com` | your own email (Let's Encrypt notices, the first admin) |
+| `<repo>` | the Git URL of this repository |
+
+**In the consoles, before touching the server**
+
+1. Oracle: create the instance (`VM.Standard.A1.Flex`, 2 OCPU / 6 GB, Ubuntu
+   24.04, your SSH public key, public IPv4).
+2. Oracle: security list ingress for TCP 80 and 443 from `0.0.0.0/0`.
+3. Oracle: bucket `task-attachments`, user and group `taskmanager-storage`,
+   the two-line policy, a Customer Secret Key. Note the namespace.
+4. Backblaze: private bucket, lifecycle "Keep only the last version", an
+   application key for that bucket only. Note the endpoint and region.
+5. Brevo: SMTP key and login; add the sending domain.
+6. DNS: `A tasks.example.com → <SERVER_IP>`, plus Brevo's `brevo-code`, the
+   two DKIM CNAMEs, SPF and DMARC. Then **Authenticate** in Brevo.
+
+**On the server, as `ubuntu`**
+
+```bash
+ssh ubuntu@<SERVER_IP>
+
+# Host firewall: before Docker
+N=$(sudo iptables -L INPUT -n --line-numbers | awk '$2 == "REJECT" { print $1; exit }'); echo "$N"
+sudo iptables -I INPUT "$N" -p tcp -m state --state NEW --dport 443 -j ACCEPT
+sudo iptables -I INPUT "$N" -p tcp -m state --state NEW --dport 80  -j ACCEPT
+sudo netfilter-persistent save
+grep -E 'dport (80|443)' /etc/iptables/rules.v4
+
+# The deploy user
+sudo adduser deploy
+sudo usermod -aG sudo deploy
+sudo rsync --archive --chown=deploy:deploy /home/ubuntu/.ssh /home/deploy
+```
+
+**From a second terminal, as `deploy`**, keeping the first one open:
+
+```bash
+ssh deploy@<SERVER_IP>
+
+# PermitRootLogin no, PasswordAuthentication no
+sudo nano /etc/ssh/sshd_config
+sudo systemctl restart ssh            # then test a fresh login before closing anything
+
+# Docker
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker deploy && newgrp docker
+docker compose version
+docker info --format '{{.Architecture}}'      # aarch64
+
+# Swap
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h
+
+# Security updates
+sudo apt update && sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure --priority=low unattended-upgrades
+
+# DNS has propagated
+dig +short tasks.example.com
+curl -fsS https://ifconfig.me && echo
+
+# The code
+sudo mkdir -p /srv/taskmanager && sudo chown deploy:deploy /srv/taskmanager
+git clone <repo> /srv/taskmanager
+cd /srv/taskmanager
+git checkout v1.0.0-rc4
+
+# Configuration
+cp .env.production.example .env.production
+openssl rand -hex 24      # POSTGRES_PASSWORD, and the same value inside DATABASE_URL
+openssl rand -hex 32      # JWT_ACCESS_SECRET
+nano .env.production      # domain, the three of OCI / Brevo / B2, the two secrets above
+chmod 600 .env.production
+
+# Check it, with no Node on the server
+docker compose -f docker-compose.prod.yml build api
+docker compose -f docker-compose.prod.yml run --rm --no-deps api node dist/cli/envCheck.js
+
+# Start
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
+
+# TLS
+docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+  --webroot --webroot-path /var/www/certbot \
+  -d tasks.example.com --email you@example.com --agree-tos --no-eff-email
+docker compose -f docker-compose.prod.yml exec web /usr/local/bin/use-real-cert
+./scripts/check-tls.sh tasks.example.com
+ls certs/live/                                  # tasks.example.com only, no -0001
+echo | openssl s_client -servername tasks.example.com -connect tasks.example.com:443 2>/dev/null \
+  | openssl x509 -noout -issuer -dates          # issuer: Let's Encrypt
+docker compose -f docker-compose.prod.yml run --rm certbot renew --dry-run
+
+# The first administrator (prompts for the password)
+docker compose -f docker-compose.prod.yml run --rm api \
+  node dist/cli/createUser.js --email you@example.com --name "Your Name" --role SUPER_ADMIN
+```
+
+**In the browser, at `https://tasks.example.com`, as the administrator**
+
+1. Settings → Organisation: `Asia/Kolkata`, weekend Saturday and Sunday,
+   8 working hours, digest `09:00`, week starts Monday.
+2. Settings → Holidays: this year's.
+3. Settings → Email → Send a test email, to another provider; headers show
+   `spf=pass`, `dkim=pass`, `dmarc=pass`.
+4. Settings → Teams: `Smoke`, Internal ticked. Settings → Projects: `Smoke`,
+   key `SMOKE`. Settings → People: invite `smoke@example.com` as Team Lead of
+   Smoke, and set its password from the email.
+5. Upload an attachment to any task and download it again.
+
+**Back on the server: backups, proven**
+
+```bash
+cd /srv/taskmanager
+docker compose -f docker-compose.prod.yml exec backup /scripts/backup.sh
+docker compose -f docker-compose.prod.yml exec backup \
+  sh -c '. /scripts/rclone-remotes.sh && rclone lsl "backup:$BACKUP_S3_BUCKET/database"'
+
+docker compose -f docker-compose.prod.yml exec postgres \
+  sh -c 'createdb -U "$POSTGRES_USER" taskmanager_restore'
+docker compose -f docker-compose.prod.yml exec backup sh -c \
+  '/scripts/restore.sh remote "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/taskmanager_restore"'
+docker compose -f docker-compose.prod.yml exec postgres \
+  sh -c 'dropdb -U "$POSTGRES_USER" taskmanager_restore'
+```
+
+**From your Windows machine, in this repository: the smoke test**
+
+```powershell
+$env:BASE_URL="https://tasks.example.com"
+$env:SMOKE_EMAIL="smoke@example.com"
+$env:SMOKE_PASSWORD="<smoke password>"
+pnpm smoke
+```
+
+**Then**
+
+1. UptimeRobot: Keyword monitor on `https://tasks.example.com/api/v1/ready`,
+   keyword `"ready":true`, 5 minutes.
+2. The day after: `free -m` on the server. Under 20% in use → Edit shape and
+   reduce memory (see **Don't let Oracle reclaim it as idle**).
+3. Add a line to the **Restore drill log** above.

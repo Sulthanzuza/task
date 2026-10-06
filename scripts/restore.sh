@@ -27,13 +27,13 @@ case "$DUMP" in
     : "${BACKUP_S3_ACCESS_KEY:?BACKUP_S3_ACCESS_KEY is required}"
     : "${BACKUP_S3_SECRET_KEY:?BACKUP_S3_SECRET_KEY is required}"
 
-    mc alias set backup "$BACKUP_S3_ENDPOINT" "$BACKUP_S3_ACCESS_KEY" "$BACKUP_S3_SECRET_KEY" >/dev/null
+    . "$(dirname "$0")/rclone-remotes.sh"
 
     WANTED="${DUMP#remote}"
     WANTED="${WANTED#:}"
     if [ -z "$WANTED" ]; then
       # Newest by name, which sorts correctly because the stamp is ISO-8601.
-      WANTED="$(mc ls "backup/$BACKUP_S3_BUCKET/database/" | awk '{print $NF}' | sort | tail -1)"
+      WANTED="$(rclone lsf --files-only "backup:$BACKUP_S3_BUCKET/database" | grep '\.dump$' | sort | tail -1)"
       if [ -z "$WANTED" ]; then
         echo "No dumps found in $BACKUP_S3_BUCKET/database/" >&2
         exit 1
@@ -42,7 +42,7 @@ case "$DUMP" in
 
     LOCAL="/tmp/$WANTED"
     echo "Fetching $WANTED from the off-site bucket"
-    mc cp --quiet "backup/$BACKUP_S3_BUCKET/database/$WANTED" "$LOCAL"
+    rclone copyto --quiet "backup:$BACKUP_S3_BUCKET/database/$WANTED" "$LOCAL"
     DUMP="$LOCAL"
     ;;
 esac

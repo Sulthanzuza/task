@@ -50,27 +50,28 @@ echo "Wrote $TARGET ($SIZE bytes)"
 # Off this server
 # ---------------------------------------------------------------------------
 
-# --insecure is deliberately not set: an endpoint that cannot present a valid
+# Certificate checking stays on: an endpoint that cannot present a valid
 # certificate is not somewhere to put the only copy of the data.
-mc alias set backup "$BACKUP_S3_ENDPOINT" "$BACKUP_S3_ACCESS_KEY" "$BACKUP_S3_SECRET_KEY" \
-  ${BACKUP_S3_REGION:+--api S3v4} >/dev/null
+. "$(dirname "$0")/rclone-remotes.sh"
 
-if ! mc ls "backup/$BACKUP_S3_BUCKET" >/dev/null 2>&1; then
-  echo "Creating bucket $BACKUP_S3_BUCKET"
-  mc mb --ignore-existing "backup/$BACKUP_S3_BUCKET" >/dev/null
+# The bucket is made by hand, once, at the provider: the key here is scoped to
+# it and cannot create one. Fail loudly if it is not reachable rather than
+# discovering it at restore time.
+if ! rclone lsf --max-depth 1 "backup:$BACKUP_S3_BUCKET" >/dev/null; then
+  echo "Cannot reach bucket $BACKUP_S3_BUCKET at $BACKUP_S3_ENDPOINT: check the endpoint, region and key" >&2
+  exit 1
 fi
 
 echo "Uploading the dump to $BACKUP_S3_BUCKET/database/"
-mc cp --quiet "$TARGET" "backup/$BACKUP_S3_BUCKET/database/"
+rclone copyto --quiet "$TARGET" "backup:$BACKUP_S3_BUCKET/database/$(basename "$TARGET")"
 
 # The attachments. Without them a restore gives everybody their tasks back
 # with every file on them broken, which is a restore that fails review.
 if [ -n "${S3_BUCKET:-}" ] && [ -n "${S3_ENDPOINT:-}" ]; then
-  mc alias set files "$S3_ENDPOINT" "${S3_ACCESS_KEY_ID:-}" "${S3_SECRET_ACCESS_KEY:-}" >/dev/null
-  echo "Mirroring $S3_BUCKET to $BACKUP_S3_BUCKET/files/"
-  # --overwrite, not --remove: a file deleted here should not vanish from the
-  # backup on the next run, or the backup follows the mistake within a day.
-  mc mirror --quiet --overwrite "files/$S3_BUCKET" "backup/$BACKUP_S3_BUCKET/files/"
+  echo "Copying $S3_BUCKET to $BACKUP_S3_BUCKET/files/"
+  # copy, not sync: a file deleted here should not vanish from the backup on
+  # the next run, or the backup follows the mistake within a day.
+  rclone copy --quiet "files:$S3_BUCKET" "backup:$BACKUP_S3_BUCKET/files"
 else
   echo "No S3_BUCKET configured; attachments were not backed up" >&2
 fi
@@ -79,9 +80,12 @@ fi
 # Retention, at both ends
 # ---------------------------------------------------------------------------
 
+# On B2 a delete through the S3 API only hides the file; the bucket's
+# lifecycle rule ("keep only the last version") is what removes it a day
+# later. See docs/deploy.md.
 echo "Removing remote dumps older than $RETENTION_DAYS days"
-mc rm --quiet --recursive --force --older-than "${RETENTION_DAYS}d" \
-  "backup/$BACKUP_S3_BUCKET/database/" || true
+rclone delete --quiet --min-age "${RETENTION_DAYS}d" "backup:$BACKUP_S3_BUCKET/database" ||
+  echo "Remote retention failed; old dumps were left in place" >&2
 
 # Local copies are a convenience for a fast restore, not the backup, so they
 # are kept for a shorter time than the remote ones.

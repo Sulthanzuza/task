@@ -1,0 +1,26 @@
+# The images install their own dependencies. A host node_modules copied over
+# the top breaks the build (pnpm's links point at the host's store) and, built
+# from Windows or macOS, carries native binaries for the wrong platform.
+**/node_modules
+**/dist
+**/.turbo
+
+# Nothing secret goes into a build context: it ends up in the image layers or
+# the builder's cache, and either can outlive the server.
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Data, not source.
+backups
+certs
+certbot-www
+uploads
+apps/api/uploads
+
+.git
+apps/web/e2e/screenshots
+apps/web/test-results
+apps/web/playwright-report
+*.docx

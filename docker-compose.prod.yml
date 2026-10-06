@@ -1,5 +1,9 @@
 # Production stack: one Nginx, one API, one worker, one database.
 #
+# Attachments live in an external S3-compatible bucket (OCI Object Storage on
+# the Oracle deployment), not in a container here: see S3_* in
+# .env.production.example.
+#
 # Exactly one API instance for now. Socket.IO keeps connection state in memory,
 # so a second instance would leave clients connected to a process that never
 # hears about their events. See docs/deploy.md before scaling out.
@@ -143,24 +147,6 @@ services:
       done'
     logging: *default-logging
 
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    expose:
-      - '9000'
-
-    logging: *default-logging
   # restart: unless-stopped only covers a process that exits. A container that
   # is running but failing its health check would sit there indefinitely, which
   # is exactly the case a health check exists to catch, so something has to act
@@ -196,4 +182,3 @@ services:
 
 volumes:
   pgdata:
-  miniodata:

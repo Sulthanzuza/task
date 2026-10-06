@@ -2,6 +2,51 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-rc4 — 2026-10-06
+
+The runbook rewritten for Oracle Cloud Always Free (Ampere A1, arm64), and
+two bugs that would have stopped any fresh deployment.
+
+### Fixed
+
+- **MinIO could no longer be installed.** Its server image is gone from
+  Docker Hub and its `mc` client downloads return 410, so a fresh server could
+  not start the stack or build the backup image, on any architecture. The
+  `minio` service is removed: attachments live in OCI Object Storage through
+  its S3 API, and the backup and restore scripts use rclone from the Alpine
+  archive (`scripts/rclone-remotes.sh` defines both remotes from the
+  environment, so no file holds the keys).
+- **The scripts were not executable.** They were committed as `100644`, so
+  `./scripts/check-tls.sh`, `exec backup /scripts/backup.sh` and
+  `/scripts/restore.sh` would all have failed with "Permission denied" on the
+  server.
+- **No `.dockerignore`.** A build from a developer's checkout copied its
+  `node_modules` over the image's own, and the build context carried `.git`,
+  `backups/` and any `.env` file.
+- **The backup no longer creates its bucket.** It checks the bucket is
+  reachable and fails loudly if not; the key is scoped to one bucket and
+  cannot create one anyway.
+
+### Changed
+
+- `docs/deploy.md`: a new **Oracle Cloud: the server** section (instance, VCN
+  security list, iptables rather than ufw, idle reclamation, the attachments
+  bucket); Brevo SMTP with its SPF, DKIM and DMARC records; Backblaze B2 with
+  a one-bucket key and the lifecycle rule that makes deletions free space;
+  UptimeRobot; and **The whole sequence**, every command in order.
+- `.env.production.example`: Brevo, OCI Object Storage and B2 values, and
+  `AWS_*_CHECKSUM_*=WHEN_REQUIRED` for S3-compatible stores.
+
+### Verified
+
+All three images built with `docker buildx build --platform linux/arm64`;
+argon2 hashes and verifies in the arm64 API image; nginx and the built app
+are in the arm64 web image. In the arm64 backup image, against a throwaway
+Postgres and an S3 server: backup, attachment copy, remote retention (an aged
+dump removed, recent ones kept), a wrong key failing loudly, restore from the
+remote copy (50 users, 200 tasks verified), and the guard refusing the live
+database name.
+
 ## v1.0.0-rc3 — 2026-10-03
 
 Review of the rc2 runbook, which found one real bug and several commands

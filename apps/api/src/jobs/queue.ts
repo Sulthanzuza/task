@@ -1,6 +1,6 @@
 import { PgBoss } from 'pg-boss';
 import type { IDatabase } from 'pg-boss/dist/types';
-import { env, jobQueueEnabled, poolSizes } from '../config/env';
+import { databaseSsl, env, jobQueueEnabled, poolSizes } from '../config/env';
 import { logger } from '../lib/logger';
 import type { QueueConnection } from '../db/client';
 
@@ -31,6 +31,8 @@ export async function getQueue(): Promise<PgBoss> {
       // Its share of DATABASE_MAX_CONNECTIONS, so the two pools together stay
       // inside a pooler's allowance.
       max: poolSizes().queue,
+      // The same verified TLS as the app's own pool.
+      ssl: databaseSsl(),
     });
 
     instance.on('error', (error: unknown) => {

@@ -18,7 +18,8 @@ services:
     name: taskmanager
     runtime: docker
     plan: free
-    # Render has no region in India; Singapore is the nearest.
+    # Render has no region in India; Singapore is the nearest, and the
+    # Supabase project is in Singapore too, so database round trips stay local.
     region: singapore
     branch: main
     autoDeploy: true
@@ -54,11 +55,17 @@ services:
         value: ''
 
       # ---- Database: Supabase, Session pooler --------------------------------
-      # Connect → Session pooler: postgres://postgres.<ref>:<password>@
-      # aws-0-<region>.pooler.supabase.com:5432/postgres. Not the direct
-      # connection (IPv6 only, which Render cannot reach) and not the
-      # Transaction pooler on 6543 (pg-boss needs a session).
+      # Connect → Session pooler: postgresql://postgres.<ref>:<password>@
+      # aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres, with nothing
+      # after it: no ?sslmode, which would override the certificate below.
+      # Not the direct connection (IPv6 only, which Render cannot reach) and
+      # not the Transaction pooler on 6543 (pg-boss needs a session).
       - key: DATABASE_URL
+        sync: false
+      # Supabase's CA, as PEM: Database Settings → SSL Configuration →
+      # Download certificate. Every connection is TLS and verified against it,
+      # host name included; production refuses to start without it.
+      - key: DATABASE_CA_CERT
         sync: false
       # Every connection this process may hold, pg-boss's included: 3 + 2.
       - key: DATABASE_MAX_CONNECTIONS
@@ -96,9 +103,9 @@ services:
       # https://<ref>.storage.supabase.co/storage/v1/s3
       - key: S3_ENDPOINT
         sync: false
-      # The project's region: ap-south-1 for Mumbai.
+      # The Supabase project's region: Southeast Asia (Singapore).
       - key: S3_REGION
-        sync: false
+        value: ap-southeast-1
       - key: S3_BUCKET
         value: task-attachments
       - key: S3_ACCESS_KEY_ID

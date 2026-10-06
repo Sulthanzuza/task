@@ -351,6 +351,7 @@ Every value the API will not start without, and how to make it:
 | `SERVER_NAME` | your domain, e.g. `tasks.example.com` | nginx cannot find its certificate without it; Compose refuses to start |
 | `WEB_ORIGIN` | `https://` + the same domain | must be `https` in production |
 | `DATABASE_URL` | `postgres://USER:PASSWORD@postgres:5432/DB`, matching the three `POSTGRES_*` values | must parse as a URL |
+| `DATABASE_TLS` | `off`: Postgres is on the Compose network, so there is no certificate to verify | unset means `verify`, and production then refuses to start without `DATABASE_CA_CERT` |
 | `POSTGRES_USER` | anything, e.g. `taskmanager` | — |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` | — |
 | `POSTGRES_DB` | anything, e.g. `taskmanager` | — |

@@ -2,6 +2,71 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-render-rc2 — 2026-10-06
+
+Decisions on the Render release: both services in Singapore, verified
+database TLS, and migrations that cannot race.
+
+### Changed
+
+- **Database TLS is verified.** `DATABASE_CA_CERT` (PEM, from Supabase's SSL
+  settings) is passed as `ssl.ca` with `rejectUnauthorized: true` to every
+  pool: the app's, pg-boss's, the migrator's and the CLI's. The server's
+  certificate is checked against it, host name included. Production refuses
+  to start without it unless `DATABASE_TLS=off`, which the Docker deployment
+  sets because its Postgres never leaves the host. A `sslmode` (or any TLS
+  setting) left in `DATABASE_URL` is refused, because pg would let it
+  override the certificate. The `uselibpqcompat=true&sslmode=require` form is
+  gone; one plain URL now serves Render, the first admin and the backups.
+- **The GitHub Actions backup and the scratch restore verify too:**
+  `PGSSLMODE=verify-full` with `PGSSLROOTCERT` written from the
+  `DATABASE_CA_CERT` secret (or `SCRATCH_DATABASE_CA_CERT`). They refuse to run
+  without one.
+- **Migrations take `pg_advisory_lock`** on one connection for their whole
+  run, so two instances starting together cannot both migrate: the second
+  waits, then finds nothing to do.
+- **The migrator checks the production configuration before connecting.**
+  It runs first in the start command, so it is what would have connected
+  without a CA certificate, unencrypted, to a database that allowed it; the
+  server's own check came too late.
+- **Singapore for both.** The guide creates the Supabase project in
+  Southeast Asia (Singapore), beside the Render service; `render.yaml` sets
+  `S3_REGION=ap-southeast-1`.
+- **Brevo keeps blocking unknown addresses.** The guide adds Render's
+  published outbound ranges for Singapore to Brevo's Authorized IPs, after the
+  service exists, instead of turning the blocking off.
+
+### Fixed
+
+- **Calendar day cells were buttons containing links** (axe:
+  `nested-interactive`), which assistive technology cannot present as either.
+  The cell is now a plain element and the day number is the button, labelled
+  with the full date and carrying the selected state; a click anywhere in the
+  cell still selects the day. It surfaced only on days with tasks, in runs
+  where the tasks had rendered before axe looked.
+
+### Verified
+
+- Two migrator processes started together against an empty database: both
+  succeed, each migration applied once. With the lock held elsewhere a
+  migrator applies nothing until it is released. With the lock removed, the
+  same test fails (`duplicate key value violates unique constraint
+  "pg_extension_name_index"`), so it is the lock that passes it.
+- Against Postgres servers with certificates from a CA made for the test:
+  both pools connect over TLS (`pg_stat_ssl`), a certificate pasted as one
+  line with `\n` works, another CA is refused, a certificate from the right CA
+  for another host name is refused, and `?sslmode=` in the URL is refused.
+- libpq as the backup workflow runs it: the CA written by `printf '%b'` from a
+  one-line secret, `psql` and `pg_dump` with `verify-full` connect; a wrong CA
+  and a wrong host name are refused.
+- The Render image, production mode, against a TLS-only Postgres 17: two
+  instances started together both came up (`Waited for another migrator to
+  finish` in one log), each migration recorded once, every app connection on
+  TLS. Without the CA, against a Postgres that accepts plain connections, the
+  migrator refused and created nothing.
+- Not verified: Supabase's own certificate and pooler host names. Its CA is
+  documented for `verify-full`; the first real deploy is the test.
+
 ## v1.0.0-render-rc1 — 2026-10-06
 
 A second way to deploy, free and with no credit card: one Render web service,

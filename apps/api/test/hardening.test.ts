@@ -178,6 +178,7 @@ describe('the production configuration guard', () => {
     S3_ACCESS_KEY_ID: 'access-key',
     S3_SECRET_ACCESS_KEY: 'secret-key',
     MAIL_TRANSPORT: 'smtp',
+    DATABASE_CA_CERT: '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----',
   };
 
   it('accepts a properly configured production environment', async () => {
@@ -250,6 +251,27 @@ describe('the production configuration guard', () => {
 
     expect(await errorsFor({ ...baseline, RUN_MODE: 'all', WEB_DIST_DIR: dir })).toEqual([]);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to reach the database without a certificate to verify it by', async () => {
+    const { DATABASE_CA_CERT: _omit, ...rest } = baseline;
+    expect((await errorsFor(rest)).join(' ')).toContain('DATABASE_CA_CERT is required');
+
+    // The Docker deployment: Postgres on the Compose network, opted out by name.
+    expect(await errorsFor({ ...rest, DATABASE_TLS: 'off' })).toEqual([]);
+  });
+
+  it('refuses a database certificate that is not PEM', async () => {
+    const errors = await errorsFor({ ...baseline, DATABASE_CA_CERT: 'not a certificate' });
+    expect(errors.join(' ')).toContain('PEM');
+  });
+
+  it('refuses sslmode in the URL beside the certificate, since pg would let it win', async () => {
+    const errors = await errorsFor({
+      ...baseline,
+      DATABASE_URL: 'postgres://u:p@db.example.com:5432/postgres?sslmode=require',
+    });
+    expect(errors.join(' ')).toContain('sslmode');
   });
 
   it('refuses a password hash cost below the OWASP minimum', async () => {

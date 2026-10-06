@@ -6,9 +6,11 @@ name: Restore drill
 #   target: local     into a throwaway Postgres 17 inside this run. Needs only
 #                     the B2 secrets. The quarterly drill.
 #   target: scratch   into a second, empty Supabase project, through its
-#                     Session pooler (secret SCRATCH_DATABASE_URL). Proves the
-#                     dump restores onto Supabase itself. Refused if that URL
-#                     is the production database.
+#                     Session pooler (secret SCRATCH_DATABASE_URL, no
+#                     ?sslmode), verified against SCRATCH_DATABASE_CA_CERT or,
+#                     if that is not set, DATABASE_CA_CERT. Proves the dump
+#                     restores onto Supabase itself. Refused if that URL is
+#                     the production database.
 #
 # Never into production: restore.sh refuses the production database by
 # identity, whatever the target is called.
@@ -78,6 +80,7 @@ jobs:
         if: inputs.target == 'scratch'
         env:
           SCRATCH_DATABASE_URL: ${{ secrets.SCRATCH_DATABASE_URL }}
+          SCRATCH_CA: ${{ secrets.SCRATCH_DATABASE_CA_CERT || secrets.DATABASE_CA_CERT }}
         run: |
           if [ -z "$SCRATCH_DATABASE_URL" ]; then
             echo "Set the SCRATCH_DATABASE_URL secret to a second Supabase project's Session pooler URL." >&2
@@ -87,7 +90,14 @@ jobs:
             echo "Set the DATABASE_URL secret too, so the drill can refuse to restore into it." >&2
             exit 1
           fi
+          if [ -z "$SCRATCH_CA" ]; then
+            echo "Set SCRATCH_DATABASE_CA_CERT (or DATABASE_CA_CERT): no unverified connections." >&2
+            exit 1
+          fi
+          printf '%b\n' "$SCRATCH_CA" > "$RUNNER_TEMP/db-ca.pem"
           docker run --rm \
+            -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/certs/db-ca.pem \
+            -v "$RUNNER_TEMP/db-ca.pem:/certs/db-ca.pem:ro" \
             -e BACKUP_S3_ENDPOINT -e BACKUP_S3_REGION -e BACKUP_S3_BUCKET \
             -e BACKUP_S3_ACCESS_KEY -e BACKUP_S3_SECRET_KEY -e RESTORE_FORBIDDEN_URL \
             -e RESTORE_ALLOW_DATABASE=postgres -e SCRATCH_DATABASE_URL \

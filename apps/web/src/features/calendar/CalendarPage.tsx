@@ -45,6 +45,15 @@ function startOfWeek(date: string, weekStartsOn = 1): string {
   return addDays(date, -((weekday - weekStartsOn + 7) % 7));
 }
 
+/** "Monday, 28 September", for the day button: "28" alone says too little. */
+function dayLabel(date: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(date + 'T00:00:00'));
+}
+
 function monthLabel(date: string): string {
   const [y, m] = date.split('-').map(Number);
   return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
@@ -233,15 +242,22 @@ export function CalendarPage() {
             const resting = weekend || holiday !== null;
             const picked = date === selected;
 
+            /*
+             * The cell is not a button: it holds links to its tasks, and a
+             * link inside a button is two controls at once that assistive
+             * technology cannot present (axe: nested-interactive). The day
+             * number is the button; a click anywhere else in the cell does
+             * the same, for the mouse.
+             */
             return (
-              <button
-                type="button"
+              // The click is a mouse convenience; the day-number button is the keyboard path.
+              <div
                 key={date}
                 data-date={date}
                 data-today={isToday ? 'true' : undefined}
-                aria-pressed={picked}
                 onClick={() => setPicked(date)}
                 className={cn(
+                  'cursor-pointer',
                   'min-h-24 border-r border-b border-border-subtle p-1.5 text-left last:border-r-0',
                   // No opacity: it fades the text inside below contrast. The
                   // muted day number is what sets a neighbouring month back.
@@ -266,9 +282,17 @@ export function CalendarPage() {
                 title={holiday ?? undefined}
               >
                 <div className="mb-1 flex items-center gap-1">
-                  <span
+                  <button
+                    type="button"
+                    aria-pressed={picked}
+                    aria-label={dayLabel(date)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPicked(date);
+                    }}
                     className={cn(
                       'inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs tabular-nums',
+                      'focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none',
                       // Days from the neighbouring months are set back by one
                       // step, ink to muted, not to faint: faint is decoration
                       // and fails contrast on a number someone has to read.
@@ -280,7 +304,7 @@ export function CalendarPage() {
                     )}
                   >
                     {Number(date.slice(8, 10))}
-                  </span>
+                  </button>
                   {dayTasks.length > 0 ? (
                     <span className="tabular text-[10px] text-ink-faint">{dayTasks.length}</span>
                   ) : null}
@@ -337,7 +361,7 @@ export function CalendarPage() {
                     </Link>
                   ) : null}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

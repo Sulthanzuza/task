@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
-import { env, poolSizes } from '../config/env';
+import { databaseSsl, env, poolSizes } from '../config/env';
 import * as schema from './schema';
 
 /**
@@ -16,6 +16,8 @@ export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,
   // Our share of DATABASE_MAX_CONNECTIONS; pg-boss holds the rest.
   max: poolSizes().app,
+  // Verified TLS when DATABASE_CA_CERT is set; see databaseSsl.
+  ssl: databaseSsl(),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
 });

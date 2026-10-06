@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `master` (renamed to `main` when first pushed; see `docs/deploy-render.md`), tagged **v1.0.0-render-rc1**.
+Last updated: 2026-10-06. Branch `master` (renamed to `main` when first pushed; see `docs/deploy-render.md`), tagged **v1.0.0-render-rc2**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -52,7 +52,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `543670c` | rc3: the placeholder-certificate bug, and runbook corrections |
 | `e48beb7` | Calendar takes today from `/org/calendar` (it hung for members and the admin); dashboard team picker for the admin; the More menu was clipped by the scrolling nav; Team page shows load errors |
 | `4d8e19c` | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
-| _this one_ | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
+| `a75f1f3` | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
+| _this one_ | render-rc2: Singapore for Render and Supabase; database TLS verified against `DATABASE_CA_CERT` (app, pg-boss, CLI, and the Actions backup with `verify-full`); migrations under an advisory lock; Brevo allows Render's Singapore ranges instead of blocking being turned off |
 
 ### The design system, applied (three design prompts)
 
@@ -295,9 +296,6 @@ None of these is blocking. Each is a real gap, checked against the code today.
   for Supabase's pooler, an S3 server for Supabase Storage and B2, and a stub for Brevo's
   API. Not exercised: Supabase's TLS on the pooler, Supabase Storage's S3 quirks, Brevo's
   real API, and the two GitHub workflows on GitHub itself (the repository is not pushed).
-- **Database TLS is encrypted but not verified** on the Render deployment
-  (`uselibpqcompat=true&sslmode=require`). Verifying needs Supabase's CA certificate shipped
-  with the image.
 
 - **Calendar bars.** `CalendarPage` groups tasks by `dueDate` only, so a task with a
   start date and a due date shows as a single dot on the last day instead of a bar
@@ -372,7 +370,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
-| `apps/api` integration | 22 | 404 |
+| `apps/api` integration | 24 | 414 |
 | `apps/web` end-to-end (`pnpm e2e`) | 13 | 58 |
 | `apps/web` end-to-end, one process (`pnpm e2e:all`, `RUN_MODE=all`) | 13 | 58 |
 

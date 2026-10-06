@@ -51,6 +51,24 @@ const envSchema = z.object({
 
   DATABASE_URL: z.string().url('DATABASE_URL must be a postgres connection string'),
 
+  /**
+   * The CA that signed the database server's certificate, as PEM. When set,
+   * every connection is TLS and the server's certificate is verified against
+   * it, host name included. For Supabase: Database Settings → SSL
+   * Configuration → Download certificate. A value with literal "\n"
+   * sequences, as a one-line secret store keeps it, is accepted too.
+   */
+  DATABASE_CA_CERT: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value.replace(/\\n/g, '\n').trim() : undefined)),
+  /**
+   * verify: production refuses to start without DATABASE_CA_CERT. off: for a
+   * database that never leaves the host, as in the Docker deployment, where
+   * Postgres is on the Compose network and has no certificate to verify.
+   */
+  DATABASE_TLS: z.enum(['verify', 'off']).default('verify'),
+
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET needs at least 32 characters'),
   /**
    * Access token lifetime, in seconds. Seconds rather than minutes so an
@@ -189,6 +207,29 @@ export const trustedProxyHops: number | false = proxyHops > 0 ? proxyHops : fals
 
 export const runsEverything = env.RUN_MODE === 'all';
 
+/** TLS settings in a connection string, which pg lets override the ssl option. */
+const URL_TLS_PARAMS = /[?&](sslmode|sslrootcert|sslcert|sslkey|uselibpqcompat)=/i;
+
+/**
+ * TLS for every Postgres connection: the app's pool, pg-boss's, the migrator
+ * and the CLI. Verified against DATABASE_CA_CERT, host name included, never
+ * merely encrypted.
+ *
+ * Throws when the URL also carries sslmode and friends: pg applies those on
+ * top of this object, so a leftover `?sslmode=require` would silently replace
+ * verification with whatever it means to that version of the driver.
+ */
+export function databaseSsl(): { ca: string; rejectUnauthorized: true } | undefined {
+  if (env.DATABASE_TLS === 'off' || !env.DATABASE_CA_CERT) return undefined;
+  if (URL_TLS_PARAMS.test(env.DATABASE_URL)) {
+    throw new Error(
+      'DATABASE_URL carries sslmode or another TLS setting, which would override ' +
+        'DATABASE_CA_CERT. Remove it: TLS is configured by the certificate alone.',
+    );
+  }
+  return { ca: env.DATABASE_CA_CERT, rejectUnauthorized: true };
+}
+
 export const mailTransport = env.MAIL_TRANSPORT ?? 'smtp';
 
 /**
@@ -261,6 +302,21 @@ export function productionConfigErrors(): string[] {
     errors.push('STORAGE_DRIVER=local keeps uploads on a single container disk; use s3');
   } else if (!env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
     errors.push('S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set for STORAGE_DRIVER=s3');
+  }
+
+  if (env.DATABASE_TLS === 'verify') {
+    if (!env.DATABASE_CA_CERT) {
+      errors.push(
+        'DATABASE_CA_CERT is required to verify the database server; ' +
+          'set DATABASE_TLS=off only for a database on the same host',
+      );
+    } else if (!env.DATABASE_CA_CERT.includes('-----BEGIN CERTIFICATE-----')) {
+      errors.push('DATABASE_CA_CERT must be a PEM certificate (-----BEGIN CERTIFICATE-----)');
+    } else if (URL_TLS_PARAMS.test(env.DATABASE_URL)) {
+      errors.push(
+        'DATABASE_URL must not carry sslmode or other TLS settings with DATABASE_CA_CERT',
+      );
+    }
   }
 
   // Chosen on purpose, not inherited: the wrong default would mean mail that

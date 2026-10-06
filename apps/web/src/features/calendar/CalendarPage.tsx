@@ -5,9 +5,7 @@ import type { TaskSummary } from '@tm/shared';
 import { priorityColor, tintedPill, PRIORITY_LABELS } from '@tm/shared';
 import { useTaskList } from '@/features/tasks/api';
 import { useProjects, useUsers } from '@/features/team/api';
-import { useDashboardSummary } from '@/features/dashboard/api';
-import { useAuth } from '@/features/auth/AuthContext';
-import { Button, Card, Select, Skeleton } from '@/components/ui/primitives';
+import { Button, Card, EmptyState, Select, Skeleton } from '@/components/ui/primitives';
 import { PriorityIcon, StatusBadge } from '@/components/common/badges';
 import { nonWorkingDay, useWorkCalendar } from './api';
 import { cn } from '@/lib/utils';
@@ -15,7 +13,7 @@ import { cn } from '@/lib/utils';
 /**
  * Tasks by due date.
  *
- * "Today" comes from the dashboard summary, which computes it in the org time
+ * "Today" comes from the work calendar, which computes it in the org time
  * zone. Using the browser's clock would put a task on the wrong day for anyone
  * working in a different zone, which is exactly the bug the server-side date
  * rules exist to prevent.
@@ -60,13 +58,11 @@ export function CalendarPage() {
   // once the organisation's today is known.
   const [picked, setPicked] = useState<string | null>(null);
   const workCalendar = useWorkCalendar();
-  const { primaryTeamId } = useAuth();
   const projects = useProjects();
   const people = useUsers();
 
   // The org's today, not the browser's.
-  const summary = useDashboardSummary(primaryTeamId);
-  const today = summary.data?.asOfDate;
+  const today = workCalendar.data?.today;
 
   const view = (params.get('view') as ViewMode) ?? 'month';
   const anchor = params.get('date') ?? today;
@@ -116,6 +112,19 @@ export function CalendarPage() {
       view === 'week'
         ? addDays(anchor, direction * 7)
         : addDays(startOfMonth(anchor), direction * 32).slice(0, 8) + '01',
+    );
+  }
+
+  if (workCalendar.isError) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <Card>
+          <EmptyState
+            title="The calendar could not be loaded"
+            action={<Button onClick={() => void workCalendar.refetch()}>Try again</Button>}
+          />
+        </Card>
+      </div>
     );
   }
 
@@ -203,7 +212,7 @@ export function CalendarPage() {
       </header>
 
       <p className="text-xs text-ink-muted">
-        Dates are shown in {summary.data?.timezone}, the organisation time zone.
+        Dates are shown in {workCalendar.data?.timezone}, the organisation time zone.
       </p>
 
       <Card className="overflow-hidden">

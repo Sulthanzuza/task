@@ -26,6 +26,19 @@ beforeEach(async () => {
   fx = await seedFixture(harness.app);
 });
 
+describe('work calendar', () => {
+  // The calendar screen takes "today" from here. Members and the admin lead
+  // no team, so the dashboard summary it used before was never an answer for them.
+  it("gives everyone signed in the organisation's today", async () => {
+    for (const actor of [fx.member, fx.admin]) {
+      const res = await as(harness.app, actor).get('/api/v1/org/calendar').expect(200);
+      expect(res.body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(res.body.timezone).toBeTruthy();
+      expect(Array.isArray(res.body.weekendDays)).toBe(true);
+    }
+  });
+});
+
 describe('holidays', () => {
   it('adds one, lists it and deletes it again', async () => {
     const created = await as(harness.app, fx.admin)

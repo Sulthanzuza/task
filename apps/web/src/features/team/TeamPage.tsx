@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useTeams } from './api';
-import { Card, EmptyState, Skeleton } from '@/components/ui/primitives';
+import { Button, Card, EmptyState, Skeleton } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
 import { ROLE_LABELS } from '@tm/shared';
 
@@ -12,6 +12,21 @@ export function TeamPage() {
       <div className="mx-auto max-w-4xl space-y-3 px-4 py-6">
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  // Without this a failed request read as "You are not on a team yet".
+  if (teams.isError) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <Card>
+          <EmptyState
+            title="The team could not be loaded"
+            description={teams.error.message}
+            action={<Button onClick={() => void teams.refetch()}>Try again</Button>}
+          />
+        </Card>
       </div>
     );
   }

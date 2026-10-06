@@ -169,5 +169,8 @@ export const workCalendarSchema = z.object({
   weekendDays: z.array(z.number().int().min(0).max(6)),
   weekStartsOn: z.number().int().min(0).max(6),
   holidays: z.array(z.object({ date: z.string(), name: z.string() })),
+  /** Today's date in the org time zone, so no screen has to trust the browser's clock. */
+  today: z.string(),
+  timezone: z.string(),
 });
 export type WorkCalendarView = z.infer<typeof workCalendarSchema>;

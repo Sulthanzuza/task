@@ -19,6 +19,7 @@ import { users } from '../../db/schema';
 import { orgSettings } from '../../db/schema';
 import { NotFoundError, ValidationError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
+import { today } from '../../lib/date-utils';
 import { authenticate, requireActor, requireRole } from '../../middleware/authenticate';
 import { handler, validate } from '../../middleware/validate';
 import { authorize } from '../permissions/authorize';
@@ -248,6 +249,8 @@ orgRouter.get(
       weekendDays: settings.weekendDays,
       weekStartsOn: settings.weekStartsOn,
       holidays: await listHolidays(),
+      today: today(new Date(), settings.timezone),
+      timezone: settings.timezone,
     });
   }),
 );

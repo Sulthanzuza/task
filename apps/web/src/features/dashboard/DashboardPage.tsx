@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowDownRight, ArrowUpRight, FolderKanban, Minus } from 'lucide-react';
 import type { AttentionItem, DashboardCharts, DashboardSummary, MemberRow } from '@tm/shared';
 import type { TaskPriority, TaskStatus } from '@tm/shared';
 import { ATTENTION_REASON_LABELS, PRIORITY_ORDER, priorityColor, statusColor } from '@tm/shared';
 import { useAttention, useDashboardCharts, useDashboardMembers, useDashboardSummary } from './api';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useTeams } from '@/features/team/api';
 import { usePeriod } from '@/app/PeriodSwitcher';
 import {
   AreaTrend,
@@ -21,6 +22,7 @@ import {
   type HeatCell,
 } from '@/components/charts';
 import {
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -28,6 +30,7 @@ import {
   FigureLabel,
   HeroCard,
   SegmentedTabs,
+  Select,
   Skeleton,
 } from '@/components/ui/primitives';
 import {
@@ -92,23 +95,85 @@ export const KPI_LINKS = [
 ];
 
 export function DashboardPage() {
-  const { primaryTeamId } = useAuth();
+  const { user, isAdmin, primaryTeamId } = useAuth();
   const { period } = usePeriod();
+  const [params, setParams] = useSearchParams();
+  const teams = useTeams();
 
-  const summary = useDashboardSummary(primaryTeamId);
-  const members = useDashboardMembers(primaryTeamId);
-  const attention = useAttention(primaryTeamId);
-  const charts = useDashboardCharts(primaryTeamId, period);
+  // The admin leads no team of their own, so they choose one; a lead with
+  // more than one team can switch between them.
+  const choices = (teams.data?.items ?? []).filter((team) => isAdmin || team.leadId === user?.id);
+  const teamId = params.get('teamId') ?? primaryTeamId ?? choices[0]?.id;
+  const ready = Boolean(teamId);
+
+  const summary = useDashboardSummary(teamId, ready);
+  const members = useDashboardMembers(teamId, ready);
+  const attention = useAttention(teamId, ready);
+  const charts = useDashboardCharts(teamId, period, ready);
+
+  if (teams.isSuccess && !teamId) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-16">
+        <Card>
+          <EmptyState
+            title="No team to show"
+            description="The dashboard is drawn for one team. Create a team first, then come back."
+            action={
+              isAdmin ? (
+                <Button variant="outline" asChild>
+                  <Link to="/admin/teams">Go to teams</Link>
+                </Button>
+              ) : undefined
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  if (summary.isError) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-16">
+        <Card>
+          <EmptyState
+            title="The dashboard could not be loaded"
+            description={summary.error.message}
+            action={<Button onClick={() => void summary.refetch()}>Try again</Button>}
+          />
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4 px-4 py-6 sm:px-6">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">Team dashboard</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          {summary.data
-            ? readableDate(summary.data.asOfDate) + ' · ' + summary.data.timezone
-            : 'Loading the current picture…'}
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Team dashboard</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            {summary.data
+              ? readableDate(summary.data.asOfDate) + ' · ' + summary.data.timezone
+              : 'Loading the current picture…'}
+          </p>
+        </div>
+        {choices.length > 1 ? (
+          <Select
+            aria-label="Team"
+            className="w-56"
+            value={teamId}
+            onChange={(event) => {
+              const next = new URLSearchParams(params);
+              next.set('teamId', event.target.value);
+              setParams(next, { replace: true });
+            }}
+          >
+            {choices.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </Select>
+        ) : null}
       </header>
 
       <KeyNumbers summary={summary.data} charts={charts.data} loading={summary.isLoading} />

@@ -127,17 +127,27 @@ export function Layout() {
           <nav
             aria-label="Main"
             className={cn(
-              'mx-auto hidden min-w-0 items-center gap-0.5 overflow-x-auto rounded-full',
+              'mx-auto hidden min-w-0 items-center gap-0.5 rounded-full',
               'border border-border-subtle bg-surface/70 p-1 min-[900px]:flex',
-              '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
             )}
           >
-            {items.map((item) => (
-              <NavLink key={item.to} to={item.to} className={({ isActive }) => pillClass(isActive)}>
-                <item.icon size={14} aria-hidden />
-                {item.label}
-              </NavLink>
-            ))}
+            {/*
+              Only the pills scroll. The More menu stays outside this box: an
+              overflow container clips both axes, so a dropdown inside it
+              opened invisibly within the bar.
+            */}
+            <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => pillClass(isActive)}
+                >
+                  <item.icon size={14} aria-hidden />
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
             {moreItems.length > 0 ? <MoreMenu items={moreItems} /> : null}
           </nav>
 

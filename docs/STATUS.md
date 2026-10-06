@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-03. Branch `master`, tagged **v1.0.0-rc3**.
+Last updated: 2026-10-06. Branch `master`, tagged **v1.0.0-rc3**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -49,7 +49,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `e04853f` | The third review round, and the font (below) |
 | `eefb658` | Release prep: the last three fixes, CHANGELOG.md, v1.0.0-rc1 |
 | `c84f2fc` | First-deploy runbook fixes, v1.0.0-rc2 |
-| _this one_ | rc3: the placeholder-certificate bug, and runbook corrections |
+| `543670c` | rc3: the placeholder-certificate bug, and runbook corrections |
+| _uncommitted_ | Calendar takes today from `/org/calendar` (it hung for members and the admin, who have no dashboard); the More menu was clipped by the scrolling nav; Team page shows load errors instead of "not on a team"; dashboard team picker, so the admin (who leads no team) gets a dashboard instead of an endless "Loading" |
 
 ### The design system, applied (three design prompts)
 

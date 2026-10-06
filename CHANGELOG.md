@@ -2,6 +2,31 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-render-rc4 — 2026-10-06
+
+### Added
+
+- **A one-time bootstrap of the first administrator**, for Render's free tier,
+  which has no shell. With `BOOTSTRAP_ADMIN_EMAIL` (and optionally
+  `BOOTSTRAP_ADMIN_NAME`) set, a start against an **empty** users table
+  creates that SUPER_ADMIN with no password and logs a single-use link to set
+  one, valid 24 hours, at WARN. Only the token's hash is stored; the raw token
+  is in that log line alone. With anybody in the table it does nothing and
+  logs that it was skipped: it never creates a second admin or resets a
+  password. The check and the insert share a transaction under an advisory
+  lock, so instances starting together create one admin. Both variables are
+  in `render.yaml` (`sync: false`, optional) and the guide says to remove
+  them after the first sign-in.
+
+### Verified
+
+- Creates on an empty database (password-less SUPER_ADMIN, hash only, one WARN
+  line carrying the link); the link sets a password once and signs in;
+  skips when users exist, leaving every password and token untouched; skips
+  on every start after the first; three concurrent bootstraps create one
+  admin; an empty value counts as unset; a malformed address is refused. Real
+  log output keeps the link while still redacting nested `token` fields.
+
 ## v1.0.0-render-rc3 — 2026-10-06
 
 Launch without email and without a domain of our own: the app runs at

@@ -39,6 +39,27 @@ const envSchema = z.object({
    * parameters and keep verifying; a sign-in rehashes them when these change.
    * The defaults are OWASP's minimum: 19 MiB, two passes, one lane.
    */
+  /**
+   * The first administrator, on a host with no shell (Render's free tier):
+   * created at start-up only when the users table is empty, with no password
+   * and a single-use link to set one written to the log. See
+   * modules/users/bootstrap.ts. Remove both once signed in. An empty value,
+   * as a dashboard may save one, counts as unset.
+   */
+  BOOTSTRAP_ADMIN_EMAIL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email('BOOTSTRAP_ADMIN_EMAIL must be an email address')
+      .optional(),
+  ),
+  BOOTSTRAP_ADMIN_NAME: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(2).max(120).default('Administrator'),
+  ),
+
   ARGON2_MEMORY_COST: z.coerce.number().int().min(1024).max(1_048_576).default(19_456),
   ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(2),
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),

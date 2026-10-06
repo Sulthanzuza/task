@@ -10,6 +10,7 @@ import {
 import { logger } from './lib/logger';
 import { closeDatabase } from './db/client';
 import { runWorker } from './jobs/runWorker';
+import { bootstrapAdmin } from './modules/users/bootstrap';
 import { closeRealtime, createRealtimeGateway } from './realtime/gateway';
 
 // A misconfigured production process must not serve at all.
@@ -33,6 +34,16 @@ for (const warning of unsafeProductionSettings()) {
  * dist/worker.js, a container of its own, and this stays null.
  */
 let stopWorker: (() => Promise<void>) | null = null;
+
+/*
+ * The first administrator, when the database has nobody in it and
+ * BOOTSTRAP_ADMIN_EMAIL is set. Before listening, so the link is in the log by
+ * the time the service is live. A failure is reported and the server still
+ * starts: an admin can always be created with dist/cli/createUser.js.
+ */
+await bootstrapAdmin().catch((error: unknown) => {
+  logger.error({ err: error }, 'Bootstrap of the first administrator failed.');
+});
 
 server.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV, mode: env.RUN_MODE }, 'API listening.');

@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.0.0-render-rc3**.
+Last updated: 2026-10-06. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.0.0-render-rc4**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -54,7 +54,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `4d8e19c` | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
 | `a75f1f3` | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
 | `ee25ca8` | render-rc2: Singapore for Render and Supabase; database TLS verified against `DATABASE_CA_CERT` (app, pg-boss, CLI, and the Actions backup with `verify-full`); migrations under an advisory lock; Brevo allows Render's Singapore ranges instead of blocking being turned off |
-| _this one_ | render-rc3: launch without email or a domain. `MAIL_TRANSPORT=none` (a warning, not a refusal); copyable invite links (single use, 7 days) and admin reset links (single use, 24 hours) in Admin → People; forgot-password and Settings → Email say email is off; `render.yaml` on the onrender address with a host-only cookie; Brevo and the custom domain moved to "Later" in the guide; `pnpm e2e:all` now runs the launch configuration |
+| `dbe2c44` | render-rc3: launch without email or a domain. `MAIL_TRANSPORT=none` (a warning, not a refusal); copyable invite links (single use, 7 days) and admin reset links (single use, 24 hours) in Admin → People; forgot-password and Settings → Email say email is off; `render.yaml` on the onrender address with a host-only cookie; Brevo and the custom domain moved to "Later" in the guide; `pnpm e2e:all` now runs the launch configuration |
+| _this one_ | render-rc4: one-time bootstrap of the first administrator from `BOOTSTRAP_ADMIN_EMAIL` on an empty database, with a single-use set-password link in the log |
 
 ### The design system, applied (three design prompts)
 

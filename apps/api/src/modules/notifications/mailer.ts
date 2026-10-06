@@ -61,8 +61,9 @@ async function sendWithBrevo(mail: Mail): Promise<void> {
 
 export async function sendMail(mail: Mail): Promise<void> {
   // Most tests assert on behaviour, not on SMTP; sending would only slow them
-  // down. The end-to-end run turns it on and checks the inbox.
-  if (!mailEnabled) return;
+  // down. The end-to-end run turns it on and checks the inbox. With
+  // MAIL_TRANSPORT=none the deployment has no email at all.
+  if (!mailEnabled || mailTransport === 'none') return;
 
   if (mailTransport === 'brevo-api') {
     await sendWithBrevo(mail);

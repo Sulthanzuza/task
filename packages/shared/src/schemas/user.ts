@@ -47,3 +47,24 @@ export const listUsersQuerySchema = cursorPaginationSchema.extend({
   role: userRoleSchema.optional(),
 });
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
+
+/**
+ * A one-time link an admin hands over by hand: to set a first password (an
+ * invitation) or a new one (a reset). Single use, and it expires. Returned
+ * whether or not email is on, so a lost email never strands anybody.
+ */
+export const issuedLinkSchema = z.object({
+  url: z.string().url(),
+  expiresAt: z.string(),
+});
+export type IssuedLink = z.infer<typeof issuedLinkSchema>;
+
+/** POST /users: the new person, and the link that lets them in. */
+export type InvitedUser = UserDetail & { invite: IssuedLink };
+
+/** POST /users/:id/resend-invite. emailed is false when email is turned off. */
+export interface ResentInvite {
+  email: string;
+  emailed: boolean;
+  invite: IssuedLink;
+}

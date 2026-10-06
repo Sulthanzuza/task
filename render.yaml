@@ -10,7 +10,8 @@
 #     (docker/render.Dockerfile).
 #   - No Shell or one-off jobs: the first administrator is created from your
 #     own machine against the database (docs/deploy-render.md).
-#   - Outbound SMTP is blocked: mail goes through Brevo's HTTP API.
+#   - Outbound SMTP is blocked: the launch sends no email at all
+#     (MAIL_TRANSPORT=none); Brevo's HTTP API can be switched on later.
 #   - The disk is ephemeral: attachments live in Supabase Storage.
 
 services:
@@ -48,10 +49,19 @@ services:
         value: info
 
       # ---- Origins -----------------------------------------------------------
-      # https://taskmanager-xxxx.onrender.com, or your own domain once added.
+      # The service's own address, https://<service>.onrender.com, exactly as
+      # the dashboard shows it, no trailing slash. Invitation and reset links
+      # are built from it. A custom domain replaces it later.
       - key: WEB_ORIGIN
         sync: false
+      # Empty: the app and the API are one origin, and WEB_ORIGIN is always
+      # allowed, so there is no other origin to list.
       - key: CORS_ORIGINS
+        value: ''
+      # Empty: a host-only session cookie, for <service>.onrender.com alone.
+      # onrender.com is a public suffix shared by every Render app; browsers
+      # refuse a cookie set for it, and it must never be set to that.
+      - key: COOKIE_DOMAIN
         value: ''
 
       # ---- Database: Supabase, Session pooler --------------------------------
@@ -82,16 +92,19 @@ services:
       - key: ARGON2_PARALLELISM
         value: '1'
 
-      # ---- Email: Brevo HTTP API ---------------------------------------------
+      # ---- Email: off at launch ----------------------------------------------
+      # none: no email. The app starts with a warning saying so. Admins copy
+      # invitation and reset links from Admin → People; notifications and the
+      # digest are in the app.
+      #
+      # To turn email on later (docs/deploy-render.md, "Later: email"): set
+      # MAIL_TRANSPORT to brevo-api in the dashboard and add BREVO_API_KEY
+      # (xkeysib-...) and MAIL_FROM ("Task Manager <no-reply@your-domain>").
+      # They are not listed here, so the Blueprint does not ask for them.
       - key: MAIL_ENABLED
         value: 'true'
       - key: MAIL_TRANSPORT
-        value: brevo-api
-      - key: BREVO_API_KEY
-        sync: false
-      # Task Manager <no-reply@example.com>, at a domain authenticated in Brevo.
-      - key: MAIL_FROM
-        sync: false
+        value: none
 
       # ---- Jobs --------------------------------------------------------------
       - key: JOB_QUEUE_ENABLED

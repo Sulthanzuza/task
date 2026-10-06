@@ -11,6 +11,7 @@ import {
   USERS,
   userIdOf,
 } from '../fixtures';
+import { E2E_EMAIL_OFF } from '../playwright.config';
 
 /**
  * Notifications, end to end: the bell moves live, every tab of one person
@@ -114,6 +115,7 @@ test('marking a notification read in one tab clears the bell in the other', asyn
 });
 
 test('an email arrives with a link to the task', async ({ api }) => {
+  test.skip(E2E_EMAIL_OFF, 'no email is sent with MAIL_TRANSPORT=none');
   await clearMailbox(api);
 
   const memberId = await userIdOf(api, USERS.member);

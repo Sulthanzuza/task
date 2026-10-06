@@ -1,6 +1,6 @@
 import { PgBoss } from 'pg-boss';
 import type { IDatabase } from 'pg-boss/dist/types';
-import { databaseSsl, env, jobQueueEnabled, poolSizes } from '../config/env';
+import { databaseSsl, env, jobQueueEnabled, mailTransport, poolSizes } from '../config/env';
 import { logger } from '../lib/logger';
 import type { QueueConnection } from '../db/client';
 
@@ -92,6 +92,9 @@ export async function enqueueNotificationEmail(
   // Most tests assert on rows and behaviour; running a queue would only add
   // noise. The ones that are about queueing turn it on.
   if (!jobQueueEnabled) return;
+  // No email at all: the notification row is already written and lights the
+  // bell; a job would only wake up to send nothing.
+  if (mailTransport === 'none') return;
 
   const instance = await getQueue();
   const now = options.now ?? new Date();

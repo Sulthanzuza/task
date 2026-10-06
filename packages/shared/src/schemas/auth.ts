@@ -63,3 +63,12 @@ export const loginResponseSchema = z.object({
   user: authUserSchema,
 });
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
+
+/**
+ * What the sign-in pages need to know before anyone is signed in. Public, and
+ * deliberately nothing more than this.
+ */
+export interface AuthOptions {
+  /** False when MAIL_TRANSPORT=none: no email is sent, links are handed over by an admin. */
+  email: boolean;
+}

@@ -13,11 +13,11 @@ import {
   type ListAuditQuery,
   type UpdateOrgSettingsInput,
 } from '@tm/shared';
-import { isTest } from '../../config/env';
+import { emailOn, isTest } from '../../config/env';
 import { db } from '../../db/client';
 import { users } from '../../db/schema';
 import { orgSettings } from '../../db/schema';
-import { NotFoundError, ValidationError } from '../../lib/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { today } from '../../lib/date-utils';
 import { authenticate, requireActor, requireRole } from '../../middleware/authenticate';
@@ -171,6 +171,13 @@ orgRouter.post(
       .limit(1);
 
     if (!person) throw new NotFoundError('Your account');
+
+    if (!emailOn) {
+      throw new ConflictError(
+        'Email is turned off (MAIL_TRANSPORT=none), so there is nothing to test. ' +
+          'Invitation and reset links are copied from Admin → People.',
+      );
+    }
 
     const { emailLayout, sendMail } = await import('../notifications/mailer');
     const settings = await getOrgSettings();

@@ -149,9 +149,11 @@ const envSchema = z.object({
   /**
    * How mail leaves. `smtp` for Docker and development (Mailpit); `brevo-api`
    * for a host that blocks outbound SMTP, as Render's free tier does, where
-   * the same messages go over HTTPS to Brevo instead.
+   * the same messages go over HTTPS to Brevo instead; `none` for a deployment
+   * with no email at all, where admins hand invitation and reset links over
+   * themselves and everything else is in the app (the bell, the digest page).
    */
-  MAIL_TRANSPORT: z.enum(['smtp', 'brevo-api']).optional(),
+  MAIL_TRANSPORT: z.enum(['smtp', 'brevo-api', 'none']).optional(),
   BREVO_API_KEY: z.string().optional(),
   /** Overridable so a test can point it at a local stand-in. */
   BREVO_API_URL: z.string().url().default('https://api.brevo.com/v3/smtp/email'),
@@ -253,6 +255,17 @@ export const jobQueueEnabled =
 export const mailEnabled = env.MAIL_ENABLED !== undefined ? env.MAIL_ENABLED === 'true' : !isTest;
 
 /**
+ * Whether this deployment has email at all: MAIL_TRANSPORT=none is the choice
+ * the person running it makes. The UI asks this, through GET /auth/options,
+ * to know whether to promise an email or to say "ask your admin for a link".
+ *
+ * MAIL_ENABLED is not part of it. That is the test suite's switch for "do
+ * not actually send", and the app must otherwise behave exactly as deployed:
+ * make the links, queue the jobs, offer the test email.
+ */
+export const emailOn = mailTransport !== 'none';
+
+/**
  * Settings that are fine in development and dangerous in production.
  *
  * These are refusals, not warnings. A deployment that starts with a default
@@ -287,7 +300,11 @@ export function productionConfigErrors(): string[] {
 
   // Both default to off under test; reaching production off means alerts and
   // invitations silently do nothing.
-  if (!mailEnabled) errors.push('MAIL_ENABLED must be true in production');
+  // MAIL_TRANSPORT=none is the explicit way to run without email; MAIL_ENABLED
+  // is the test suite's switch and must not be how production ends up silent.
+  if (!mailEnabled && env.MAIL_TRANSPORT !== 'none') {
+    errors.push('MAIL_ENABLED must be true in production (use MAIL_TRANSPORT=none for no email)');
+  }
   if (!jobQueueEnabled) errors.push('JOB_QUEUE_ENABLED must be true in production');
 
   if (env.AUTH_RATE_LIMIT_PER_MINUTE > 5) {
@@ -322,7 +339,7 @@ export function productionConfigErrors(): string[] {
   // Chosen on purpose, not inherited: the wrong default would mean mail that
   // silently never leaves a host that blocks SMTP.
   if (!env.MAIL_TRANSPORT) {
-    errors.push('MAIL_TRANSPORT must be set in production: smtp or brevo-api');
+    errors.push('MAIL_TRANSPORT must be set in production: smtp, brevo-api or none');
   } else if (env.MAIL_TRANSPORT === 'brevo-api' && !env.BREVO_API_KEY) {
     errors.push('BREVO_API_KEY is required when MAIL_TRANSPORT=brevo-api');
   }
@@ -369,6 +386,15 @@ export function unsafeProductionSettings(): string[] {
   if (!isProduction) return [];
 
   const warnings: string[] = [];
+
+  // Allowed, and worth saying at every start: nothing will be emailed.
+  if (env.MAIL_TRANSPORT === 'none') {
+    warnings.push(
+      'MAIL_TRANSPORT is none: no email is sent. Invitation and reset links are ' +
+        'handed over by an admin from Admin → People; notifications and the ' +
+        'digest are in the app only',
+    );
+  }
   const defaults = { auth: 5, api: 300, upload: 30 };
 
   if (env.AUTH_RATE_LIMIT_PER_MINUTE > defaults.auth) {

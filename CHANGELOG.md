@@ -2,6 +2,62 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.0.0-render-rc3 — 2026-10-06
+
+Launch without email and without a domain of our own: the app runs at
+`https://<service>.onrender.com` and sends no email. Both can be added later
+by configuration (`docs/deploy-render.md`, "Later").
+
+### Added
+
+- **`MAIL_TRANSPORT=none`.** Allowed in production, with a warning at every
+  start instead of a refusal. Nothing is emailed and no email job is queued;
+  notifications still reach the bell and the daily digest still arrives in the
+  app (its notification links to the day's digest page).
+- **Copyable invite links.** Inviting someone, or making a new invitation,
+  hands the admin the link: single use, valid 7 days, and a new one retires
+  the previous one. With email on it is emailed too, and the admin's copy is
+  the same link, for when the email does not arrive.
+- **Admin reset links.** **Admin → People → Reset link** issues a single-use
+  link valid for 24 hours, retiring any earlier one, never emailed, recorded in
+  the audit log (`user.reset_link_issued`). `POST /api/v1/users/:id/reset-link`,
+  admins only, refused for deactivated accounts.
+- **`GET /api/v1/auth/options`**, public: `{ email: boolean }`, so the sign-in
+  pages know before anyone signs in.
+
+### Changed
+
+- **Forgot password** says "Ask your admin for a reset link" when email is off,
+  and the endpoint creates no token there is no way to deliver (the answer is
+  the same either way, so it still reveals nothing about who has an account).
+- **Settings → Email** shows "Email is turned off" in place of the test email;
+  the test-email endpoint says the same (409) instead of pretending to send.
+  The digest preview stays: the digest is still delivered in the app.
+- **`render.yaml`:** `MAIL_TRANSPORT=none`; `BREVO_API_KEY` and `MAIL_FROM`
+  are no longer asked for (documented for later); `COOKIE_DOMAIN` and
+  `CORS_ORIGINS` explicitly empty, for a host-only cookie on the onrender.com
+  address (a public suffix, which must never be a cookie domain). Region
+  Singapore, as before.
+- **`docs/deploy-render.md`:** no email or DNS steps before launch; inviting
+  and resetting by link; Brevo (with Render's IP ranges) and a custom domain in
+  a "Later" section.
+- **`pnpm e2e:all` runs the launch configuration:** `RUN_MODE=all` and
+  `MAIL_TRANSPORT=none`. Tests that read a mailbox skip themselves there;
+  `pnpm e2e` keeps email on. The invitation test runs in both.
+
+### Verified
+
+- Email off and email on side by side in integration tests: options, forgotten
+  password, invite and resend links (single use, 7 days, the old one retired),
+  reset links (24 hours, admins only, not for deactivated accounts, audited),
+  the test email, the bell with no email job queued, and, with email on, the
+  invitation email carrying the very link the admin was shown. A host-only
+  session cookie with `COOKIE_DOMAIN` empty. Production starts with
+  `MAIL_TRANSPORT=none` and warns.
+- End to end, in both modes: inviting through the screen and signing in from
+  the link; copying a reset link (read back from the clipboard) and using it
+  once; the forgot-password page; Settings → Email; the digest in the bell.
+
 ## v1.0.0-render-rc2 — 2026-10-06
 
 Decisions on the Render release: both services in Singapore, verified

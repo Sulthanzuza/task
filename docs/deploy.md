@@ -359,7 +359,7 @@ Every value the API will not start without, and how to make it:
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` | OCI Object Storage: see **Oracle Cloud: the server**, step 5 | — |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | the Customer Secret Key of `taskmanager-storage` | — |
 | `STORAGE_DRIVER` | `s3` | `local` is refused: it keeps uploads on one container's disk |
-| `MAIL_TRANSPORT` | `smtp` | unset is refused in production |
+| `MAIL_TRANSPORT` | `smtp`, or `none` to run without email (invitation and reset links are then copied from **Admin → People**) | unset is refused in production; `none` starts with a warning |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | `smtp-relay.brevo.com`, `587`, `false` (STARTTLS) | — |
 | `SMTP_USER` / `SMTP_PASS` | Brevo's SMTP login and an SMTP key: see **Email: Brevo** | — |
 | `MAIL_FROM` | `Task Manager <no-reply@example.com>`, at the domain authenticated in Brevo | — |

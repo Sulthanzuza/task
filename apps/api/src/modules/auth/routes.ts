@@ -5,7 +5,8 @@ import {
   loginSchema,
   resetPasswordSchema,
 } from '@tm/shared';
-import { env, isProduction } from '../../config/env';
+import type { AuthOptions } from '@tm/shared';
+import { emailOn, env, isProduction } from '../../config/env';
 import { ForbiddenError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { authenticate, requireActor } from '../../middleware/authenticate';
@@ -135,17 +136,36 @@ authRouter.get(
   }),
 );
 
+/**
+ * What the sign-in pages need to know before anyone signs in: whether a
+ * "forgot password" request can be answered by email at all.
+ */
+authRouter.get('/options', (_req, res) => {
+  const options: AuthOptions = { email: emailOn };
+  res.json(options);
+});
+
 authRouter.post(
   '/forgot',
   authLimiter,
   validate({ body: forgotPasswordSchema }),
   handler(async (req, res) => {
+    // With email off there is nothing to send, so no link is made: an admin
+    // issues one from Admin → People instead. The answer is the same either
+    // way, so this endpoint still reveals nothing about who has an account.
+    if (!emailOn) {
+      res.status(202).json({ ok: true });
+      return;
+    }
+
     const created = await service.createPasswordResetToken(req.body.email);
     if (created) {
       // Sending must not block the response, or the timing would reveal the account.
-      sendPasswordResetEmail(req.body.email, created.name, created.token).catch((error: unknown) => {
-        logger.error({ err: error }, 'Could not send the password reset email.');
-      });
+      sendPasswordResetEmail(req.body.email, created.name, created.token).catch(
+        (error: unknown) => {
+          logger.error({ err: error }, 'Could not send the password reset email.');
+        },
+      );
     }
     // The same answer either way.
     res.status(202).json({ ok: true });
@@ -167,11 +187,7 @@ authRouter.post(
   authenticate,
   validate({ body: changePasswordSchema }),
   handler(async (req, res) => {
-    await service.changePassword(
-      requireActor(req).id,
-      req.body.currentPassword,
-      req.body.password,
-    );
+    await service.changePassword(requireActor(req).id, req.body.currentPassword, req.body.password);
     res.status(204).send();
   }),
 );

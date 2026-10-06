@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `master` (renamed to `main` when first pushed; see `docs/deploy-render.md`), tagged **v1.0.0-render-rc2**.
+Last updated: 2026-10-06. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.0.0-render-rc3**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -53,7 +53,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `e48beb7` | Calendar takes today from `/org/calendar` (it hung for members and the admin); dashboard team picker for the admin; the More menu was clipped by the scrolling nav; Team page shows load errors |
 | `4d8e19c` | rc4: Oracle Cloud Always Free runbook (arm64); MinIO removed for OCI Object Storage, backups on rclone to B2; scripts made executable; `.dockerignore` |
 | `a75f1f3` | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
-| _this one_ | render-rc2: Singapore for Render and Supabase; database TLS verified against `DATABASE_CA_CERT` (app, pg-boss, CLI, and the Actions backup with `verify-full`); migrations under an advisory lock; Brevo allows Render's Singapore ranges instead of blocking being turned off |
+| `ee25ca8` | render-rc2: Singapore for Render and Supabase; database TLS verified against `DATABASE_CA_CERT` (app, pg-boss, CLI, and the Actions backup with `verify-full`); migrations under an advisory lock; Brevo allows Render's Singapore ranges instead of blocking being turned off |
+| _this one_ | render-rc3: launch without email or a domain. `MAIL_TRANSPORT=none` (a warning, not a refusal); copyable invite links (single use, 7 days) and admin reset links (single use, 24 hours) in Admin → People; forgot-password and Settings → Email say email is off; `render.yaml` on the onrender address with a host-only cookie; Brevo and the custom domain moved to "Later" in the guide; `pnpm e2e:all` now runs the launch configuration |
 
 ### The design system, applied (three design prompts)
 
@@ -370,9 +371,9 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
-| `apps/api` integration | 24 | 414 |
-| `apps/web` end-to-end (`pnpm e2e`) | 13 | 58 |
-| `apps/web` end-to-end, one process (`pnpm e2e:all`, `RUN_MODE=all`) | 13 | 58 |
+| `apps/api` integration | 26 | 431 |
+| `apps/web` end-to-end (`pnpm e2e`, email on) | 14 | 61 |
+| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 14 | 59, and 2 mailbox tests skipped |
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.

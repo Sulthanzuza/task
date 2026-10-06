@@ -7,6 +7,11 @@ import type { ListTasksQuery } from '@tm/shared';
 export const queryKeys = {
   me: ['me'] as const,
 
+  auth: {
+    /** Whether email is on: fixed for the life of a deployment. */
+    options: () => ['auth', 'options'] as const,
+  },
+
   tasks: {
     all: ['tasks'] as const,
     list: (filters: Partial<ListTasksQuery>) => ['tasks', 'list', filters] as const,

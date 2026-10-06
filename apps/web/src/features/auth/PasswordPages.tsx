@@ -10,9 +10,15 @@ import {
 } from '@tm/shared';
 import { ApiError, api } from '@/lib/api';
 import { Button, Card, FieldError, Input, Label, Spinner } from '@/components/ui/primitives';
+import { useAuthOptions } from './api';
 
 export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
+  // With email off there is no link to send: an admin issues one instead.
+  // Until the answer arrives, show neither, rather than a form that may be a
+  // promise the deployment cannot keep.
+  const options = useAuthOptions();
+  const emailOff = options.data?.email === false;
   const {
     register,
     handleSubmit,
@@ -31,7 +37,16 @@ export function ForgotPasswordPage() {
 
   return (
     <Shell title="Reset your password">
-      {sent ? (
+      {options.isPending ? (
+        <div className="flex justify-center py-4">
+          <Spinner />
+        </div>
+      ) : emailOff ? (
+        <p className="text-sm text-ink-muted">
+          This workspace does not send email. Ask your admin for a reset link: they can make one for
+          you in Admin → People.
+        </p>
+      ) : sent ? (
         <p className="text-sm text-ink-muted">
           If that address belongs to an account, a reset link is on its way. The link expires
           shortly, so use it soon.

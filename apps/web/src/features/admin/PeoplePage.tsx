@@ -1,17 +1,25 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Plus, Search } from 'lucide-react';
-import { ROLE_LABELS, USER_ROLES, type UserRole, type UserSummary } from '@tm/shared';
+import { Copy, KeyRound, Link2, Mail, Plus, Search } from 'lucide-react';
+import {
+  ROLE_LABELS,
+  USER_ROLES,
+  type IssuedLink,
+  type UserRole,
+  type UserSummary,
+} from '@tm/shared';
 import {
   useAddTeamMember,
   useAdminPeople,
   useAdminTeams,
   useInviteUser,
+  useIssueResetLink,
   useRemoveTeamMember,
   useResendInvite,
   useSetUserActive,
   useUpdateUser,
 } from './api';
+import { useAuthOptions } from '@/features/auth/api';
 import { AdminPage, Banner, Field, useBanner } from './shared';
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
 import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/ui/primitives';
@@ -20,10 +28,23 @@ import { ApiError } from '@/lib/api';
 import { DataTable, type Column } from '@/components/common/table';
 
 /**
- * Everyone in the organisation, and the four things an admin does to them:
- * invite, change their role or team, send the welcome link again, and switch
- * the account off.
+ * Everyone in the organisation, and what an admin does to them: invite, change
+ * their role or team, issue a new invitation or a password reset link, and
+ * switch the account off.
+ *
+ * Every invitation and reset produces a link the admin can copy, email or no
+ * email. With email off (MAIL_TRANSPORT=none) that link is the only way in;
+ * with email on it rescues an invitation that went to spam.
  */
+
+/** A link on screen, and who it is for. */
+interface ShownLink {
+  kind: 'invite' | 'reset';
+  name: string;
+  link: IssuedLink;
+  /** Whether it was also emailed to them. */
+  emailed: boolean;
+}
 
 export function PeoplePage() {
   const [query, setQuery] = useState('');
@@ -44,6 +65,9 @@ export function PeoplePage() {
 
   const setActive = useSetUserActive();
   const resend = useResendInvite();
+  const resetLink = useIssueResetLink();
+  const emailOn = useAuthOptions().data?.email ?? false;
+  const [shown, setShown] = useState<ShownLink | null>(null);
 
   const deactivation = useConfirm<UserSummary>();
 
@@ -133,10 +157,24 @@ export function PeoplePage() {
                       banner.show('error', messageOf(error));
                     }
                   }}
+                  emailOn={emailOn}
                   onResend={async () => {
                     try {
                       const result = await resend.mutateAsync(person.id);
-                      banner.show('success', 'A new invitation is on its way to ' + result.email);
+                      setShown({
+                        kind: 'invite',
+                        name: person.name,
+                        link: result.invite,
+                        emailed: result.emailed,
+                      });
+                    } catch (error) {
+                      banner.show('error', messageOf(error));
+                    }
+                  }}
+                  onResetLink={async () => {
+                    try {
+                      const link = await resetLink.mutateAsync(person.id);
+                      setShown({ kind: 'reset', name: person.name, link, emailed: false });
                     } catch (error) {
                       banner.show('error', messageOf(error));
                     }
@@ -160,13 +198,16 @@ export function PeoplePage() {
       {inviting ? (
         <InviteDialog
           teams={teams.data?.items ?? []}
+          emailOn={emailOn}
           onClose={() => setInviting(false)}
-          onInvited={(name) => {
+          onInvited={(name, link) => {
             setInviting(false);
-            banner.show('success', name + ' has been sent a link to set their password.');
+            setShown({ kind: 'invite', name, link, emailed: emailOn });
           }}
         />
       ) : null}
+
+      {shown ? <LinkDialog shown={shown} onClose={() => setShown(null)} /> : null}
 
       <ConfirmDialog
         open={deactivation.open}
@@ -207,6 +248,8 @@ interface PersonRowProps {
   onAskDeactivate(): void;
   onReactivate(): Promise<void>;
   onResend(): Promise<void>;
+  onResetLink(): Promise<void>;
+  emailOn: boolean;
   onSaved(message: string): void;
   onFailed(message: string): void;
 }
@@ -215,7 +258,7 @@ const PEOPLE_COLUMNS: Column[] = [
   { label: 'Name', width: 'auto' },
   { label: 'Role', width: '12rem' },
   { label: 'Teams', width: '14rem', hideBelow: 'md' },
-  { label: 'Actions', width: '11rem', align: 'right' },
+  { label: 'Actions', width: '19rem', align: 'right' },
 ];
 
 function PersonRow({
@@ -224,6 +267,8 @@ function PersonRow({
   onAskDeactivate,
   onReactivate,
   onResend,
+  onResetLink,
+  emailOn,
   onSaved,
   onFailed,
 }: PersonRowProps) {
@@ -335,10 +380,28 @@ function PersonRow({
           <Button
             variant="ghost"
             size="sm"
-            title="Send the set-a-password link again"
+            title={
+              emailOn
+                ? 'Email a new set-a-password link, and show it to copy'
+                : 'Make a new set-a-password link to copy'
+            }
+            aria-label={(emailOn ? 'Resend invite to ' : 'New invite link for ') + person.name}
+            disabled={!person.isActive}
             onClick={() => void onResend()}
           >
-            <Mail size={14} aria-hidden /> Resend invite
+            {emailOn ? <Mail size={14} aria-hidden /> : <Link2 size={14} aria-hidden />}
+            {emailOn ? 'Resend invite' : 'New invite link'}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Make a one-time password reset link to copy"
+            aria-label={'Reset link for ' + person.name}
+            disabled={!person.isActive}
+            onClick={() => void onResetLink()}
+          >
+            <KeyRound size={14} aria-hidden /> Reset link
           </Button>
 
           {person.isActive ? (
@@ -358,12 +421,14 @@ function PersonRow({
 
 function InviteDialog({
   teams,
+  emailOn,
   onClose,
   onInvited,
 }: {
   teams: Array<{ id: string; name: string }>;
+  emailOn: boolean;
   onClose(): void;
-  onInvited(name: string): void;
+  onInvited(name: string, link: IssuedLink): void;
 }) {
   const invite = useInviteUser();
 
@@ -387,7 +452,10 @@ function InviteDialog({
       <Card className="w-full max-w-md p-5">
         <h2 className="text-sm font-semibold">Invite someone</h2>
         <p className="mt-1 text-xs text-ink-faint">
-          They are emailed a link to choose their own password. No password is set here.
+          {emailOn
+            ? 'They are emailed a link to choose their own password, and you get a copy of it. '
+            : 'You get a link to send them yourself; they use it to choose their own password. '}
+          No password is set here.
         </p>
 
         <form
@@ -397,14 +465,14 @@ function InviteDialog({
             setError(null);
             setFieldErrors({});
             try {
-              await invite.mutateAsync({
+              const created = await invite.mutateAsync({
                 name: name.trim(),
                 email: email.trim(),
                 role,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 teamIds,
               });
-              onInvited(name.trim());
+              onInvited(name.trim(), created.invite);
             } catch (cause) {
               if (cause instanceof ApiError) {
                 setFieldErrors(cause.fieldErrors());
@@ -487,6 +555,86 @@ function InviteDialog({
             </Button>
           </div>
         </form>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * The link, to copy and send by whatever channel the team uses. Shown once:
+ * only its hash is stored, so closing this is the last chance to copy it, and
+ * a new one can always be made (which retires this one).
+ */
+function LinkDialog({ shown, onClose }: { shown: ShownLink; onClose(): void }) {
+  const [copied, setCopied] = useState(false);
+  const label = shown.kind === 'invite' ? 'Invite link' : 'Reset link';
+  const expires = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(shown.link.expiresAt));
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(shown.link.url);
+      setCopied(true);
+    } catch {
+      // No clipboard permission: the field is selected, so Ctrl+C works.
+      document.getElementById('issued-link')?.focus();
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={label + ' for ' + shown.name}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <Card className="w-full max-w-lg p-5">
+        <h2 className="text-sm font-semibold">
+          {label} for {shown.name}
+        </h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          {shown.kind === 'invite'
+            ? 'They open it to choose their password and sign in. '
+            : 'They open it to choose a new password. Their old one keeps working until then. '}
+          {shown.emailed ? 'It has also been emailed to them.' : 'Nothing has been emailed.'}
+        </p>
+
+        <div className="mt-4 flex gap-2">
+          <Input
+            id="issued-link"
+            aria-label={label}
+            readOnly
+            value={shown.link.url}
+            onFocus={(event) => event.target.select()}
+            className="font-mono text-xs"
+          />
+          <Button onClick={() => void copy()} aria-label={'Copy ' + label.toLowerCase()}>
+            <Copy size={14} aria-hidden /> {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+
+        <ul className="mt-3 space-y-1 text-xs text-ink-muted">
+          <li>Works once, and until {expires}.</li>
+          <li>
+            Anyone holding it can set {shown.name}&rsquo;s password: send it to them directly, not
+            to a group.
+          </li>
+          <li>Making another link retires this one. It is not shown again after you close this.</li>
+        </ul>
+
+        <div className="mt-4 flex justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
+        </div>
       </Card>
     </div>
   );

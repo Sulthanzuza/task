@@ -15,6 +15,14 @@ const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
  */
 const ALL_IN_ONE = process.env.E2E_RUN_MODE === 'all';
 
+/**
+ * Email off (MAIL_TRANSPORT=none), as the Render launch runs. Set by
+ * all.config.ts together with RUN_MODE=all, so one suite proves the launch
+ * configuration and the other the deployment with email. Tests that read a
+ * mailbox skip themselves when this is set.
+ */
+export const E2E_EMAIL_OFF = process.env.E2E_EMAIL === 'off';
+
 export const E2E_WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5199);
 export const E2E_API_PORT = ALL_IN_ONE ? E2E_WEB_PORT : Number(process.env.E2E_API_PORT ?? 4100);
 export const E2E_WORKER_PORT = Number(process.env.E2E_WORKER_PORT ?? 4101);
@@ -107,6 +115,7 @@ const apiEnv = {
   // mailer points at mailpit. A one second debounce keeps the wait short.
   JOB_QUEUE_ENABLED: 'true',
   MAIL_ENABLED: 'true',
+  MAIL_TRANSPORT: E2E_EMAIL_OFF ? 'none' : 'smtp',
   EMAIL_DEBOUNCE_SECONDS: '1',
   SMTP_HOST: process.env.E2E_SMTP_HOST ?? 'localhost',
   SMTP_PORT: process.env.E2E_SMTP_PORT ?? '1025',

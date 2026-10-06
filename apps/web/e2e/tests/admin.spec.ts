@@ -1,11 +1,14 @@
 import { apiAs, clearMailbox, expect, findMail, mailBody, signIn, test, USERS } from '../fixtures';
+import { E2E_EMAIL_OFF } from '../playwright.config';
 
 /**
  * The admin area, through the screens rather than the API.
  *
  * The invitation test is the one that matters most: it is the only path a new
  * colleague takes, it crosses the API, the mailer and two pages, and nothing
- * short of driving it end to end proves that the link in the inbox works.
+ * short of driving it end to end proves that the link works. It runs in both
+ * modes: with email the link is also in the inbox; without, the admin's copy
+ * is the only one.
  */
 
 /** A fresh address each run, because the database survives within a run. */
@@ -13,8 +16,11 @@ function newEmail(prefix: string): string {
   return prefix + '-' + Date.now().toString(36) + '@example.com';
 }
 
-test('an invited colleague sets a password from the email and signs in', async ({ page, api }) => {
-  await clearMailbox(api);
+test('an invited colleague sets a password from the invite link and signs in', async ({
+  page,
+  api,
+}) => {
+  if (!E2E_EMAIL_OFF) await clearMailbox(api);
 
   const email = newEmail('invited');
   const name = 'Freshly Invited';
@@ -31,16 +37,26 @@ test('an invited colleague sets a password from the email and signs in', async (
   await dialog.getByLabel('Role').selectOption('MEMBER');
   await dialog.getByRole('button', { name: 'Send the invitation' }).click();
 
-  await expect(page.getByRole('status')).toContainText('set their password');
+  // The admin is handed the link, email or no email.
+  const shown = page.getByRole('dialog', { name: 'Invite link for ' + name });
+  await expect(shown).toBeVisible();
+  await expect(shown).toContainText(
+    E2E_EMAIL_OFF ? 'Nothing has been emailed' : 'also been emailed',
+  );
+  const link = await shown.getByLabel('Invite link', { exact: true }).inputValue();
+  expect(link).toMatch(/\/reset-password\?token=[A-Za-z0-9_-]+$/);
+
+  if (!E2E_EMAIL_OFF) {
+    // With email on, the invitation really left the building, carrying the
+    // very link the admin was shown.
+    const message = await findMail(api, (m) => m.To.some((to) => to.Address === email));
+    expect(message.Subject).toContain('account is ready');
+    const body = await mailBody(api, message.ID);
+    expect(body, 'the email must carry the same link').toContain(new URL(link).search);
+  }
+
+  await shown.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByRole('cell', { name: email })).toBeVisible();
-
-  // The invitation really left the building.
-  const message = await findMail(api, (m) => m.To.some((to) => to.Address === email));
-  expect(message.Subject).toContain('account is ready');
-
-  const body = await mailBody(api, message.ID);
-  const link = /\/reset-password\?token=[A-Za-z0-9_-]+/.exec(body);
-  expect(link, 'the email must carry a link to set a password').not.toBeNull();
 
   // Follow it the way they would, in a session that has never signed in.
   // Sign out lives in the account menu, which the avatar opens.
@@ -48,7 +64,7 @@ test('an invited colleague sets a password from the email and signs in', async (
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/login/);
 
-  await page.goto(link?.[0] as string);
+  await page.goto(link);
   await page.getByLabel('New password').fill(password);
   await page.getByLabel('Confirm it').fill(password);
   await page.getByRole('button', { name: 'Save the password' }).click();

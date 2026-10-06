@@ -5,6 +5,9 @@ import type {
   CreateProjectInput,
   CreateTeamInput,
   CreateUserInput,
+  InvitedUser,
+  IssuedLink,
+  ResentInvite,
   Holiday,
   ListAuditQuery,
   OrgSettingsView,
@@ -73,7 +76,7 @@ function usePeopleInvalidation() {
 export function useInviteUser() {
   const refresh = usePeopleInvalidation();
   return useMutation({
-    mutationFn: (input: CreateUserInput) => api.post<UserDetail>('/users', input),
+    mutationFn: (input: CreateUserInput) => api.post<InvitedUser>('/users', input),
     onSuccess: refresh,
   });
 }
@@ -99,8 +102,16 @@ export function useSetUserActive() {
 export function useResendInvite() {
   const refresh = usePeopleInvalidation();
   return useMutation({
-    mutationFn: (userId: string) =>
-      api.post<{ email: string }>('/users/' + userId + '/resend-invite'),
+    mutationFn: (userId: string) => api.post<ResentInvite>('/users/' + userId + '/resend-invite'),
+    onSuccess: refresh,
+  });
+}
+
+/** A one-time reset link for an admin to hand over; nothing is emailed. */
+export function useIssueResetLink() {
+  const refresh = usePeopleInvalidation();
+  return useMutation({
+    mutationFn: (userId: string) => api.post<IssuedLink>('/users/' + userId + '/reset-link'),
     onSuccess: refresh,
   });
 }

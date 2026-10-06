@@ -6,6 +6,7 @@ import { AdminPage, Banner, Field, useBanner } from './shared';
 import { DigestContent, type Digest } from '@/features/digest/DigestPage';
 import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/ui/primitives';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useAuthOptions } from '@/features/auth/api';
 import { api, toQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/utils';
@@ -23,6 +24,7 @@ export function EmailPage() {
   const { user } = useAuth();
   const sendTest = useSendTestEmail();
   const banner = useBanner();
+  const emailOff = useAuthOptions().data?.email === false;
 
   const people = useAdminPeople({ active: true });
 
@@ -43,29 +45,40 @@ export function EmailPage() {
     >
       <Banner {...banner.props} />
 
-      <Card className="p-4">
-        <h2 className="text-sm font-semibold">Test email</h2>
-        <p className="mt-1 mb-3 text-sm text-ink-muted">
-          Sent to your own address and nowhere else. Check the headers show <code>spf=pass</code>{' '}
-          and <code>dkim=pass</code> before inviting anybody.
-        </p>
-        <Button
-          disabled={sendTest.isPending}
-          onClick={async () => {
-            try {
-              const result = await sendTest.mutateAsync();
-              banner.show('success', 'Sent to ' + result.to + '.');
-            } catch (error) {
-              banner.show(
-                'error',
-                error instanceof Error ? error.message : 'The message could not be sent.',
-              );
-            }
-          }}
-        >
-          <Send size={15} aria-hidden /> Send a test email
-        </Button>
-      </Card>
+      {emailOff ? (
+        <Card className="p-4">
+          <h2 className="text-sm font-semibold">Email is turned off</h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            This deployment sends no email (<code>MAIL_TRANSPORT=none</code>). Invitations and
+            password resets are links you copy from Admin → People and send yourself. Notifications
+            and the daily digest are in the app: the bell, and each day&rsquo;s digest page.
+          </p>
+        </Card>
+      ) : (
+        <Card className="p-4">
+          <h2 className="text-sm font-semibold">Test email</h2>
+          <p className="mt-1 mb-3 text-sm text-ink-muted">
+            Sent to your own address and nowhere else. Check the headers show <code>spf=pass</code>{' '}
+            and <code>dkim=pass</code> before inviting anybody.
+          </p>
+          <Button
+            disabled={sendTest.isPending}
+            onClick={async () => {
+              try {
+                const result = await sendTest.mutateAsync();
+                banner.show('success', 'Sent to ' + result.to + '.');
+              } catch (error) {
+                banner.show(
+                  'error',
+                  error instanceof Error ? error.message : 'The message could not be sent.',
+                );
+              }
+            }}
+          >
+            <Send size={15} aria-hidden /> Send a test email
+          </Button>
+        </Card>
+      )}
 
       <Card className="p-4">
         <h2 className="mb-3 text-sm font-semibold">Digest preview</h2>

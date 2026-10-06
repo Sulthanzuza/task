@@ -11,7 +11,7 @@ import {
   USERS,
   type MailpitMessage,
 } from '../fixtures';
-import { E2E_MAILPIT_URL } from '../playwright.config';
+import { E2E_EMAIL_OFF, E2E_MAILPIT_URL } from '../playwright.config';
 
 /**
  * The digest, driven at a fixed instant.
@@ -33,7 +33,7 @@ async function runJob(api: APIRequestContext, name: string, now?: string): Promi
 }
 
 test('the digest email and the bell match the dashboard', async ({ page, api }) => {
-  await clearMailbox(api);
+  if (!E2E_EMAIL_OFF) await clearMailbox(api);
 
   const lead = await apiAs(api, USERS.lead);
   const dashboard = await lead.get<DashboardSummary>('/dashboard/summary');
@@ -55,19 +55,21 @@ test('the digest email and the bell match the dashboard', async ({ page, api }) 
 
   await runJob(api, 'daily-digest', at.toISOString());
 
-  // The email arrives, addressed to the lead.
-  const message = await findMail(api, (m) => m.To.some((to) => to.Address === USERS.lead.email));
+  // With email on, the email arrives, addressed to the lead. With email off
+  // there is none, and the bell below is the digest.
+  if (!E2E_EMAIL_OFF) {
+    const message = await findMail(api, (m) => m.To.some((to) => to.Address === USERS.lead.email));
+    const content = await mailBody(api, message.ID);
 
-  const content = await mailBody(api, message.ID);
+    // The same figures the dashboard reports, not a second opinion.
+    expect(content, 'the digest must report the active count').toContain(
+      String(dashboard.active) + ' active',
+    );
+    expect(content).toContain(String(dashboard.overdue) + ' overdue');
+    expect(content).toContain(String(dashboard.blocked) + ' blocked');
+  }
 
-  // The same figures the dashboard reports, not a second opinion.
-  expect(content, 'the digest must report the active count').toContain(
-    String(dashboard.active) + ' active',
-  );
-  expect(content).toContain(String(dashboard.overdue) + ' overdue');
-  expect(content).toContain(String(dashboard.blocked) + ' blocked');
-
-  // And the same figures are in the bell.
+  // And the same figures are in the bell, email or no email.
   await signIn(page, USERS.lead);
   await page.goto('/notifications');
 
@@ -78,6 +80,8 @@ test('the digest email and the bell match the dashboard', async ({ page, api }) 
 });
 
 test('running the digest twice sends only one', async ({ api }) => {
+  // It counts emails; the claim it guards (digest_log) is the same either way.
+  test.skip(E2E_EMAIL_OFF, 'no email is sent with MAIL_TRANSPORT=none');
   await clearMailbox(api);
 
   /*

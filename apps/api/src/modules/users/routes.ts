@@ -65,6 +65,16 @@ usersRouter.post(
   }),
 );
 
+/** A one-time password reset link, handed back to the admin rather than emailed. */
+usersRouter.post(
+  '/:id/reset-link',
+  requireRole('SUPER_ADMIN'),
+  validate({ params: idParamSchema }),
+  handler(async (req, res) => {
+    res.json(await service.issueResetLink(requireActor(req), req.params.id as string));
+  }),
+);
+
 usersRouter.post(
   '/:id/activate',
   requireRole('SUPER_ADMIN'),

@@ -5,6 +5,9 @@ import type {
   UpdateUserInput,
   UserDetail,
   UserSummary,
+  InvitedUser,
+  IssuedLink,
+  ResentInvite,
 } from '@tm/shared';
 import { db, withTransaction } from '../../db/client';
 import { teamMembers, teams, users } from '../../db/schema';
@@ -12,7 +15,7 @@ import type { Actor } from '../../middleware/authenticate';
 import { ConflictError, NotFoundError } from '../../lib/errors';
 import { generateToken, hashToken } from '../../lib/crypto';
 import { passwordResetTokens } from '../../db/schema';
-import { env } from '../../config/env';
+import { emailOn, env } from '../../config/env';
 import { authorize } from '../permissions/authorize';
 import { revokeAllSessions } from '../auth/service';
 import { sendSetPasswordEmail } from '../notifications/mailer';
@@ -122,12 +125,32 @@ export async function getUser(actor: Actor, userId: string): Promise<UserDetail>
   };
 }
 
+/** An invitation lasts a week: it may sit in a chat or an inbox for a while. */
+const INVITE_LINK_DAYS = 7;
+/**
+ * A reset link an admin hands over lasts a day, not the half hour of one that
+ * is emailed: it goes through a person, who may not pass it on at once. It is
+ * still single use.
+ */
+export const ADMIN_RESET_LINK_HOURS = 24;
+
+/** The page that sets a password, for invitations and resets alike. */
+function passwordLink(token: string, expiresAt: Date): IssuedLink {
+  return {
+    url: env.WEB_ORIGIN.replace(/\/$/, '') + '/reset-password?token=' + encodeURIComponent(token),
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
 export async function createUser(
   actor: Actor,
   input: CreateUserInput,
   now = new Date(),
-): Promise<UserDetail> {
+): Promise<InvitedUser> {
   authorize(actor, 'user.manage', { kind: 'user', userId: 'new', teamIds: input.teamIds });
+
+  const token = generateToken(32);
+  const expiresAt = new Date(now.getTime() + INVITE_LINK_DAYS * 86_400_000);
 
   const existing = await db
     .select({ id: users.id })
@@ -160,18 +183,19 @@ export async function createUser(
         .onConflictDoNothing();
     }
 
-    const token = generateToken(32);
     await tx.insert(passwordResetTokens).values({
       userId: created.id,
       tokenHash: hashToken(token),
       // A welcome link may sit in an inbox for a while, so it lives longer than a reset.
-      expiresAt: new Date(now.getTime() + 7 * 86_400_000),
+      expiresAt,
       createdAt: now,
     });
 
-    sendSetPasswordEmail(input.email, input.name, token).catch((error: unknown) => {
-      logger.error({ err: error }, 'Could not send the welcome email.');
-    });
+    if (emailOn) {
+      sendSetPasswordEmail(input.email, input.name, token).catch((error: unknown) => {
+        logger.error({ err: error }, 'Could not send the welcome email.');
+      });
+    }
 
     return created.id;
   });
@@ -184,7 +208,9 @@ export async function createUser(
     after: { email: input.email, role: input.role, teamIds: input.teamIds },
   });
 
-  return getUser(actor, userId);
+  // The link goes back to the admin too, email or not: with email off it is
+  // the only way in, and with email on it rescues an invitation lost to spam.
+  return { ...(await getUser(actor, userId)), invite: passwordLink(token, expiresAt) };
 }
 
 export async function updateUser(
@@ -279,7 +305,7 @@ export async function resendInvite(
   actor: Actor,
   userId: string,
   now = new Date(),
-): Promise<{ email: string }> {
+): Promise<ResentInvite> {
   authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
 
   const [person] = await db
@@ -304,6 +330,7 @@ export async function resendInvite(
   }
 
   const token = generateToken(32);
+  const expiresAt = new Date(now.getTime() + INVITE_LINK_DAYS * 86_400_000);
 
   await withTransaction(async (tx) => {
     // Only the newest link should work, so earlier ones are spent.
@@ -315,22 +342,76 @@ export async function resendInvite(
     await tx.insert(passwordResetTokens).values({
       userId,
       tokenHash: hashToken(token),
-      expiresAt: new Date(now.getTime() + 7 * 86_400_000),
+      expiresAt,
       createdAt: now,
     });
   });
 
-  await sendSetPasswordEmail(person.email, person.name, token);
+  if (emailOn) await sendSetPasswordEmail(person.email, person.name, token);
 
   await recordAudit({
     actor,
     action: 'user.invite_resent',
     subjectType: 'user',
     subjectId: userId,
-    after: { email: person.email },
+    after: { email: person.email, emailed: emailOn },
   });
 
-  return { email: person.email };
+  return { email: person.email, emailed: emailOn, invite: passwordLink(token, expiresAt) };
+}
+
+/**
+ * A password reset link, for an admin to hand over: the way back in when
+ * email is off, or when someone's email is not arriving.
+ *
+ * Single use, a day long, and it revokes any link issued before it, so only
+ * the newest works. Nothing changes until it is used: the password, and the
+ * sessions it signs out, change only when the person sets a new one.
+ */
+export async function issueResetLink(
+  actor: Actor,
+  userId: string,
+  now = new Date(),
+): Promise<IssuedLink> {
+  authorize(actor, 'user.manage', { kind: 'user', userId, teamIds: [] });
+
+  const [person] = await db
+    .select({ email: users.email, isActive: users.isActive })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!person) throw new NotFoundError('That user');
+  if (!person.isActive) {
+    throw new ConflictError('That account is deactivated. Reactivate it before issuing a link.');
+  }
+
+  const token = generateToken(32);
+  const expiresAt = new Date(now.getTime() + ADMIN_RESET_LINK_HOURS * 3_600_000);
+
+  await withTransaction(async (tx) => {
+    await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: now })
+      .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.usedAt)));
+
+    await tx.insert(passwordResetTokens).values({
+      userId,
+      tokenHash: hashToken(token),
+      expiresAt,
+      createdAt: now,
+    });
+  });
+
+  await recordAudit({
+    actor,
+    action: 'user.reset_link_issued',
+    subjectType: 'user',
+    subjectId: userId,
+    after: { email: person.email, expiresAt: expiresAt.toISOString() },
+  });
+
+  return passwordLink(token, expiresAt);
 }
 
 export async function reactivateUser(

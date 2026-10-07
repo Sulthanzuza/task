@@ -32,10 +32,31 @@ export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
 
 export const listCommentsQuerySchema = cursorPaginationSchema;
 
+/**
+ * Why a file is on the task.
+ *
+ * Required: a file called final-v3.xlsx says nothing about what it is for,
+ * and the person who attached it is the only one who knows. Files attached
+ * before this was asked for carry an empty string.
+ */
+export const ATTACHMENT_DESCRIPTION_MAX = 500;
+export const attachmentDescriptionSchema = z
+  .string({ required_error: 'Say what this file is for.' })
+  .trim()
+  .min(1, 'Say what this file is for.')
+  .max(ATTACHMENT_DESCRIPTION_MAX, 'Keep it under ' + ATTACHMENT_DESCRIPTION_MAX + ' characters.');
+
+/** The fields sent alongside the file in the multipart upload. */
+export const uploadAttachmentBodySchema = z.object({
+  description: attachmentDescriptionSchema,
+});
+export type UploadAttachmentBody = z.infer<typeof uploadAttachmentBodySchema>;
+
 export const attachmentSchema = z.object({
   id: uuidSchema,
   taskId: uuidSchema,
   fileName: z.string(),
+  description: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number().int(),
   uploadedBy: z.object({ id: uuidSchema, name: z.string(), avatarUrl: z.string().nullable() }),

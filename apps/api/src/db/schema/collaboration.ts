@@ -28,12 +28,12 @@ export const taskComments = pgTable(
     editedAt: tz('edited_at'),
     deletedAt: tz('deleted_at'),
     createdAt: createdAt(),
-    search: tsvector('search').generatedAlwaysAs(
-      sql`to_tsvector('simple', coalesce(body, ''))`,
-    ),
+    search: tsvector('search').generatedAlwaysAs(sql`to_tsvector('simple', coalesce(body, ''))`),
   },
   (t) => [
-    index('task_comments_task_idx').on(t.taskId, t.createdAt).where(sql`deleted_at IS NULL`),
+    index('task_comments_task_idx')
+      .on(t.taskId, t.createdAt)
+      .where(sql`deleted_at IS NULL`),
     index('task_comments_search_idx').using('gin', t.search),
   ],
 );
@@ -65,6 +65,8 @@ export const taskAttachments = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     fileName: text('file_name').notNull(),
+    /** What the file is for, in the uploader's words. Empty only on rows older than the column. */
+    description: text('description').notNull(),
     mimeType: text('mime_type').notNull(),
     sizeBytes: integer('size_bytes').notNull(),
     /** Key inside the storage bucket or the local upload directory. */

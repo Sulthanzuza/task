@@ -17,6 +17,7 @@ import {
 } from '@tm/shared';
 import { useCreateTask, useTaskList } from './api';
 import { useUploadAttachment } from './attachmentsApi';
+import { attachmentDescriptionSchema } from '@tm/shared';
 import { useCreateLabel } from './labelsApi';
 import { useLabels, useProjects, useUsers } from '@/features/team/api';
 import { Markdown } from '@/components/common/Markdown';
@@ -92,7 +93,10 @@ function CreateTaskForm({
   const [preview, setPreview] = useState(false);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [dependsOn, setDependsOn] = useState<TaskSummary[]>([]);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<QueuedFile[]>([]);
+  // Set on the first attempt to create with an undescribed file, so the
+  // boxes are only pointed at once somebody has tried to skip them.
+  const [queueChecked, setQueueChecked] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
 
   /*
@@ -137,6 +141,15 @@ function CreateTaskForm({
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
+
+    // Each queued file needs its reason before the task exists, since the
+    // uploads start the moment it does.
+    if (files.some((queued) => !describedQueuedFile(queued))) {
+      setQueueChecked(true);
+      setFormError('Say what each attached file is for.');
+      return;
+    }
+
     try {
       // The resolver has already parsed and defaulted these values.
       const task = await create.mutateAsync({
@@ -155,10 +168,14 @@ function CreateTaskForm({
        * and the task is still opened.
        */
       const failed: string[] = [];
-      for (const file of files) {
+      for (const { file, description } of files) {
         setUploading(file.name);
         try {
-          await upload.mutateAsync({ file, onProgress: () => undefined });
+          await upload.mutateAsync({
+            file,
+            description: description.trim(),
+            onProgress: () => undefined,
+          });
         } catch {
           failed.push(file.name);
         }
@@ -271,7 +288,7 @@ function CreateTaskForm({
 
           <DependencyPicker chosen={dependsOn} onChange={setDependsOn} />
 
-          <AttachmentQueue files={files} onChange={setFiles} />
+          <AttachmentQueue files={files} onChange={setFiles} showErrors={queueChecked} />
 
           <div className="grid grid-cols-2 gap-3">
             {/*
@@ -620,8 +637,30 @@ function DependencyPicker({
   );
 }
 
-/** Files chosen now, uploaded once the task exists. */
-function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: File[]): void }) {
+/** A file chosen on the form, and the reason it is being attached. */
+interface QueuedFile {
+  file: File;
+  description: string;
+}
+
+function describedQueuedFile(queued: QueuedFile): boolean {
+  return attachmentDescriptionSchema.safeParse(queued.description).success;
+}
+
+function queue(list: FileList | File[]): QueuedFile[] {
+  return Array.from(list).map((file) => ({ file, description: '' }));
+}
+
+/** Files chosen now, uploaded once the task exists. Each one says what it is for. */
+function AttachmentQueue({
+  files,
+  onChange,
+  showErrors,
+}: {
+  files: QueuedFile[];
+  onChange(next: QueuedFile[]): void;
+  showErrors: boolean;
+}) {
   const [over, setOver] = useState(false);
 
   return (
@@ -629,21 +668,44 @@ function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: Fi
       <Label htmlFor="new-task-files">Attachments</Label>
 
       {files.length > 0 ? (
-        <ul className="mb-2 space-y-1">
-          {files.map((file) => (
-            <li key={file.name + file.size} className="flex items-center gap-2 text-sm">
-              <Paperclip size={13} className="shrink-0 text-ink-faint" aria-hidden />
-              <span className="min-w-0 flex-1 truncate">{file.name}</span>
-              <button
-                type="button"
-                aria-label={'Remove ' + file.name}
-                className="text-ink-faint hover:text-danger"
-                onClick={() => onChange(files.filter((candidate) => candidate !== file))}
-              >
-                <X size={13} />
-              </button>
-            </li>
-          ))}
+        <ul className="mb-2 space-y-2">
+          {files.map((queued) => {
+            const { file } = queued;
+            const missing = showErrors && !describedQueuedFile(queued);
+            return (
+              <li key={file.name + file.size} className="text-sm">
+                <div className="flex items-center gap-2">
+                  <Paperclip size={13} className="shrink-0 text-ink-faint" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    aria-label={'Remove ' + file.name}
+                    className="text-ink-faint hover:text-danger"
+                    onClick={() => onChange(files.filter((candidate) => candidate !== queued))}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <Input
+                  className="mt-1 h-9"
+                  value={queued.description}
+                  placeholder="What is this file for?"
+                  aria-label={'What ' + file.name + ' is for'}
+                  aria-invalid={missing ? true : undefined}
+                  onChange={(event) =>
+                    onChange(
+                      files.map((candidate) =>
+                        candidate === queued
+                          ? { ...candidate, description: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
+                />
+                <FieldError message={missing ? 'Say what this file is for.' : undefined} />
+              </li>
+            );
+          })}
         </ul>
       ) : null}
 
@@ -662,7 +724,7 @@ function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: Fi
         onDrop={(event) => {
           event.preventDefault();
           setOver(false);
-          onChange([...files, ...Array.from(event.dataTransfer.files)]);
+          onChange([...files, ...queue(event.dataTransfer.files)]);
         }}
         className={cn(
           'flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-left transition-colors',
@@ -681,7 +743,7 @@ function AttachmentQueue({ files, onChange }: { files: File[]; onChange(next: Fi
         multiple
         className="sr-only"
         onChange={(event) => {
-          onChange([...files, ...Array.from(event.target.files ?? [])]);
+          onChange([...files, ...queue(event.target.files ?? [])]);
           event.target.value = '';
         }}
       />

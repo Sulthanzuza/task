@@ -8,7 +8,7 @@ import {
   Paperclip,
   Upload,
 } from 'lucide-react';
-import { ALLOWED_ATTACHMENT_MIME_TYPES } from '@tm/shared';
+import { ALLOWED_ATTACHMENT_MIME_TYPES, attachmentDescriptionSchema } from '@tm/shared';
 import {
   useAttachments,
   useDeleteAttachment,
@@ -16,7 +16,7 @@ import {
   type Attachment,
 } from './attachmentsApi';
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
-import { Button, Card, Spinner } from '@/components/ui/primitives';
+import { Button, Card, FieldError, Label, Spinner, Textarea } from '@/components/ui/primitives';
 import { useAuth } from '@/features/auth/AuthContext';
 import { getAccessToken } from '@/lib/api';
 import { cn, formatDateTime } from '@/lib/utils';
@@ -28,6 +28,10 @@ import { cn, formatDateTime } from '@/lib/utils';
  * awkward on a phone and impossible from a keyboard. Whatever the server says
  * about a refused file is shown as it said it, since "that kind of file
  * cannot be attached" is more use than "upload failed".
+ *
+ * A chosen file does not go up at once. It waits in a small form that asks
+ * what it is for, because a list of files called final-v3.xlsx tells the
+ * next person nothing, and the one who attached it is the only one who knows.
  */
 
 const MAX_UPLOAD_MB = 25;
@@ -97,10 +101,16 @@ export function Attachments({
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The file waiting for its description, and the description so far.
+  const [pending, setPending] = useState<File | null>(null);
+  const [description, setDescription] = useState('');
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
+
   const deletion = useConfirm<Attachment>();
 
-  async function send(file: File) {
+  function choose(file: File) {
     setError(null);
+    setDescriptionError(null);
 
     // Caught here as well as on the server, so a 30 MB file is not uploaded
     // in full just to be turned away at the end of it.
@@ -111,12 +121,41 @@ export function Attachments({
       return;
     }
 
+    setPending(file);
+  }
+
+  function cancelPending() {
+    setPending(null);
+    setDescription('');
+    setDescriptionError(null);
+  }
+
+  async function send() {
+    if (!pending) return;
+    setError(null);
+
+    // The same rule the server applies, checked here first so an empty box
+    // is pointed at rather than answered with a 400.
+    const parsed = attachmentDescriptionSchema.safeParse(description);
+    if (!parsed.success) {
+      setDescriptionError(parsed.error.issues[0]?.message ?? 'Say what this file is for.');
+      return;
+    }
+    setDescriptionError(null);
+
     setProgress(0);
     try {
-      await upload.mutateAsync({ file, onProgress: setProgress });
+      await upload.mutateAsync({
+        file: pending,
+        description: parsed.data,
+        onProgress: setProgress,
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That file was not attached.');
     } finally {
+      // Either way the form goes: on success the file is in the list, and on
+      // failure the error says why, which a form still holding it would blur.
+      cancelPending();
       setProgress(null);
     }
   }
@@ -164,7 +203,7 @@ export function Attachments({
               event.preventDefault();
               setDragging(false);
               const dropped = event.dataTransfer.files[0];
-              if (dropped) void send(dropped);
+              if (dropped) choose(dropped);
             }}
           >
             <Upload
@@ -188,7 +227,7 @@ export function Attachments({
               accept={ALLOWED_ATTACHMENT_MIME_TYPES.join(',')}
               onChange={(event) => {
                 const chosen = event.target.files?.[0];
-                if (chosen) void send(chosen);
+                if (chosen) choose(chosen);
                 // Clear it, so choosing the same file twice still fires.
                 event.target.value = '';
               }}
@@ -198,6 +237,56 @@ export function Attachments({
               Choose a file
             </Button>
           </div>
+        ) : null}
+
+        {pending ? (
+          /*
+             The file is here; the upload waits for the sentence that says
+             why. Enter sends it, since the box is one line of thought.
+           */
+          <form
+            data-testid="attachment-describe"
+            className="mx-3 mb-3 rounded-lg border border-border-subtle p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
+            }}
+          >
+            <p className="mb-2 flex items-center gap-2 text-sm">
+              <Paperclip size={13} className="shrink-0 text-ink-faint" aria-hidden />
+              <span className="min-w-0 flex-1 truncate font-medium">{pending.name}</span>
+              <span className="shrink-0 text-xs text-ink-faint">{formatSize(pending.size)}</span>
+            </p>
+
+            <Label htmlFor="attachment-description">What is this file for?</Label>
+            <Textarea
+              id="attachment-description"
+              value={description}
+              autoFocus
+              rows={2}
+              className="min-h-0"
+              placeholder="The signed-off spec, the screenshot of the error, the export the client sent"
+              aria-invalid={descriptionError ? true : undefined}
+              onChange={(event) => setDescription(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <FieldError message={descriptionError ?? undefined} />
+
+            <div className="mt-2 flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={cancelPending}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={progress !== null}>
+                {progress !== null ? <Spinner /> : null}
+                Attach
+              </Button>
+            </div>
+          </form>
         ) : null}
 
         {progress !== null ? (
@@ -242,6 +331,14 @@ export function Attachments({
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{attachment.fileName}</p>
+                  {attachment.description ? (
+                    <p className="line-clamp-2 break-words text-xs text-ink-muted">
+                      {attachment.description}
+                    </p>
+                  ) : (
+                    // Older than the rule: the file is here, the reason is not.
+                    <p className="text-xs italic text-ink-faint">No description</p>
+                  )}
                   <p className="truncate text-xs text-ink-faint">
                     {formatSize(attachment.sizeBytes)} · {attachment.uploadedBy.name} ·{' '}
                     {formatDateTime(attachment.createdAt)}

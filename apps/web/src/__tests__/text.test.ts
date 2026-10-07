@@ -64,6 +64,16 @@ describe('activity sentences', () => {
     );
   });
 
+  it('says what the file was for, when the uploader said', () => {
+    const entry = {
+      ...entryFor('attachment.created'),
+      newValue: { fileName: 'opening-balances.png', description: 'The balances as of 1 April' },
+    };
+    expect(describeActivity(entry)).toBe(
+      'Sulthan attached opening-balances.png: The balances as of 1 April',
+    );
+  });
+
   it('falls back to "a file" when the name was not recorded', () => {
     const entry = { ...entryFor('attachment.created'), newValue: null };
     expect(describeActivity(entry)).toBe('Sulthan attached a file');

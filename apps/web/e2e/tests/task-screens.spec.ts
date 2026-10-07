@@ -71,7 +71,18 @@ test('a PDF uploads, shows on the task, in the timeline and in another tab', asy
      * both and cannot say which one it meant.
      */
     const panel = page.getByRole('region', { name: /Attachments/ });
+
+    // Nothing goes up until it says what it is for: an empty box is pointed
+    // at, and the file is not yet in the list.
+    await panel.getByRole('button', { name: 'Attach', exact: true }).click();
+    await expect(panel.getByText('Say what this file is for.')).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+
+    await panel.getByLabel('What is this file for?').fill('The spec the work follows');
+    await panel.getByRole('button', { name: 'Attach', exact: true }).click();
+
     await expect(panel.getByText('specification.pdf')).toBeVisible();
+    await expect(panel.getByText('The spec the work follows')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Delete' }).first()).toBeVisible();
 
     // And in the history, because attaching is a change to the task.
@@ -114,6 +125,8 @@ test('a file of the wrong kind is refused, and says why', async ({ page, api, pr
     // A Windows executable wearing a .png name: the sniffer reads the bytes.
     buffer: Buffer.from('MZ\x90\x00\x03\x00\x00\x00', 'latin1'),
   });
+  await page.getByLabel('What is this file for?').fill('A picture, supposedly');
+  await page.getByRole('button', { name: 'Attach', exact: true }).click();
 
   // The server's own words, which name what the file actually is rather than
   // repeating what it was called.

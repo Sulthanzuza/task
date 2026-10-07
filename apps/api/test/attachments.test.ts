@@ -49,6 +49,7 @@ describe('uploading', () => {
 
     const response = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 
@@ -69,6 +70,7 @@ describe('uploading', () => {
 
     await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PDF, { filename: 'spec.pdf', contentType: 'application/pdf' })
       .expect(201);
 
@@ -88,6 +90,7 @@ describe('uploading', () => {
 
     const uploaded = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 
@@ -102,12 +105,101 @@ describe('uploading', () => {
   });
 });
 
+describe('the description', () => {
+  it('is required: a file with none is refused and nothing is stored', async () => {
+    const task = await taskForUpload();
+
+    const response = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
+      .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_FAILED');
+    expect(response.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'description' })]),
+    );
+
+    const list = await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.key + '/attachments')
+      .expect(200);
+    expect(list.body.items).toHaveLength(0);
+  });
+
+  it('refuses whitespace as a description', async () => {
+    const task = await taskForUpload();
+
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', '   ')
+      .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
+      .expect(400);
+  });
+
+  it('refuses one longer than the limit', async () => {
+    const task = await taskForUpload();
+
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'x'.repeat(501))
+      .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
+      .expect(400);
+  });
+
+  it('is kept with the file, trimmed, and shown in the list and the timeline', async () => {
+    const task = await taskForUpload();
+
+    const response = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', '  The error as the customer saw it  ')
+      .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
+      .expect(201);
+
+    expect(response.body.description).toBe('The error as the customer saw it');
+
+    const list = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key + '/attachments')
+      .expect(200);
+    expect(list.body.items[0].description).toBe('The error as the customer saw it');
+
+    const timeline = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key + '/timeline')
+      .expect(200);
+    const entry = timeline.body.items.find(
+      (item: { action?: string }) => item.action === 'attachment.created',
+    );
+    expect(entry.newValue.description).toBe('The error as the customer saw it');
+  });
+
+  it('survives the file: the deletion row still says what it was for', async () => {
+    const task = await taskForUpload();
+
+    const uploaded = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'The signed-off spec')
+      .attach('file', PDF, { filename: 'spec.pdf', contentType: 'application/pdf' })
+      .expect(201);
+
+    await as(harness.app, fx.member)
+      .delete('/api/v1/attachments/' + uploaded.body.id)
+      .expect(204);
+
+    const timeline = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key + '/timeline')
+      .expect(200);
+    const entry = timeline.body.items.find(
+      (item: { action?: string }) => item.action === 'attachment.deleted',
+    );
+    expect(entry.oldValue).toEqual({ fileName: 'spec.pdf', description: 'The signed-off spec' });
+  });
+});
+
 describe('type sniffing', () => {
   it('refuses an executable renamed to .png', async () => {
     const task = await taskForUpload();
 
     const response = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       // Both the name and the declared type say image; the bytes say otherwise.
       .attach('file', EXE, { filename: 'holiday.png', contentType: 'image/png' })
       .expect(415);
@@ -125,6 +217,7 @@ describe('type sniffing', () => {
 
     await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', EXE, { filename: 'invoice.pdf', contentType: 'application/pdf' })
       .expect(415);
   });
@@ -134,6 +227,7 @@ describe('type sniffing', () => {
 
     const response = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       // A real PNG, dishonestly declared as a PDF.
       .attach('file', PNG, { filename: 'thing.pdf', contentType: 'application/pdf' })
       .expect(201);
@@ -146,6 +240,7 @@ describe('type sniffing', () => {
 
     const response = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', Buffer.from('one,two,three\n1,2,3\n'), {
         filename: 'rows.csv',
         contentType: 'text/csv',
@@ -170,6 +265,7 @@ describe('who may upload and read', () => {
 
     await as(harness.app, fx.outsider)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(403);
   });
@@ -179,6 +275,7 @@ describe('who may upload and read', () => {
 
     const uploaded = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 
@@ -202,6 +299,7 @@ describe('deleting', () => {
 
     const uploaded = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 
@@ -228,6 +326,7 @@ describe('deleting', () => {
 
     const uploaded = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 
@@ -241,6 +340,7 @@ describe('deleting', () => {
 
     const uploaded = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'What this file is for')
       .attach('file', PNG, { filename: 'screenshot.png', contentType: 'image/png' })
       .expect(201);
 

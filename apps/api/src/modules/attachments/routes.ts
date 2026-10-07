@@ -2,7 +2,12 @@ import { pipeline } from 'node:stream/promises';
 import { Router } from 'express';
 import multer from 'multer';
 import { and, desc, eq } from 'drizzle-orm';
-import { ALLOWED_ATTACHMENT_MIME_TYPES, idParamSchema, uuidSchema } from '@tm/shared';
+import {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  idParamSchema,
+  uploadAttachmentBodySchema,
+  uuidSchema,
+} from '@tm/shared';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { db, withTransaction } from '../../db/client';
@@ -53,10 +58,14 @@ taskAttachmentsRouter.post(
   uploadLimiter,
   validate({ params: refParam }),
   upload.single('file'),
+  // After multer, because the text fields of a multipart body are not there
+  // until it has read the stream.
+  validate({ body: uploadAttachmentBodySchema }),
   handler(async (req, res) => {
     const actor = requireActor(req);
     const file = req.file;
     if (!file) throw new ValidationError('No file was uploaded.');
+    const { description } = req.body as { description: string };
 
     const task = await loadTaskOr404(db, req.params.idOrKey as string);
     authorize(actor, 'task.attach', await toResource(db, task));
@@ -91,6 +100,7 @@ taskAttachmentsRouter.post(
           uploadedBy: actor.id,
           // Keep the name for display, but strip any path a client sent.
           fileName: file.originalname.replace(/^.*[\\/]/, '').slice(0, 255),
+          description,
           mimeType: verdict.mime,
           sizeBytes: stored.sizeBytes,
           storageKey: stored.key,
@@ -106,7 +116,7 @@ taskAttachmentsRouter.post(
             taskId: task.id,
             actorId: actor.id,
             action: 'attachment.created',
-            newValue: { fileName: file.originalname, mimeType: verdict.mime },
+            newValue: { fileName: file.originalname, description, mimeType: verdict.mime },
           },
         ],
         uploadedAt,
@@ -130,6 +140,7 @@ taskAttachmentsRouter.post(
     res.status(201).json({
       id: created,
       fileName: file.originalname,
+      description,
       mimeType: verdict.mime,
       sizeBytes: stored.sizeBytes,
       downloadUrl: '/api/v1/attachments/' + created,
@@ -161,6 +172,7 @@ taskAttachmentsRouter.get(
         id: row.id,
         taskId: row.taskId,
         fileName: row.fileName,
+        description: row.description,
         mimeType: row.mimeType,
         sizeBytes: row.sizeBytes,
         uploadedBy: {
@@ -253,7 +265,7 @@ attachmentsRouter.delete(
             taskId: row.taskId,
             actorId: actor.id,
             action: 'attachment.deleted',
-            oldValue: { fileName: row.fileName },
+            oldValue: { fileName: row.fileName, description: row.description },
           },
         ],
         removedAt,

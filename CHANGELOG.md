@@ -2,6 +2,17 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## Unreleased
+
+### Changed
+
+- **Every attachment now says what it is for.** Uploading a file requires a
+  description (1 to 500 characters), on the task page and in the create
+  drawer alike. The API refuses an upload without one, the list and the
+  timeline show it, and it stays on the activity row after the file is
+  deleted. Files attached before this carry an empty description and show
+  "No description". Migration `0006_attachment_description`.
+
 ## v1.0.0-render-rc4 — 2026-10-06
 
 ### Added

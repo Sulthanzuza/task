@@ -9,6 +9,8 @@ export interface Attachment {
   id: string;
   taskId: string;
   fileName: string;
+  /** What the file is for. Empty only on files attached before it was required. */
+  description: string;
   mimeType: string;
   sizeBytes: number;
   uploadedBy: { id: string; name: string; avatarUrl: string | null };
@@ -35,6 +37,7 @@ export function useAttachments(taskIdOrKey: string | undefined) {
 async function uploadWithProgress(
   path: string,
   file: File,
+  description: string,
   onProgress: (fraction: number) => void,
   isRetry = false,
 ): Promise<Attachment> {
@@ -60,13 +63,15 @@ async function uploadWithProgress(
     request.addEventListener('abort', () => reject(new Error('The upload was cancelled.')));
 
     const form = new FormData();
+    // The text field first, so the server has it by the time the file ends.
+    form.append('description', description);
     form.append('file', file);
     request.send(form);
   });
 
   // The same one-retry-after-refresh rule the rest of the client follows.
   if (attempt.status === 401 && !isRetry && (await refreshSession())) {
-    return uploadWithProgress(path, file, onProgress, true);
+    return uploadWithProgress(path, file, description, onProgress, true);
   }
 
   if (attempt.status >= 400) {
@@ -93,8 +98,16 @@ export function useUploadAttachment(taskIdOrKey: string | undefined) {
   const client = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ file, onProgress }: { file: File; onProgress: (fraction: number) => void }) =>
-      uploadWithProgress('/tasks/' + taskIdOrKey + '/attachments', file, onProgress),
+    mutationFn: ({
+      file,
+      description,
+      onProgress,
+    }: {
+      file: File;
+      description: string;
+      onProgress: (fraction: number) => void;
+    }) =>
+      uploadWithProgress('/tasks/' + taskIdOrKey + '/attachments', file, description, onProgress),
 
     onSuccess: async () => {
       await Promise.all([

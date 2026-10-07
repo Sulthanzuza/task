@@ -23,6 +23,13 @@ function fileNameOf(value: unknown): string | null {
   return typeof name === 'string' && name.length > 0 ? name : null;
 }
 
+/** Why the file was attached, kept on the event so it outlives the file. */
+function descriptionOf(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const text = (value as { description?: unknown }).description;
+  return typeof text === 'string' && text.trim().length > 0 ? text.trim() : null;
+}
+
 function statusLabel(value: unknown): string {
   return typeof value === 'string' && value in STATUS_LABELS
     ? STATUS_LABELS[value as TaskStatus]
@@ -82,7 +89,9 @@ export function describeActivity(entry: Activity): string {
       return who + ' deleted a comment';
     case 'attachment.created': {
       const name = fileNameOf(entry.newValue);
-      return name ? who + ' attached ' + name : who + ' attached a file';
+      if (!name) return who + ' attached a file';
+      const why = descriptionOf(entry.newValue);
+      return why ? who + ' attached ' + name + ': ' + why : who + ' attached ' + name;
     }
     case 'attachment.deleted': {
       const name = fileNameOf(entry.oldValue) ?? fileNameOf(entry.newValue);

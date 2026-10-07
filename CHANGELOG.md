@@ -2,7 +2,37 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
-## Unreleased
+## v1.1.0-rc1 — 2026-10-07
+
+Two features, and the first schema changes since launch: migrations `0005`
+and `0006` both run on startup.
+
+### Added
+
+- **Group tasks: one piece of work given to several people, each with their
+  own copy.** A parent carries the shared title, description, dates and
+  priority; its children are the real tasks, one per person, each with its
+  own key, activity, comments and notification.
+
+  Two rules hold it together. The parent is **derived**: its status and
+  progress are read off the children and never set by hand, recomputed inside
+  the same transaction as whatever changed a child, because recomputing
+  afterwards leaves a window where a group reads "3 of 8" with a fourth
+  already complete. And the parent is **never counted**: all seventeen
+  aggregate queries exclude it, or a group of eight would read as nine pieces
+  of work and a lead's numbers would drift further from the truth the more
+  the feature was used. Cancelled children leave the denominator too, so five
+  of eight where one person left is five of seven rather than a group that
+  can never finish.
+
+  The create drawer takes several people and says "Each person gets their own
+  task" before the button is pressed. A group's page is a People table and a
+  summary line; a child links back with a "Group: ERP-200" chip; My Tasks
+  shows a member their own copy only; the task list gives a group one line
+  and an icon; the board hides containers behind a toggle, since a column
+  holding a group and its children shows the same work nine times.
+
+  Migration `0005_mixed_nomad`.
 
 ### Changed
 
@@ -12,6 +42,26 @@ Notable changes, newest first. Dates are the day the work landed on `master`.
   timeline show it, and it stays on the activity row after the file is
   deleted. Files attached before this carry an empty description and show
   "No description". Migration `0006_attachment_description`.
+
+- **`task.progress` is no longer open to the whole team on a group child.**
+  Progress is a collaborative signal like a comment, which is right for an
+  ordinary task and wrong for one person's share of a group, where a
+  colleague moving their bar is the confusion the feature exists to prevent.
+  `TaskResource.inGroup` narrows it to the assignee and a lead; ordinary
+  tasks are unchanged.
+
+### Known follow-ups
+
+Three parts of the group-task brief are deliberately not in this tag:
+
+- Editing a parent does not offer to cascade to the children. There is no
+  "Apply to the open personal tasks too?" prompt; `updateGroupSchema` and
+  `GROUP_SHARED_FIELDS` are in `packages/shared` ready for it.
+- A parent's comments and attachments are not shown on its children. Each
+  child has its own, which works; the "From the group task" section is
+  missing.
+- The digest lists children individually rather than folding a group into one
+  line. The counts are right either way, since children are what count.
 
 ## v1.0.0-render-rc4 — 2026-10-06
 

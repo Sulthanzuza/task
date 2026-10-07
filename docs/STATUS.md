@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-06. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.0.0-render-rc4**.
+Last updated: 2026-10-07. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.1.0-rc1**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -40,7 +40,7 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `682ac5f` | Digest content and links, pre-commit hook, the tests that were missing |
 | `37cdeae` | Admin area: people, teams, projects, organisation settings, holidays, email, import, audit |
 | `3e968ae` | Task screens: attachments, mention autocomplete, full create drawer, optimistic updates |
-| _this one_ | Attachment descriptions (2026-10-07): every upload must say what the file is for. `task_attachments.description` (migration `0006`, older rows backfilled with an empty string), required by `uploadAttachmentBodySchema` in `packages/shared`, returned by the list and create endpoints, kept on both `attachment.created` and `attachment.deleted` activity rows so the reason outlives the file. The task page holds a chosen file in a small form until it is described; the create drawer asks per queued file and refuses to create until each has one. Timeline reads "attached spec.pdf: the signed-off spec". Five new integration tests, one wording test, and the task-screens e2e updated |
+| `29532a7` | Attachment descriptions (2026-10-07): every upload must say what the file is for. `task_attachments.description` (migration `0006`, older rows backfilled with an empty string), required by `uploadAttachmentBodySchema` in `packages/shared`, returned by the list and create endpoints, kept on both `attachment.created` and `attachment.deleted` activity rows so the reason outlives the file. The task page holds a chosen file in a small form until it is described; the create drawer asks per queued file and refuses to create until each has one. Timeline reads "attached spec.pdf: the signed-off spec". Five new integration tests, one wording test, and the task-screens e2e updated |
 | `696e511` | Design system: four themes as tokens, the top-bar shell, `/design` |
 | `30ad223` | Responsive top bar: pill icons down to 900px, identity into the account menu |
 | `a5313f0` | Dashboard redesign, the chart set, and `pnpm db:seed --demo` |
@@ -294,10 +294,10 @@ group could never reach 100%.
 | Board | Containers hidden by default, with a "Show group rows" toggle (`?groups=true`) |
 | Dashboard, alerts, digest, workload | Children only |
 
-### Not built yet
+### Follow-ups
 
 Three items from the brief are not in this tag, and nothing pretends they
-are:
+are. They are the next thing to pick up:
 
 - **Editing a parent does not offer to cascade.** Changing the parent's
   title, due date or priority leaves the children alone; there is no "Apply

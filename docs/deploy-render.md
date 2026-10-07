@@ -352,6 +352,21 @@ is computed from them, and changing them later moves dates on existing work.
    the invite link yourself, and set its password.
 5. Upload a file to any task and download it again: that is Supabase
    Storage working.
+6. **Reports → the overdue trend** will be empty, and says so. The nightly
+   job (23:50 in the org time zone) starts recording from the first night it
+   runs, so there is nothing behind today yet. If this deployment already has
+   history worth charting, rebuild it once from Render → the `api` service →
+   **Shell**:
+
+   ```
+   node dist/cli/backfillSnapshots.js --days 90
+   ```
+
+   That reconstructs open and overdue from the tasks as they stand now. It
+   leaves blocked and waiting-review at zero, because neither can be
+   recovered from a current row, and the chart marks rebuilt days as
+   estimated rather than passing a reconstruction off as a measurement. It is
+   safe to run twice: days the job really measured are never overwritten.
 
 **Inviting someone.** **Admin → People → Invite someone** → name, email,
 role, teams → **Send the invitation**. A box shows their **invite link**:

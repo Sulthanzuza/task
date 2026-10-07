@@ -215,6 +215,18 @@ export const listTasksQuerySchema = cursorPaginationSchema.extend({
   labelId: csvArray(uuidSchema),
   teamId: uuidSchema.optional(),
   dueFrom: dateOnlySchema.optional(),
+  /*
+   * When a task was made, and when it was finished.
+   *
+   * Added for the Reports page, where every number hands out the query that
+   * opens the rows behind it. Without these, a report saying "23 completed
+   * last month" linked to a list of every completion there has ever been,
+   * and the two disagreed by more the longer the project ran.
+   */
+  createdFrom: dateOnlySchema.optional(),
+  createdTo: dateOnlySchema.optional(),
+  completedFrom: dateOnlySchema.optional(),
+  completedTo: dateOnlySchema.optional(),
   dueTo: dateOnlySchema.optional(),
   overdue: booleanQuerySchema,
   blocked: booleanQuerySchema,

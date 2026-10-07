@@ -28,6 +28,7 @@
     "shots": "pnpm --filter @tm/web shots",
     "e2e:ui": "pnpm --filter @tm/web e2e:ui",
     "admin:create-user": "pnpm --filter @tm/api admin:create-user",
+    "snapshots:backfill": "pnpm --filter @tm/api snapshots:backfill",
     "smoke": "pnpm --filter @tm/web smoke"
   },
   "lint-staged": {

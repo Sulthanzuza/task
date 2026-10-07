@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-07. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.1.0-rc1**.
+Last updated: 2026-10-07. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.2.0-rc1**.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -25,7 +25,9 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | 11 | Kanban board and calendar, live updates | Done — dnd-kit board with server-counted columns, month and week calendar in org time, Socket.IO with server-decided rooms | `apps/web/src/features/board/`, `features/calendar/`, `apps/api/src/realtime/gateway.ts` |
 | 12 | Notifications | Done — in-app bell, per-type preferences including digest-only, email through pg-boss collapsed to one per burst, quiet hours in each person's own zone | `apps/api/src/modules/notifications/`, `apps/api/src/jobs/` |
 | 13 | Alerts, daily digest, escalations | Done — scheduled jobs on working-hours thresholds, leave-aware, idempotent through `alert_log` and `digest_log`, digest rendered to email and to `/digest/:date` | `apps/api/src/modules/alerts/` |
-| 14–19 | Workload, checklists, recurring, check-ins, search, integrations | Not started | — |
+| 14–17 | Workload, checklists, recurring, check-ins | Not started | — |
+| 18 | Search, saved views, bulk actions, reporting | **Partial** — reporting is done (API, UI, tests); search, saved views and bulk actions are not started | `apps/api/src/modules/reports/`, `apps/web/src/features/reports/` |
+| 19 | Integrations | Not started | — |
 | 20–21 | Tests and security hardening, production deployment | Partly done — see below | `docs/deploy.md` |
 | 22 | V2 AI layer | Not started, and deliberately: it wants months of real data first | — |
 
@@ -56,7 +58,10 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `a75f1f3` | render-rc1: free deployment on Render + Supabase. `RUN_MODE=all` (one process serving app, API, sockets and jobs), Brevo HTTP mailer, connection budget, configurable argon2 with rehash on sign-in, streamed downloads, `render.yaml`, backup and restore-drill workflows, `docs/deploy-render.md`. Also: dev Compose without MinIO, stricter `.gitignore` |
 | `ee25ca8` | render-rc2: Singapore for Render and Supabase; database TLS verified against `DATABASE_CA_CERT` (app, pg-boss, CLI, and the Actions backup with `verify-full`); migrations under an advisory lock; Brevo allows Render's Singapore ranges instead of blocking being turned off |
 | `dbe2c44` | render-rc3: launch without email or a domain. `MAIL_TRANSPORT=none` (a warning, not a refusal); copyable invite links (single use, 7 days) and admin reset links (single use, 24 hours) in Admin → People; forgot-password and Settings → Email say email is off; `render.yaml` on the onrender address with a host-only cookie; Brevo and the custom domain moved to "Later" in the guide; `pnpm e2e:all` now runs the launch configuration |
-| _this one_ | render-rc4: one-time bootstrap of the first administrator from `BOOTSTRAP_ADMIN_EMAIL` on an empty database, with a single-use set-password link in the log |
+| `be4c62a` | render-rc4: one-time bootstrap of the first administrator from `BOOTSTRAP_ADMIN_EMAIL` on an empty database, with a single-use set-password link in the log |
+| `d10211c` | Group tasks (v1.1.0-rc1): one piece of work given to several people, each with their own copy. See the section below |
+| `f132915` | `CHANGELOG.md` entry for v1.1.0-rc1 |
+| _this one_ | Reports (v1.2.0-rc1): `/reports` for leads and admins, nightly `daily_snapshots`, CSV and XLSX export, and the four task-list date filters the drill-downs needed. See the section below |
 
 ### The design system, applied (three design prompts)
 
@@ -309,6 +314,72 @@ are. They are the next thing to pick up:
 - **The digest lists children individually** rather than folding a group into
   one line. The counts are right either way, since children are what count.
 
+## Reports (v1.2)
+
+`/reports`, for leads and admins. Seven sections over one set of filters:
+summary cards, throughput per week, the overdue trend, cycle time, blocked
+time, a people table and a projects table.
+
+Three rules decide whether a report is worth having:
+
+- **Every number opens the rows behind it.** Each card and each table figure
+  links into the task list carrying the filters that produced it, and a test
+  asserts the figure equals the drill-down count. That test earned its place
+  immediately: the task list had no `createdFrom`, `createdTo`,
+  `completedFrom` or `completedTo` filter, so the links were silently ignored
+  and a card reading 3 opened 4 rows. The four filters are now in
+  `taskListQuerySchema` and `modules/tasks/repo.ts`, compared as dates in the
+  org timezone.
+- **The filters are in the URL.** Preset, custom from and to, team, project,
+  member and label all round-trip through the query string, so a report can
+  be pasted into a message and read the same way by whoever opens it.
+- **A range with nothing in it says why.** The week and day series are
+  generated from the range, so they are never empty: with no activity they
+  are a row of zeros, which draws a chart that looks like data. The empty
+  states test the values rather than the length of the list.
+
+### The unit of time
+
+Hours are **working hours** — elapsed hours falling on a working day,
+weekends and `org_settings` holidays excluded. A whole working day is 24, not
+8, because that is the unit the alert thresholds already use ("no update for
+24 working hours") and two units would mean two answers to the same question.
+Thursday 16:00 to Monday 10:00 with the Friday a holiday is 18 hours, not 90,
+and the test spells the arithmetic out rather than asserting a range.
+
+### Where the numbers come from
+
+| Section | Source |
+| --- | --- |
+| Summary, throughput, cycle time | `tasks` over the range, with the previous window of the same length for comparison |
+| Overdue trend | `daily_snapshots`, because "open and past due at the end of that day" cannot be recovered from current rows |
+| Blocked time | `task_activity` pairs — BLOCKED to resumed; an open spell counts to now and is marked current |
+| People, projects | `tasks` grouped; a project's percent-done is over its whole life, not the range |
+
+Group parents (`is_group`) and internal teams are excluded from every
+aggregate, as everywhere else.
+
+### Snapshots
+
+`daily-snapshot` runs at 23:50 in the org timezone and writes one row per
+team, keyed `(date, team_id)` so a re-run overwrites rather than doubles.
+`pnpm snapshots:backfill` rebuilds up to 90 days from current rows — open and
+overdue only; blocked and waiting-review stay at zero rather than inventing a
+history the activity log cannot support. The overdue trend is therefore
+honest but short until the job has run for a while, and says so.
+
+### Export
+
+CSV and XLSX, one sheet per section, filters on the first sheet so a
+spreadsheet says what it is a report of. Dates in the org timezone. Adds
+`exceljs`.
+
+### Not in this tag
+
+Prompt 18's other half — search, saved views and bulk actions — is not
+started, and TanStack Table is not yet a dependency. The reporting part is
+done (API, UI and tests); the prompt as a whole is PARTIAL.
+
 ## Accepted deviations
 
 These are decided, not oversights. Do not "fix" them without asking.
@@ -429,15 +500,20 @@ is dropped and rebuilt every run.
 Other commands: `pnpm build`, `pnpm smoke` (against a deployed site, with a dedicated
 smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset`.
 
-## Test counts as of 2026-10-06
+## Test counts as of 2026-10-07
 
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 51 |
-| `apps/api` integration | 26 | 431 |
-| `apps/web` end-to-end (`pnpm e2e`, email on) | 14 | 61 |
-| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 14 | 59, and 2 mailbox tests skipped |
+| `apps/api` integration | 29 | 481 |
+| `apps/web` end-to-end (`pnpm e2e`, email on) | 16 | 66 |
+| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 16 | 64, and 2 mailbox tests skipped |
+
+The axe sweep covers eleven screens in four themes, Reports included, which
+is forty-four runs of a slow check in one test. Its budget is for the whole
+sweep rather than per screen, so run it with the machine to itself: a
+timeout there is reported as an accessibility failure and is not one.
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.

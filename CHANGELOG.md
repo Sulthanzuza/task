@@ -2,6 +2,66 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.2.0-rc1 — 2026-10-07
+
+The reporting half of prompt 18. Migration `0007` runs on startup.
+
+### Added
+
+- **Reports (`/reports`, leads and admins).** Seven sections over one set of
+  filters: summary cards, throughput per week, the overdue trend, cycle time,
+  blocked time, a people table and a projects table.
+
+  Three things decide whether a report is worth having, and each one is a
+  rule here rather than a nicety:
+
+  **Every number opens the rows behind it.** Each card and each table figure
+  is a link into the task list carrying the filters that produced it, and a
+  test asserts the figure and the drill-down count are equal. Writing that
+  test is what found the gap it was written for: the task list had no
+  `createdFrom`, `createdTo`, `completedFrom` or `completedTo` filter, so the
+  links were being silently ignored and a card reading 3 opened 4 rows. The
+  four filters are now in `taskListQuerySchema` and the repo, compared as
+  dates in the org timezone.
+
+  **The filters are in the URL.** Range preset, custom from and to, team,
+  project, member and label all round-trip through the query string, so a
+  report can be pasted into a message and the person who opens it sees the
+  same figures.
+
+  **A range with nothing in it says so.** The week and day series are
+  generated from the range, so they are never empty — with no activity they
+  are a row of zeros, which draws a chart that looks like data. The empty
+  states test the values, not the length of the list, and each one says why
+  it is empty rather than only that it is.
+
+  Hours are **working hours**, which here means elapsed hours falling on a
+  working day, excluding weekends and `org_settings` holidays — the same unit
+  the alert thresholds use. Thursday 16:00 to Monday 10:00 with the Friday a
+  holiday is 18 hours, not 90, and a test spells the arithmetic out.
+
+  Blocked time is reconstructed by pairing `task_activity` rows, so a spell
+  that is still open counts up to now and is marked as current. Group parents
+  and internal teams are excluded from every aggregate, as everywhere else.
+
+- **Nightly snapshots.** The overdue trend cannot be derived after the fact
+  from current rows, so `daily_snapshots` records open, overdue, blocked and
+  waiting-review per team each night at 23:50 in the org timezone, keyed on
+  `(date, team_id)` so a re-run overwrites rather than doubles.
+  `pnpm snapshots:backfill` rebuilds up to 90 days from current rows; it
+  fills open and overdue only, and leaves blocked and waiting-review at zero
+  rather than inventing a history the activity log cannot support.
+  Migration `0007_hard_inertia`.
+
+- **CSV and XLSX export.** One sheet per section with the filters on the
+  first, so a spreadsheet says what it is a report of. Dates are rendered in
+  the org timezone. Adds `exceljs`.
+
+### Deliberately not in this tag
+
+Prompt 18's other half — saved views, bulk actions and search — is not
+started, and TanStack Table is not yet a dependency.
+
 ## v1.1.0-rc1 — 2026-10-07
 
 Two features, and the first schema changes since launch: migrations `0005`

@@ -48,6 +48,12 @@ export const queryKeys = {
       ['dashboard', 'charts', teamId ?? 'mine', period] as const,
   },
 
+  reports: {
+    all: ['reports'] as const,
+    /** Keyed by the whole filter set: a different range is a different report. */
+    detail: (query: Record<string, unknown>) => ['reports', query] as const,
+  },
+
   org: {
     /** Weekends and holidays. Everyone reads it; it changes a few times a year. */
     calendar: () => ['org', 'calendar'] as const,

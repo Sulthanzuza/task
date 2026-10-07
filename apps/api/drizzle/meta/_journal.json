@@ -50,6 +50,13 @@
       "when": 1791342857070,
       "tag": "0006_attachment_description",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791377637556,
+      "tag": "0007_hard_inertia",
+      "breakpoints": true
     }
   ]
 }

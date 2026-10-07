@@ -79,7 +79,13 @@ async function scan(page: Page, label: string): Promise<string[]> {
     );
 }
 
-test.describe.configure({ timeout: 180_000 });
+/*
+ * Eleven screens in four themes is forty-four axe runs, and axe is slow by
+ * nature: it walks the tree and computes contrast for every node. The budget
+ * is for the whole sweep, so it has to be generous enough that a loaded
+ * machine does not report a timeout as an accessibility failure.
+ */
+test.describe.configure({ timeout: 420_000 });
 
 test('every main screen passes axe in all four themes', async ({ page, api }) => {
   const client = await apiAs(api, USERS.lead);
@@ -97,6 +103,7 @@ test('every main screen passes axe in all four themes', async ({ page, api }) =>
     { name: 'notification preferences', path: '/settings/notifications' },
     { name: 'people', path: '/admin/people' },
     { name: 'audit', path: '/admin/audit' },
+    { name: 'reports', path: '/reports' },
   ];
 
   await signIn(page, USERS.admin);

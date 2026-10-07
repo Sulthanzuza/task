@@ -20,6 +20,7 @@ export const SCHEDULES = {
   alertScan: 'alert-scan',
   dailyDigest: 'daily-digest',
   housekeeping: 'nightly-housekeeping',
+  dailySnapshot: 'daily-snapshot',
 } as const;
 
 /** Reads "09:00:00" into the cron fields pg-boss needs. */
@@ -57,6 +58,13 @@ export async function registerSchedules(): Promise<void> {
 
   // Small hours, when nobody is waiting on the database.
   await boss.schedule(SCHEDULES.housekeeping, '30 2 * * *', {}, { tz: settings.timezone });
+
+  /*
+   * 23:50 in the organisation's zone: late enough to be the day's final
+   * state, early enough that it is still that day. Running at midnight would
+   * write the row under tomorrow's date half the time.
+   */
+  await boss.schedule(SCHEDULES.dailySnapshot, '50 23 * * *', {}, { tz: settings.timezone });
 
   logger.info(
     { timezone: settings.timezone, digestTime: settings.digestTime },

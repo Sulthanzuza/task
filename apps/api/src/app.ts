@@ -23,6 +23,7 @@ import { labelsRouter, projectsRouter } from './modules/projects/routes';
 import { projectTasksRouter, tasksRouter } from './modules/tasks/routes';
 import { commentsRouter } from './modules/comments/routes';
 import { dashboardRouter, membersRouter } from './modules/dashboard/routes';
+import { reportsRouter } from './modules/reports/routes';
 import { attachmentsRouter, taskAttachmentsRouter } from './modules/attachments/routes';
 import { importRouter } from './modules/import/routes';
 import { notificationsRouter } from './modules/notifications/routes';
@@ -149,6 +150,7 @@ export function createApp(): Express {
   v1.use('/org', orgRouter);
   v1.use('/import', importRouter);
   v1.use('/dashboard', dashboardRouter);
+  v1.use('/reports', reportsRouter);
   v1.use('/members', membersRouter);
 
   app.use('/api/v1', v1);

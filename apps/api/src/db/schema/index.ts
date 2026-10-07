@@ -7,3 +7,4 @@ export * from './collaboration';
 export * from './workspace';
 export * from './notifications';
 export * from './audit';
+export * from './reporting';

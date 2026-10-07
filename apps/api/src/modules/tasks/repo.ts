@@ -400,6 +400,32 @@ function buildFilters(
   if (query.dueFrom) filters.push(sql`${tasks.dueDate} >= ${query.dueFrom}::date`);
   if (query.dueTo) filters.push(sql`${tasks.dueDate} <= ${query.dueTo}::date`);
 
+  /*
+   * Compared as dates in the organisation's zone, the same way the report
+   * counts them, or a task finished late on the last evening of a range
+   * would be in the number and missing from the list it opens.
+   */
+  if (query.createdFrom) {
+    filters.push(
+      sql`(${tasks.createdAt} AT TIME ZONE ${ctx.calendar.timezone})::date >= ${query.createdFrom}::date`,
+    );
+  }
+  if (query.createdTo) {
+    filters.push(
+      sql`(${tasks.createdAt} AT TIME ZONE ${ctx.calendar.timezone})::date <= ${query.createdTo}::date`,
+    );
+  }
+  if (query.completedFrom) {
+    filters.push(
+      sql`(${tasks.completedAt} AT TIME ZONE ${ctx.calendar.timezone})::date >= ${query.completedFrom}::date`,
+    );
+  }
+  if (query.completedTo) {
+    filters.push(
+      sql`(${tasks.completedAt} AT TIME ZONE ${ctx.calendar.timezone})::date <= ${query.completedTo}::date`,
+    );
+  }
+
   // Every one of these comes from the shared predicates, so a list reached from a
   // KPI card selects exactly the rows the card counted.
   if (query.open === true) filters.push(predicates.isOpen(columns));

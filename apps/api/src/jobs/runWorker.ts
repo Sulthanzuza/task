@@ -76,6 +76,12 @@ async function startJobWorkers(): Promise<void> {
     logger.info({ sent: results.filter((r) => r.sent).length }, 'Digest run finished.');
   });
 
+  await boss.work(SCHEDULES.dailySnapshot, async () => {
+    const { writeDailySnapshot } = await import('../modules/reports/snapshots');
+    const written = await writeDailySnapshot();
+    logger.info(written, 'Wrote the daily snapshot.');
+  });
+
   await boss.work(SCHEDULES.housekeeping, async () => {
     await runHousekeeping();
     await housekeeping();

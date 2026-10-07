@@ -12,4 +12,5 @@ export * from './schemas/task';
 export * from './schemas/comment';
 export * from './schemas/dashboard';
 export * from './schemas/org';
+export * from './schemas/report';
 export * from './colors';

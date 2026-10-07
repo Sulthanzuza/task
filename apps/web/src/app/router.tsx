@@ -25,6 +25,7 @@ import { ImportPage } from '@/features/admin/ImportPage';
 import { AuditPage } from '@/features/admin/AuditPage';
 import { DesignPage } from '@/features/design/DesignPage';
 import { Button, Card, EmptyState, Spinner } from '@/components/ui/primitives';
+import { ReportsPage } from '@/features/reports/ReportsPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -176,10 +177,7 @@ export function AppRoutes() {
             path="/reports"
             element={
               <RequireLead>
-                <Placeholder
-                  title="Reports"
-                  note="Reports arrive with the search and reporting work."
-                />
+                <ReportsPage />
               </RequireLead>
             }
           />

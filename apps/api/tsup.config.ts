@@ -9,6 +9,7 @@ export default defineConfig({
     'src/db/migrate.ts',
     'src/cli/createUser.ts',
     'src/cli/envCheck.ts',
+    'src/cli/backfillSnapshots.ts',
   ],
   format: ['esm'],
   target: 'node22',

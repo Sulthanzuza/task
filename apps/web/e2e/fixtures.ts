@@ -83,6 +83,8 @@ export { expect };
 export const USERS = {
   lead: { email: 'sulthan@example.com', password: 'Password123!', name: 'Sulthan' },
   member: { email: 'rahul@example.com', password: 'Password123!', name: 'Rahul' },
+  /** A second member of the same team, for anything that needs two of them. */
+  member2: { email: 'arun@example.com', password: 'Password123!', name: 'Arun' },
   otherLead: { email: 'nisha@example.com', password: 'Password123!', name: 'Nisha' },
   admin: { email: 'admin@example.com', password: 'Password123!', name: 'Admin' },
 } as const;

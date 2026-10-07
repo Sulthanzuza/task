@@ -11,6 +11,7 @@ import {
   transitionTaskSchema,
   updateProgressSchema,
   updateTaskSchema,
+  addGroupMemberSchema,
   uuidSchema,
 } from '@tm/shared';
 import { authenticate, requireActor } from '../../middleware/authenticate';
@@ -125,6 +126,38 @@ tasksRouter.post(
   validate({ params: idParamSchema, body: assignTaskSchema }),
   handler(async (req, res) => {
     const task = await service.assignTask(requireActor(req), req.params.id as string, req.body);
+    res.json(task);
+  }),
+);
+
+/**
+ * Adding and removing people on a group task.
+ *
+ * Separate from /assign on purpose: assigning moves one task from one
+ * person to another, while these change how many tasks exist.
+ */
+tasksRouter.post(
+  '/:id/group/members',
+  validate({ params: idParamSchema, body: addGroupMemberSchema }),
+  handler(async (req, res) => {
+    const task = await service.addGroupMember(
+      requireActor(req),
+      req.params.id as string,
+      (req.body as { userId: string }).userId,
+    );
+    res.status(201).json(task);
+  }),
+);
+
+tasksRouter.delete(
+  '/:id/group/members/:userId',
+  validate({ params: idParamSchema.extend({ userId: uuidSchema }) }),
+  handler(async (req, res) => {
+    const task = await service.removeGroupMember(
+      requireActor(req),
+      req.params.id as string,
+      req.params.userId as string,
+    );
     res.json(task);
   }),
 );

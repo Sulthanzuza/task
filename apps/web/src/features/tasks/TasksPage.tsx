@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, Users } from 'lucide-react';
 import type { ListTasksQuery, TaskPriority, TaskStatus } from '@tm/shared';
 import { PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES } from '@tm/shared';
 import { useTaskList } from './api';
@@ -262,9 +262,17 @@ export function TasksPage() {
                     <Link
                       to={'/tasks/' + task.key}
                       title={task.title}
-                      className="block truncate hover:underline"
+                      className="flex min-w-0 items-center gap-1.5 hover:underline"
                     >
-                      {task.title}
+                      {/*
+                        A group is one line here, not eight. The icon and the
+                        head count say it stands for several people's work
+                        without listing them.
+                      */}
+                      {task.isGroup ? (
+                        <Users size={13} aria-label="Group task" className="shrink-0 text-accent" />
+                      ) : null}
+                      <span className="truncate">{task.title}</span>
                     </Link>
                     {task.labels.length > 0 ? (
                       <span className="mt-1 flex flex-wrap gap-1">

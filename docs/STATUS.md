@@ -246,6 +246,68 @@ The last UI pass before deployment. Eight items; what is worth knowing later:
   taken of is seeded with its history spread across the last five working days. Posting
   that through the API stamped every row with the same second.
 
+## Group tasks (v1.1)
+
+One piece of work given to several people, each getting their own copy.
+
+A **parent** carries the shared title, description, dates and priority. Its
+**children** are the real tasks, one per person, each with its own key, its
+own activity, its own comments and its own notification. Two rules hold it
+together:
+
+- **The parent is derived.** Status and progress are read off the children
+  and never set by hand, and they are recomputed inside the same transaction
+  as whatever changed a child. Recomputing afterwards would leave a window
+  where a group says "3 of 8" with a fourth already complete, and that window
+  is exactly when somebody refreshes.
+- **The parent is never counted.** Every aggregate filters `is_group` out, or
+  a group of eight would read as nine pieces of work and a lead's numbers
+  would drift further from the truth the more the feature was used.
+
+Cancelled children leave the denominator entirely: five of eight where one
+person left is five of seven, not five of eight, and the other way round the
+group could never reach 100%.
+
+### What the feature needed from the rest of the product
+
+- **`task.progress` was team-wide**, by design: progress is a collaborative
+  signal like a comment. That is wrong for a group child, which is one
+  person's share, so `TaskResource.inGroup` narrows it to the assignee and a
+  lead. Ordinary tasks are unchanged.
+- **`deriveParent` first read a finished child as "not started"**, so a group
+  where one person had completed and the rest had not begun came back as
+  Assigned. COMPLETED counts as started.
+- `parentIsGroup` and `parentKey` are read as sub-selects on the row that is
+  already being fetched, rather than as another query every time something is
+  authorized or a child wants to name its group.
+
+### Where it is used
+
+| Surface | Behaviour |
+| --- | --- |
+| Create drawer | The assignee picker takes several people; two or more says "Each person gets their own task (group task)" before the button is pressed |
+| Group detail | A People table (person, task, status, progress, due, last update) and a summary line, "5 of 8 done · 2 in progress · 1 blocked" |
+| Child detail | A "Group: ERP-200" chip back to the parent |
+| My Tasks | Each member sees only their own child, with the group link |
+| Task list | A group is one line with a group icon; children are listed normally |
+| Board | Containers hidden by default, with a "Show group rows" toggle (`?groups=true`) |
+| Dashboard, alerts, digest, workload | Children only |
+
+### Not built yet
+
+Three items from the brief are not in this tag, and nothing pretends they
+are:
+
+- **Editing a parent does not offer to cascade.** Changing the parent's
+  title, due date or priority leaves the children alone; there is no "Apply
+  to the open personal tasks too?" prompt. `updateGroupSchema` and
+  `GROUP_SHARED_FIELDS` are defined in `packages/shared` ready for it.
+- **A parent's comments and attachments are not shown on its children.**
+  Each child has its own, which works; the "From the group task" section is
+  missing.
+- **The digest lists children individually** rather than folding a group into
+  one line. The counts are right either way, since children are what count.
+
 ## Accepted deviations
 
 These are decided, not oversights. Do not "fix" them without asking.
@@ -371,7 +433,7 @@ smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit | 1 | 23 |
-| `apps/web` unit (tokens, contrast, wording) | 2 | 50 |
+| `apps/web` unit (tokens, contrast, wording) | 2 | 51 |
 | `apps/api` integration | 26 | 431 |
 | `apps/web` end-to-end (`pnpm e2e`, email on) | 14 | 61 |
 | `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 14 | 59, and 2 mailbox tests skipped |

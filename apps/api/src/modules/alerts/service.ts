@@ -93,7 +93,7 @@ async function candidatesFor(condition: ReturnType<typeof isOverdue>): Promise<A
     -- An internal team is the deploy pipeline's, not a person's. Paging
     -- somebody about a task the smoke test created ninety seconds ago is
     -- how an alert channel gets muted.
-    WHERE t.deleted_at IS NULL AND tm.is_internal = false AND ${condition}
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND tm.is_internal = false AND ${condition}
   `);
 
   return (result.rows as Array<Record<string, unknown>>).map((row) => ({

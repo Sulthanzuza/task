@@ -143,7 +143,7 @@ export async function buildDigest(userId: string, now: Date): Promise<Digest> {
       SELECT p.key || '-' || t.number AS key, t.title, t.completed_at
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
-      WHERE t.deleted_at IS NULL
+      WHERE t.deleted_at IS NULL AND t.is_group = false
         AND p.team_id = ${teamId}::uuid
         AND t.completed_at >= ${yesterdayStart}
         AND t.completed_at < ${yesterdayEnd}

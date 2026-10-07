@@ -81,7 +81,7 @@ export async function getSummary(
       count(*) FILTER (WHERE ${isUnassignedOpen(c)}) AS unassigned_open
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL AND p.team_id = ${scopedTeamId}::uuid
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND p.team_id = ${scopedTeamId}::uuid
   `);
 
   const row = (result.rows[0] ?? {}) as Record<string, string | number | null>;
@@ -126,7 +126,7 @@ export async function getMemberRows(
       max(t.last_activity_at) AS last_activity_at
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${scopedTeamId}::uuid
       AND t.assignee_id IS NOT NULL
     GROUP BY t.assignee_id
@@ -186,7 +186,7 @@ export async function getAttention(
       t.assignee_id, p.key AS project_key
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${scopedTeamId}::uuid
       AND ${isOpen(c)}
       AND ${needsAttention(c, ctx)}
@@ -346,7 +346,7 @@ export async function getMemberStats(
       count(*) FILTER (WHERE t.completed_at >= ${windowStart}) AS completed_recent,
       max(t.last_activity_at) AS last_activity_at
     FROM tasks t
-    WHERE t.deleted_at IS NULL AND t.assignee_id = ${userId}::uuid
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND t.assignee_id = ${userId}::uuid
   `);
 
   const row = (counts.rows[0] ?? {}) as Record<string, unknown>;
@@ -361,7 +361,7 @@ export async function getMemberStats(
         WHERE a.task_id = t.id AND a.action = 'task.transitioned'
           AND a.new_value = '"IN_PROGRESS"'::jsonb) AS started_at
     FROM tasks t
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND t.assignee_id = ${userId}::uuid
       AND t.status = 'COMPLETED'
       AND t.completed_at >= ${windowStart}
@@ -440,7 +440,7 @@ export async function getMemberActivity(
       u.id AS actor_id, u.name AS actor_name, u.email AS actor_email,
       u.role AS actor_role, u.avatar_url AS actor_avatar, u.is_active AS actor_active
     FROM task_activity a
-    JOIN tasks t ON t.id = a.task_id AND t.deleted_at IS NULL
+    JOIN tasks t ON t.id = a.task_id AND t.deleted_at IS NULL AND t.is_group = false
     JOIN projects p ON p.id = t.project_id
     LEFT JOIN users u ON u.id = a.actor_id
     WHERE a.actor_id = ${userId}::uuid

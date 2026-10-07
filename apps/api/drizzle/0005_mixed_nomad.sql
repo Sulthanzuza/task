@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "is_group" boolean DEFAULT false NOT NULL;

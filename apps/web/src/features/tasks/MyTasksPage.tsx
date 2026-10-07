@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { TaskStatus, TaskSummary } from '@tm/shared';
 import { canTransition } from '@tm/shared';
+import { Users } from 'lucide-react';
 import { useTaskList, useTransitionTask } from './api';
 import { useAuth } from '@/features/auth/AuthContext';
 import {
@@ -287,19 +288,35 @@ function TaskRow({ task }: { task: TaskSummary }) {
         'md:grid-cols-[78px_minmax(240px,1fr)_96px_132px_84px_120px] md:items-center md:gap-x-4 md:gap-y-0',
       )}
     >
-      <Link
-        to={'/tasks/' + task.key}
-        title={task.title}
-        className="order-1 min-w-0 text-sm hover:underline md:order-2 md:truncate"
-      >
+      <span className="order-1 min-w-0 md:order-2">
+        <Link
+          to={'/tasks/' + task.key}
+          title={task.title}
+          className="block min-w-0 text-sm hover:underline md:truncate"
+        >
+          {/*
+            max-md: so the clamp exists only on a phone. line-clamp-none left
+            the span a block with overflow:visible, which escaped the link's
+            clip entirely: the title was cut mid-letter with no ellipsis,
+            because text-overflow cannot reach into a block child.
+          */}
+          <span className="max-md:line-clamp-2">{task.title}</span>
+        </Link>
+
         {/*
-          max-md: so the clamp exists only on a phone. line-clamp-none left
-          the span a block with overflow:visible, which escaped the link's
-          clip entirely: the title was cut mid-letter with no ellipsis,
-          because text-overflow cannot reach into a block child.
+          Everybody on a group has the same title, so without this a member
+          sees a task with no hint that seven colleagues have one too.
         */}
-        <span className="max-md:line-clamp-2">{task.title}</span>
-      </Link>
+        {task.parentIsGroup && task.parentKey ? (
+          <Link
+            to={'/tasks/' + task.parentKey}
+            className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-faint hover:text-accent"
+          >
+            <Users size={10} aria-hidden />
+            Group: <span className="font-mono">{task.parentKey}</span>
+          </Link>
+        ) : null}
+      </span>
 
       <div className="order-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 md:order-1 md:contents">
         <span className="flex shrink-0 items-center gap-1.5">

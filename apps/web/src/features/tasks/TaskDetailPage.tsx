@@ -45,6 +45,7 @@ import {
 import { formatDate, formatDateTime, formatHours } from '@/lib/utils';
 import { TransitionDialog } from './TransitionDialog';
 import { PersonPicker } from './PersonPicker';
+import { GroupLink, GroupPeople } from './GroupPeople';
 import { describeActivity } from './activityText';
 
 export function TaskDetailPage() {
@@ -117,8 +118,30 @@ export function TaskDetailPage() {
             <TaskHeader task={task.data} />
           </div>
           <div className="order-2 lg:mb-5">
-            <TransitionBar task={task.data} />
+            {/*
+              A group's status is read off its children, so there is nothing
+              here to press. Saying so beats a row of buttons that would
+              each be overwritten on the next child change.
+            */}
+            {task.data.isGroup ? (
+              <p className="text-xs text-ink-faint">
+                This group follows its people: it is done when they are.
+              </p>
+            ) : (
+              <TransitionBar task={task.data} />
+            )}
           </div>
+          {/*
+            A group's People table comes before its description: the group
+            row carries no work of its own, so who is on it and how they are
+            getting on is the reason the page was opened.
+          */}
+          {task.data.isGroup ? (
+            <div className="order-3 lg:mb-5">
+              <GroupPeople task={task.data} />
+            </div>
+          ) : null}
+
           <div className="order-4 lg:mb-5">
             <DescriptionCard task={task.data} />
           </div>
@@ -196,6 +219,7 @@ function TaskHeader({ task }: { task: TaskDetail }) {
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} />
         <PriorityBadge priority={task.priority} />
+        {task.parentKey && task.parentIsGroup ? <GroupLink parentKey={task.parentKey} /> : null}
         <DueBadge dueDate={task.dueDate} status={task.status} emptyLabel="No due date" />
         {task.labels.map((label) => (
           <LabelChip key={label.id} name={label.name} color={label.color} />

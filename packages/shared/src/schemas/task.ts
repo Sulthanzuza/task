@@ -52,6 +52,18 @@ export const taskSummarySchema = z.object({
   lastActivityAt: z.string(),
   completedAt: z.string().nullable(),
   parentTaskId: uuidSchema.nullable(),
+  /**
+   * One piece of work given to several people, each with their own copy.
+   *
+   * The group row is a container: its children are the real tasks, and its
+   * status and progress are read off them rather than set. It is left out of
+   * every count, or a group of eight would make nine tasks out of eight.
+   */
+  isGroup: z.boolean(),
+  /** Set when this task is one person's copy inside a group. */
+  parentIsGroup: z.boolean(),
+  /** The group's key, so a child can link back to it by name. */
+  parentKey: z.string().nullable(),
   labels: z.array(labelSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -67,11 +79,38 @@ export const taskDependencySchema = z.object({
 });
 export type TaskDependency = z.infer<typeof taskDependencySchema>;
 
+/** A row in the People table on a group task. */
+export const groupChildSchema = z.object({
+  id: uuidSchema,
+  key: z.string(),
+  assignee: userSummarySchema.nullable(),
+  status: taskStatusSchema,
+  progress: z.number().int(),
+  dueDate: dateOnlySchema.nullable(),
+  lastActivityAt: z.string(),
+});
+export type GroupChild = z.infer<typeof groupChildSchema>;
+
+/** What a group looks like at a glance: "5 of 8 done, 2 in progress, 1 blocked". */
+export interface GroupTally {
+  total: number;
+  done: number;
+  inProgress: number;
+  blocked: number;
+  cancelled: number;
+  overdue: number;
+}
+
 export const taskDetailSchema = taskSummarySchema.extend({
   description: z.string().nullable(),
   createdBy: userSummarySchema,
   watcherIds: z.array(uuidSchema),
   subtaskCount: z.object({ total: z.number().int(), done: z.number().int() }),
+  /**
+   * The children of a group task, one per person, newest state first-hand.
+   * Empty for everything else, so the detail page can simply check length.
+   */
+  groupChildren: z.array(groupChildSchema),
   dependsOn: z.array(taskDependencySchema),
   blocks: z.array(taskDependencySchema),
   /** What this user may do next, straight from the workflow table. */
@@ -90,6 +129,14 @@ export const createTaskSchema = z
     title: z.string().trim().min(3, 'Give the task a title').max(300),
     description: z.string().trim().max(50_000).optional(),
     assigneeId: uuidSchema.nullable().optional(),
+    /**
+     * Two or more people makes this a group task: a parent carrying the
+     * shared detail, and one real task per person underneath it.
+     *
+     * Separate from assigneeId rather than replacing it, because one person
+     * is still one task and nothing about that should change.
+     */
+    assigneeIds: z.array(uuidSchema).max(50).optional(),
     reviewerId: uuidSchema.nullable().optional(),
     priority: taskPrioritySchema.default('MEDIUM'),
     startDate: dateOnlySchema.nullable().optional(),
@@ -183,6 +230,15 @@ export const listTasksQuerySchema = cursorPaginationSchema.extend({
   dueTomorrow: booleanQuerySchema,
   completedThisWeek: booleanQuerySchema,
   waitingReview: booleanQuerySchema,
+  /**
+   * Whether the container rows of group tasks are included.
+   *
+   * The task list wants them: a group is a thing a lead reads as one line.
+   * The board does not: a column holding both the group and its eight
+   * children shows the same work nine times. Default is to include them,
+   * because leaving them out silently is the more surprising answer.
+   */
+  includeGroups: booleanQuerySchema,
   noUpdate: booleanQuerySchema,
   parentId: z.union([uuidSchema, z.literal('none')]).optional(),
   q: z.string().trim().min(1).max(200).optional(),
@@ -295,3 +351,38 @@ export const memberActivityEntrySchema = activityEntrySchema.extend({
   }),
 });
 export type MemberActivityEntry = z.infer<typeof memberActivityEntrySchema>;
+
+// ---------------------------------------------------------------------------
+// Group tasks
+// ---------------------------------------------------------------------------
+
+/** Adding somebody to a group after it was created. */
+export const addGroupMemberSchema = z.object({ userId: uuidSchema });
+export type AddGroupMemberInput = z.infer<typeof addGroupMemberSchema>;
+
+/**
+ * Whether an edit to the parent should reach the children.
+ *
+ * Asked rather than assumed: changing a shared due date usually should move
+ * everybody's, and changing a title to fix a typo usually should too, but
+ * neither is safe to do silently to work somebody has already started.
+ */
+export const updateGroupSchema = updateTaskSchema.and(
+  z.object({ applyToChildren: z.boolean().optional() }),
+);
+export type UpdateGroupInput = z.infer<typeof updateGroupSchema>;
+
+/**
+ * The fields a group shares with its children.
+ *
+ * Status, progress and assignee are deliberately not here: those are what
+ * make a child its own task.
+ */
+export const GROUP_SHARED_FIELDS = [
+  'title',
+  'description',
+  'priority',
+  'dueDate',
+  'startDate',
+  'estimatedHours',
+] as const;

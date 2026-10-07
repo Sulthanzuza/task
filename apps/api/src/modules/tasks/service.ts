@@ -46,6 +46,7 @@ import {
 } from '../notifications/fromTaskEvents';
 import * as repo from './repo';
 import type { TaskRow } from './repo';
+import { loadGroupChildren, recomputeParent } from './group';
 
 /** What the notification rules need to describe and authorise a task. */
 function notificationContext(
@@ -95,6 +96,7 @@ async function toResource(handle: Db, row: TaskRow): Promise<TaskResource> {
     createdBy: row.createdById,
     watcherIds: await repo.getWatcherIds(handle, row.id),
     parentTaskId: row.parentTaskId,
+    inGroup: row.parentIsGroup,
     status: row.status,
   };
 }
@@ -141,6 +143,18 @@ export async function createTask(
   now = new Date(),
 ): Promise<TaskDetail> {
   const teamId = await repo.getTeamIdForProject(db, projectId);
+
+  /*
+   * Two or more people is a different thing from one: a container plus a
+   * real task each, rather than one task somebody shares. One person named
+   * in assigneeIds is just that person, so the ordinary path handles it and
+   * nobody ends up with a group of one.
+   */
+  const people = [...new Set(input.assigneeIds ?? [])];
+  if (people.length > 1) {
+    return createGroupTask(actor, projectId, teamId, { ...input, assigneeIds: people }, now);
+  }
+  if (people.length === 1) input = { ...input, assigneeId: people[0] };
 
   authorize(actor, 'task.create', {
     kind: 'task',
@@ -244,6 +258,210 @@ export async function createTask(
   return getTaskDetail(actor, taskId);
 }
 
+/**
+ * One parent, and a real task for each person underneath it.
+ *
+ * All of it in one transaction. A half-made group — a parent with four of
+ * its eight children, or children whose parent never landed — is not
+ * something the rest of the product has any way to reason about, and the
+ * failure would arrive as a lead staring at a group that says 0 of 4 when
+ * they named eight people.
+ *
+ * Each child is a task in its own right from the first moment: its own key,
+ * its own created and assigned activity, its own notification. That is what
+ * makes it show up in its person's My Tasks and in the alerts, and what
+ * lets them work on it without touching anybody else's copy.
+ */
+async function createGroupTask(
+  actor: Actor,
+  projectId: string,
+  teamId: string,
+  input: CreateTaskInput & { assigneeIds: string[] },
+  now: Date,
+): Promise<TaskDetail> {
+  // Making a group is giving work out, which is a lead's job.
+  authorize(actor, 'task.assign', {
+    kind: 'task',
+    projectId,
+    teamId,
+    assigneeId: null,
+    reviewerId: input.reviewerId ?? null,
+    createdBy: actor.id,
+    watcherIds: [],
+    parentTaskId: null,
+    status: 'BACKLOG',
+  });
+
+  const buffer = new EventBuffer();
+
+  const { parentId, childIds } = await withTransaction(async (tx, queue) => {
+    const parentNumber = await repo.allocateTaskNumber(tx, projectId);
+
+    const [parent] = await tx
+      .insert(tasks)
+      .values({
+        projectId,
+        number: parentNumber,
+        title: input.title,
+        description: input.description ?? null,
+        // Derived from the children a few lines below; never set by hand.
+        status: 'ASSIGNED',
+        priority: input.priority,
+        createdBy: actor.id,
+        // The lead owns the container, so it has somewhere to live on a
+        // board and somebody to chase about the group as a whole.
+        assigneeId: actor.id,
+        reviewerId: input.reviewerId ?? null,
+        parentTaskId: input.parentTaskId ?? null,
+        isGroup: true,
+        startDate: input.startDate ?? null,
+        dueDate: input.dueDate ?? null,
+        // Deliberately none. The estimate belongs on each person's copy;
+        // summing it onto the parent as well would double every workload.
+        estimatedMinutes: null,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: tasks.id });
+
+    if (!parent) throw new Error('Insert returned no row');
+
+    if (input.labelIds.length > 0) await repo.setLabels(tx, parent.id, input.labelIds);
+    await repo.addWatchers(tx, parent.id, [actor.id, input.reviewerId ?? '']);
+
+    await repo.writeActivity(
+      tx,
+      [
+        {
+          taskId: parent.id,
+          actorId: actor.id,
+          action: 'task.created',
+          newValue: { title: input.title, status: 'ASSIGNED', group: input.assigneeIds.length },
+        },
+      ],
+      now,
+    );
+
+    const made: string[] = [];
+    for (const assigneeId of input.assigneeIds) {
+      const childId = await insertGroupChild(tx, {
+        parentId: parent.id,
+        projectId,
+        actorId: actor.id,
+        assigneeId,
+        input,
+        now,
+      });
+      made.push(childId);
+
+      /*
+       * Each person is told about their own task, not about the group. The
+       * notification has to be built in here, where the row exists and the
+       * queue is the transaction's: enqueued outside it, an email could go
+       * out for a task a rollback then removed.
+       */
+      const child = await repo.findTaskById(tx, childId);
+      if (child) {
+        const notified = await notifyAssigned(
+          notificationContext(tx, queue, child, await toResource(tx, child), actor, now),
+          assigneeId,
+        );
+        buffer.after(() => emitCreatedNotifications(notified));
+      }
+    }
+
+    await recomputeParent(tx, parent.id, now);
+
+    return { parentId: parent.id, childIds: made };
+  });
+
+  /*
+   * Announced only once the transaction has committed, so nobody is told
+   * about work that a rollback then took away.
+   */
+  for (const childId of childIds) {
+    const child = await loadTaskOr404(db, childId);
+    buffer.add('task.created', {
+      ...eventBase(child, actor, now),
+      assigneeId: child.assigneeId,
+      reviewerId: child.reviewerId,
+    });
+  }
+  buffer.flush();
+
+  return getTaskDetail(actor, parentId);
+}
+
+/** One person's copy of a group task. Shares everything except who owns it. */
+async function insertGroupChild(
+  tx: Db,
+  args: {
+    parentId: string;
+    projectId: string;
+    actorId: string;
+    assigneeId: string;
+    input: CreateTaskInput;
+    now: Date;
+  },
+): Promise<string> {
+  const { parentId, projectId, actorId, assigneeId, input, now } = args;
+
+  const number = await repo.allocateTaskNumber(tx, projectId);
+
+  const [child] = await tx
+    .insert(tasks)
+    .values({
+      projectId,
+      number,
+      title: input.title,
+      description: input.description ?? null,
+      status: 'ASSIGNED',
+      priority: input.priority,
+      createdBy: actorId,
+      assigneeId,
+      reviewerId: input.reviewerId ?? null,
+      parentTaskId: parentId,
+      startDate: input.startDate ?? null,
+      dueDate: input.dueDate ?? null,
+      // The estimate is per person: eight people at four hours is eight
+      // four-hour tasks, not one thirty-two hour one.
+      estimatedMinutes: hoursToMinutes(input.estimatedHours) ?? null,
+      lastActivityAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: tasks.id });
+
+  if (!child) throw new Error('Insert returned no row');
+
+  if (input.labelIds.length > 0) await repo.setLabels(tx, child.id, input.labelIds);
+  await repo.addWatchers(tx, child.id, [actorId, assigneeId, input.reviewerId ?? '']);
+
+  await repo.writeActivity(
+    tx,
+    [
+      {
+        taskId: child.id,
+        actorId,
+        action: 'task.created',
+        newValue: { title: input.title, status: 'ASSIGNED' },
+      },
+      {
+        taskId: child.id,
+        actorId,
+        action: 'task.assigned',
+        field: 'assigneeId',
+        oldValue: null,
+        newValue: assigneeId,
+      },
+    ],
+    now,
+  );
+
+  return child.id;
+}
+
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
@@ -311,6 +529,9 @@ export async function getTaskDetail(
     createdBy: creator,
     watcherIds: resource.watcherIds,
     subtaskCount: counts,
+    // Only a group has these; everything else gets an empty list, so the
+    // detail page can decide by length rather than by another flag.
+    groupChildren: row.isGroup ? await loadGroupChildren(db, row.id, people) : [],
     dependsOn: deps.dependsOn,
     blocks: deps.blocks,
     // The UI renders exactly these buttons, so it can never offer a move the server refuses.
@@ -639,10 +860,158 @@ export async function transitionTask(
         });
       }
     }
+
+    /*
+     * The parent follows its children, in this transaction. Recomputing
+     * afterwards would leave a window where a group says "3 of 8" while a
+     * fourth child is already complete, and that window is exactly when
+     * somebody refreshes the page.
+     */
+    await recomputeParent(tx, row.parentTaskId, now);
   });
 
   buffer.flush();
   return getTaskDetail(actor, taskId);
+}
+
+// ---------------------------------------------------------------------------
+// Group membership
+// ---------------------------------------------------------------------------
+
+/**
+ * Another person on an existing group.
+ *
+ * A new child, carrying whatever the parent says now rather than what it
+ * said when the group was made: somebody added in week three should get the
+ * current due date, not the original one.
+ */
+export async function addGroupMember(
+  actor: Actor,
+  parentId: string,
+  userId: string,
+  now = new Date(),
+): Promise<TaskDetail> {
+  const buffer = new EventBuffer();
+
+  await withTransaction(async (tx, queue) => {
+    const parent = await repo.lockTask(tx, parentId);
+    if (!parent.isGroup) throw new ValidationError('That task is not a group task.');
+
+    authorize(actor, 'task.assign', await toResource(tx, parent));
+
+    const existing = await tx
+      .select({ assigneeId: tasks.assigneeId })
+      .from(tasks)
+      .where(and(eq(tasks.parentTaskId, parentId), isNull(tasks.deletedAt)));
+
+    if (existing.some((child) => child.assigneeId === userId)) {
+      throw new ConflictError('That person is already on this group.');
+    }
+
+    const labels = await repo.labelsForTasks(tx, [parentId]);
+
+    const childId = await insertGroupChild(tx, {
+      parentId,
+      projectId: parent.projectId,
+      actorId: actor.id,
+      assigneeId: userId,
+      input: {
+        title: parent.title,
+        description: parent.description ?? undefined,
+        priority: parent.priority,
+        startDate: parent.startDate ?? undefined,
+        dueDate: parent.dueDate ?? undefined,
+        estimatedHours: null,
+        labelIds: (labels.get(parentId) ?? []).map((label) => label.id),
+        dependsOnTaskIds: [],
+        reviewerId: parent.reviewerId ?? undefined,
+      } as CreateTaskInput,
+      now,
+    });
+
+    const child = await repo.findTaskById(tx, childId);
+    if (child) {
+      const notified = await notifyAssigned(
+        notificationContext(tx, queue, child, await toResource(tx, child), actor, now),
+        userId,
+      );
+      buffer.after(() => emitCreatedNotifications(notified));
+      buffer.add('task.created', {
+        ...eventBase(child, actor, now),
+        assigneeId: child.assigneeId,
+        reviewerId: child.reviewerId,
+      });
+    }
+
+    await recomputeParent(tx, parentId, now);
+  });
+
+  buffer.flush();
+  return getTaskDetail(actor, parentId);
+}
+
+/**
+ * Somebody off a group.
+ *
+ * Their copy is cancelled rather than deleted. The work happened: the
+ * activity, the comments and the time they spent are part of the record,
+ * and a cancelled child is also what keeps the parent's progress honest,
+ * since cancelled children are left out of the denominator.
+ */
+export async function removeGroupMember(
+  actor: Actor,
+  parentId: string,
+  userId: string,
+  now = new Date(),
+): Promise<TaskDetail> {
+  const buffer = new EventBuffer();
+
+  await withTransaction(async (tx) => {
+    const parent = await repo.lockTask(tx, parentId);
+    if (!parent.isGroup) throw new ValidationError('That task is not a group task.');
+
+    authorize(actor, 'task.assign', await toResource(tx, parent));
+
+    const [child] = await tx
+      .select({ id: tasks.id, status: tasks.status })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.parentTaskId, parentId),
+          eq(tasks.assigneeId, userId),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!child) throw new NotFoundError('That person on this group');
+    if (child.status === 'CANCELLED') return;
+
+    await tx
+      .update(tasks)
+      .set({ status: 'CANCELLED', updatedAt: now, lastActivityAt: now })
+      .where(eq(tasks.id, child.id));
+
+    await repo.writeActivity(
+      tx,
+      [
+        {
+          taskId: child.id,
+          actorId: actor.id,
+          action: 'task.transitioned',
+          field: 'status',
+          oldValue: child.status,
+          newValue: 'CANCELLED',
+        },
+      ],
+      now,
+    );
+
+    await recomputeParent(tx, parentId, now);
+  });
+
+  buffer.flush();
+  return getTaskDetail(actor, parentId);
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +1171,14 @@ export async function updateProgress(
       from: row.progress,
       to: progress,
     });
+
+    /*
+     * The parent follows its children, in this transaction. Recomputing
+     * afterwards would leave a window where a group says "3 of 8" while a
+     * fourth child is already complete, and that window is exactly when
+     * somebody refreshes the page.
+     */
+    await recomputeParent(tx, row.parentTaskId, now);
   });
 
   buffer.flush();
@@ -821,6 +1198,15 @@ export async function softDeleteTask(
     authorize(actor, 'task.delete', resource);
 
     await tx.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, taskId));
+
+    /*
+     * The parent follows its children, in this transaction. Recomputing
+     * afterwards would leave a window where a group says "3 of 8" while a
+     * fourth child is already complete, and that window is exactly when
+     * somebody refreshes the page.
+     */
+    await recomputeParent(tx, row.parentTaskId, now);
+
     await repo.writeActivity(tx, [{ taskId, actorId: actor.id, action: 'task.deleted' }], now);
 
     buffer.add('task.deleted', {

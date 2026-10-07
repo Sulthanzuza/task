@@ -44,6 +44,21 @@ const summaryColumns = {
   lastActivityAt: tasks.lastActivityAt,
   completedAt: tasks.completedAt,
   parentTaskId: tasks.parentTaskId,
+  isGroup: tasks.isGroup,
+  /*
+   * Whether this row is one person's copy inside a group. Read here as part
+   * of the row that is already being fetched, rather than as a second query
+   * every time something is authorized.
+   */
+  parentIsGroup: sql<boolean>`COALESCE(
+    (SELECT p.is_group FROM tasks p WHERE p.id = ${tasks.parentTaskId}), false
+  )`,
+  /** The parent's key, so a child can link back to its group by name. */
+  parentKey: sql<string | null>`(
+    SELECT pr.key || '-' || p.number
+    FROM tasks p JOIN projects pr ON pr.id = p.project_id
+    WHERE p.id = ${tasks.parentTaskId}
+  )`,
   createdById: tasks.createdBy,
   assigneeId: tasks.assigneeId,
   reviewerId: tasks.reviewerId,
@@ -76,6 +91,9 @@ export interface TaskRow {
   lastActivityAt: Date;
   completedAt: Date | null;
   parentTaskId: string | null;
+  isGroup: boolean;
+  parentIsGroup: boolean;
+  parentKey: string | null;
   createdById: string;
   assigneeId: string | null;
   reviewerId: string | null;
@@ -319,6 +337,13 @@ function buildFilters(
   ctx: predicates.PredicateContext,
 ): SQL[] {
   const filters: SQL[] = [isNull(tasks.deletedAt)];
+
+  /*
+   * A group's container row. Kept by default, because the task list reads a
+   * group as one line; the board asks for it to be dropped, or a column
+   * would show the group and each of its children as separate work.
+   */
+  if (query.includeGroups === false) filters.push(eq(tasks.isGroup, false));
 
   // A member only ever sees tasks in their own teams, plus anything they are on.
   if (visibleTeamIds !== null) {

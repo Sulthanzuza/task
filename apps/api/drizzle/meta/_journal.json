@@ -36,6 +36,13 @@
       "when": 1791024058146,
       "tag": "0004_charming_juggernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791340505344,
+      "tag": "0005_mixed_nomad",
+      "breakpoints": true
     }
   ]
 }

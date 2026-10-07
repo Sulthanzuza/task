@@ -51,6 +51,18 @@ export const tasks = pgTable(
     parentTaskId: uuid('parent_task_id').references((): AnyPgColumn => tasks.id, {
       onDelete: 'set null',
     }),
+    /**
+     * One piece of work given to several people, each getting their own copy.
+     *
+     * The row itself is a container: it carries the shared title, dates and
+     * description, and its children are the real tasks. Its status and
+     * progress are derived from them and never set by hand.
+     *
+     * It is excluded from every count. A group of eight that also counted
+     * itself would make nine tasks out of eight, and a lead's dashboard
+     * would drift further from the truth the more they used the feature.
+     */
+    isGroup: boolean('is_group').notNull().default(false),
 
     progress: smallint('progress').notNull().default(0),
     startDate: date('start_date'),
@@ -89,15 +101,21 @@ export const tasks = pgTable(
       'tasks_blocked_needs_reason',
       sql`${t.status} <> 'BLOCKED' OR (${t.blockedReason} IS NOT NULL AND ${t.blockerType} IS NOT NULL)`,
     ),
-    index('tasks_assignee_status_idx').on(t.assigneeId, t.status).where(sql`deleted_at IS NULL`),
-    index('tasks_project_status_idx').on(t.projectId, t.status).where(sql`deleted_at IS NULL`),
+    index('tasks_assignee_status_idx')
+      .on(t.assigneeId, t.status)
+      .where(sql`deleted_at IS NULL`),
+    index('tasks_project_status_idx')
+      .on(t.projectId, t.status)
+      .where(sql`deleted_at IS NULL`),
     index('tasks_due_open_idx')
       .on(t.dueDate)
       .where(sql`status NOT IN ('COMPLETED', 'CANCELLED') AND deleted_at IS NULL`),
     index('tasks_last_activity_idx')
       .on(t.lastActivityAt)
       .where(sql`status NOT IN ('COMPLETED', 'CANCELLED') AND deleted_at IS NULL`),
-    index('tasks_reviewer_idx').on(t.reviewerId).where(sql`deleted_at IS NULL`),
+    index('tasks_reviewer_idx')
+      .on(t.reviewerId)
+      .where(sql`deleted_at IS NULL`),
     index('tasks_parent_idx').on(t.parentTaskId),
     index('tasks_search_idx').using('gin', t.search),
     uniqueIndex('tasks_rule_occurrence_idx')
@@ -116,7 +134,10 @@ export const taskLabels = pgTable(
       .notNull()
       .references(() => labels.id, { onDelete: 'cascade' }),
   },
-  (t) => [primaryKey({ columns: [t.taskId, t.labelId] }), index('task_labels_label_idx').on(t.labelId)],
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.labelId] }),
+    index('task_labels_label_idx').on(t.labelId),
+  ],
 );
 
 export const taskWatchers = pgTable(

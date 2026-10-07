@@ -223,6 +223,33 @@ export function useSetLabels(taskId: string | undefined, known: Label[] = []) {
  * Progress is dragged, so it updates optimistically and rolls back if the server
  * disagrees. Everything else waits for the server, because a status is not a guess.
  */
+/**
+ * Adding and removing people on a group task.
+ *
+ * Both answer with the parent, because both change what the parent says: a
+ * new child moves the progress fraction, and a cancelled one moves it the
+ * other way by leaving the denominator.
+ */
+export function useAddGroupMember(parentId: string | undefined) {
+  const invalidate = useTaskInvalidation();
+
+  return useMutation({
+    mutationFn: (userId: string) =>
+      api.post<TaskDetail>('/tasks/' + parentId + '/group/members', { userId }),
+    onSuccess: (task) => invalidate(task),
+  });
+}
+
+export function useRemoveGroupMember(parentId: string | undefined) {
+  const invalidate = useTaskInvalidation();
+
+  return useMutation({
+    mutationFn: (userId: string) =>
+      api.delete<TaskDetail>('/tasks/' + parentId + '/group/members/' + userId),
+    onSuccess: (task) => invalidate(task),
+  });
+}
+
 export function useUpdateProgress(taskId: string | undefined) {
   const client = useQueryClient();
   const invalidate = useTaskInvalidation();

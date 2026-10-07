@@ -82,7 +82,7 @@ export async function getCharts(
       count(*) AS created
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${teamId}::uuid
       AND t.created_at >= ${rangeStart} AND t.created_at <= ${rangeEnd}
     GROUP BY 1
@@ -94,7 +94,7 @@ export async function getCharts(
       count(*) AS completed
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${teamId}::uuid
       AND t.completed_at IS NOT NULL
       AND t.completed_at >= ${rangeStart} AND t.completed_at <= ${rangeEnd}
@@ -112,7 +112,7 @@ export async function getCharts(
       count(*) AS overdue
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${teamId}::uuid
       AND t.due_date IS NOT NULL
       AND t.due_date >= ${firstWeekStart}::date AND t.due_date <= ${today}::date
@@ -149,7 +149,7 @@ export async function getCharts(
     SELECT t.status::text AS status, t.priority::text AS priority, count(*) AS n
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL AND p.team_id = ${teamId}::uuid AND ${isOpen(c)}
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND p.team_id = ${teamId}::uuid AND ${isOpen(c)}
     GROUP BY 1, 2
   `);
 
@@ -184,7 +184,7 @@ export async function getCharts(
     JOIN projects p ON p.id = t.project_id
     JOIN task_labels tl ON tl.task_id = t.id
     JOIN labels l ON l.id = tl.label_id
-    WHERE t.deleted_at IS NULL AND p.team_id = ${teamId}::uuid AND ${isOpen(c)}
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND p.team_id = ${teamId}::uuid AND ${isOpen(c)}
     GROUP BY 1, 2
     ORDER BY count(*) DESC
     LIMIT 6
@@ -211,7 +211,7 @@ export async function getCharts(
         WHERE ${isOpen(c)} AND t.due_date >= ${today}::date AND t.due_date <= ${weekEnd}::date
       ) AS due_this_week
     FROM projects p
-    LEFT JOIN tasks t ON t.project_id = p.id AND t.deleted_at IS NULL
+    LEFT JOIN tasks t ON t.project_id = p.id AND t.deleted_at IS NULL AND t.is_group = false
     WHERE p.team_id = ${teamId}::uuid AND p.archived_at IS NULL
     GROUP BY 1, 2, 3
     ORDER BY p.key
@@ -274,7 +274,7 @@ export async function getCharts(
       t.estimated_minutes AS minutes
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${teamId}::uuid
       AND t.assignee_id IS NOT NULL
       AND t.due_date IS NOT NULL
@@ -318,7 +318,7 @@ export async function getCharts(
     SELECT t.completed_at AS completed_at, t.due_date::text AS due_date
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL
+    WHERE t.deleted_at IS NULL AND t.is_group = false
       AND p.team_id = ${teamId}::uuid
       AND t.status = 'COMPLETED'
       AND t.due_date IS NOT NULL
@@ -372,7 +372,7 @@ export async function getCharts(
       ) AS completed_before
     FROM tasks t
     JOIN projects p ON p.id = t.project_id
-    WHERE t.deleted_at IS NULL AND p.team_id = ${teamId}::uuid
+    WHERE t.deleted_at IS NULL AND t.is_group = false AND p.team_id = ${teamId}::uuid
   `);
 
   const toDate = (toDateRows.rows[0] ?? {}) as Record<string, unknown>;

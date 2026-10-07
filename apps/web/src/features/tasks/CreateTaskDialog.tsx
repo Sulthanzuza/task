@@ -4,7 +4,7 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { UserSummary } from '@tm/shared';
 import type { z } from 'zod';
-import { Paperclip, Plus, Search, Upload, X } from 'lucide-react';
+import { Paperclip, Plus, Search, Upload, Users, X } from 'lucide-react';
 import {
   createTaskSchema,
   PRIORITY_LABELS,
@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/primitives';
 import { PriorityIcon } from '@/components/common/badges';
 import { cn } from '@/lib/utils';
-import { PersonPicker } from './PersonPicker';
+import { PeoplePicker, PersonPicker } from './PersonPicker';
 import { OptionPicker } from '@/components/ui/OptionPicker';
 
 /**
@@ -112,7 +112,13 @@ function CreateTaskForm({
     formState: { errors, isSubmitting },
   } = useForm<CreateTaskForm>({
     resolver: zodResolver(createTaskSchema),
-    defaultValues: { title: '', priority: 'MEDIUM', labelIds: [], dependsOnTaskIds: [] },
+    defaultValues: {
+      title: '',
+      priority: 'MEDIUM',
+      labelIds: [],
+      dependsOnTaskIds: [],
+      assigneeIds: [],
+    },
   });
 
   /*
@@ -121,7 +127,7 @@ function CreateTaskForm({
    * whole component.
    */
   const priority = useWatch({ control, name: 'priority' });
-  const assigneeId = useWatch({ control, name: 'assigneeId' });
+  const assigneeIds = useWatch({ control, name: 'assigneeIds' }) ?? [];
   const reviewerId = useWatch({ control, name: 'reviewerId' });
 
   // The task must exist before anything can be attached to it, so the upload
@@ -275,12 +281,22 @@ function CreateTaskForm({
             */}
             <div>
               <Label>Assignee</Label>
-              <PersonPicker
+              <PeoplePicker
                 label="Assignee"
-                nobodyLabel="Nobody yet"
-                value={byId(people.data?.items, assigneeId)}
-                onChange={(id) => setValue('assigneeId', id)}
+                value={assigneeIds}
+                onChange={(ids) => setValue('assigneeIds', ids)}
               />
+              {/*
+                Said plainly, before the button is pressed. Creating eight
+                tasks when you meant one is not something to discover
+                afterwards.
+              */}
+              {assigneeIds.length > 1 ? (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-accent">
+                  <Users size={12} aria-hidden />
+                  Each person gets their own task (group task)
+                </p>
+              ) : null}
             </div>
 
             <div>

@@ -20,7 +20,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { Ban, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { Ban, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TaskDetail, TaskStatus, TaskSummary, TransitionRequirement } from '@tm/shared';
 import {
@@ -56,7 +56,14 @@ export function BoardPage() {
   const projectId = params.get('projectId') ?? undefined;
   const showAll = params.get('all') === 'true';
 
-  const query = useTaskList({ projectId, limit: 100 });
+  /*
+   * Group containers are off the board by default. A column holding both a
+   * group and each of its eight children shows the same piece of work nine
+   * times, and dragging the container would mean nothing: its status is
+   * read off its children, so the drop would be overwritten at once.
+   */
+  const showGroups = params.get('groups') === 'true';
+  const query = useTaskList({ projectId, limit: 100, includeGroups: showGroups });
   const pages = query.data?.pages;
   // Counts come from the server, so a column header is the real total rather
   // than however many cards this page happened to load.
@@ -172,6 +179,21 @@ export function BoardPage() {
         >
           {showAll ? <EyeOff size={14} /> : <Eye size={14} />}
           {showAll ? 'Hide backlog and cancelled' : 'Show backlog and cancelled'}
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={showGroups}
+          onClick={() => {
+            const next = new URLSearchParams(params);
+            if (showGroups) next.delete('groups');
+            else next.set('groups', 'true');
+            setParams(next, { replace: true });
+          }}
+        >
+          <Users size={14} aria-hidden />
+          {showGroups ? 'Hide group rows' : 'Show group rows'}
         </Button>
       </header>
 
@@ -488,7 +510,11 @@ function TaskCard({
       />
 
       <div className="flex items-center gap-2">
-        <PriorityIcon priority={task.priority} size={12} />
+        {task.isGroup ? (
+          <Users size={12} aria-label="Group task" className="shrink-0 text-accent" />
+        ) : (
+          <PriorityIcon priority={task.priority} size={12} />
+        )}
         <Link
           to={'/tasks/' + task.key}
           className="font-mono text-[11px] text-accent hover:underline"

@@ -52,6 +52,16 @@ export interface TaskResource {
   createdBy: string;
   watcherIds: string[];
   parentTaskId: string | null;
+  /**
+   * This task is one person's copy inside a group task.
+   *
+   * It changes who may touch it. An ordinary task is a team's, and anybody
+   * on the team can nudge its progress the way they can comment on it. A
+   * group child is one person's share of a bigger piece of work, and a
+   * colleague moving their bar is the confusion the feature exists to
+   * prevent.
+   */
+  inGroup?: boolean;
   status: TaskStatus;
 }
 
@@ -83,12 +93,7 @@ export interface OrgResource {
 }
 
 export type Resource =
-  | TaskResource
-  | ProjectResource
-  | TeamResource
-  | UserResource
-  | CommentResource
-  | OrgResource;
+  TaskResource | ProjectResource | TeamResource | UserResource | CommentResource | OrgResource;
 
 const isSuperAdmin = (actor: Actor): boolean => actor.role === 'SUPER_ADMIN';
 
@@ -100,8 +105,7 @@ const inTeam = (actor: Actor, teamId: string): boolean => actor.teamIds.includes
 
 const isAssignee = (actor: Actor, task: TaskResource): boolean => task.assigneeId === actor.id;
 const isReviewer = (actor: Actor, task: TaskResource): boolean => task.reviewerId === actor.id;
-const isWatcher = (actor: Actor, task: TaskResource): boolean =>
-  task.watcherIds.includes(actor.id);
+const isWatcher = (actor: Actor, task: TaskResource): boolean => task.watcherIds.includes(actor.id);
 const isInvolved = (actor: Actor, task: TaskResource): boolean =>
   isAssignee(actor, task) ||
   isReviewer(actor, task) ||
@@ -139,8 +143,13 @@ function checkTask(actor: Actor, action: Action, task: TaskResource): boolean {
     case 'task.delete':
       return lead;
 
-    // Progress, comments, attachments and watching are open to anyone involved.
+    // Progress on one person's copy of a group task is theirs alone.
     case 'task.progress':
+      if (task.inGroup) return lead || isAssignee(actor, task);
+      return lead || isInvolved(actor, task) || inTeam(actor, task.teamId);
+
+    // Comments, attachments and watching stay open to anyone involved: a
+    // group child is still a place to talk about the work.
     case 'task.comment':
     case 'task.attach':
     case 'task.watch':

@@ -57,6 +57,13 @@
       "when": 1791377637556,
       "tag": "0007_hard_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791466109228,
+      "tag": "0008_peaceful_micromax",
+      "breakpoints": true
     }
   ]
 }

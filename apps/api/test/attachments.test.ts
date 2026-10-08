@@ -105,6 +105,79 @@ describe('uploading', () => {
   });
 });
 
+describe('the edited flag', () => {
+  it('records that an image was marked up, and shows it in the list', async () => {
+    const task = await taskForUpload();
+
+    const response = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'The failing screen, with the bad total circled')
+      .field('edited', 'true')
+      .attach('file', PNG, { filename: 'marked.png', contentType: 'image/png' })
+      .expect(201);
+
+    expect(response.body.edited).toBe(true);
+
+    const list = await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.key + '/attachments')
+      .expect(200);
+    expect(list.body.items[0].edited).toBe(true);
+  });
+
+  it('defaults to false, so every file attached before this reads as untouched', async () => {
+    const task = await taskForUpload();
+
+    const response = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'Straight from the camera')
+      .attach('file', PNG, { filename: 'plain.png', contentType: 'image/png' })
+      .expect(201);
+
+    expect(response.body.edited).toBe(false);
+  });
+
+  it('does not believe a client that claims a text file was marked up', async () => {
+    /*
+     * The flag tells a reader the picture is not what the camera produced, so
+     * only something that could have been drawn on may carry it. Otherwise it
+     * is a label anybody can stick on anything.
+     */
+    const task = await taskForUpload();
+
+    const response = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'A list of ledger codes')
+      .field('edited', 'true')
+      .attach('file', Buffer.from('a,b,c\n1,2,3\n'), {
+        filename: 'codes.csv',
+        contentType: 'text/csv',
+      })
+      .expect(201);
+
+    expect(response.body.edited, 'only an image can have been drawn on').toBe(false);
+  });
+
+  it('keeps the note on the activity row, so the timeline says it was marked up', async () => {
+    const task = await taskForUpload();
+
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.key + '/attachments')
+      .field('description', 'Circled the wrong total')
+      .field('edited', 'true')
+      .attach('file', PNG, { filename: 'circled.png', contentType: 'image/png' })
+      .expect(201);
+
+    const timeline = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key + '/timeline')
+      .expect(200);
+
+    const row = timeline.body.items.find(
+      (entry: { action?: string }) => entry.action === 'attachment.created',
+    );
+    expect(row.newValue.edited).toBe(true);
+  });
+});
+
 describe('the description', () => {
   it('is required: a file with none is refused and nothing is stored', async () => {
     const task = await taskForUpload();

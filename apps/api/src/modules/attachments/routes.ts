@@ -65,7 +65,7 @@ taskAttachmentsRouter.post(
     const actor = requireActor(req);
     const file = req.file;
     if (!file) throw new ValidationError('No file was uploaded.');
-    const { description } = req.body as { description: string };
+    const { description, edited } = req.body as { description: string; edited: boolean };
 
     const task = await loadTaskOr404(db, req.params.idOrKey as string);
     authorize(actor, 'task.attach', await toResource(db, task));
@@ -103,6 +103,12 @@ taskAttachmentsRouter.post(
           description,
           mimeType: verdict.mime,
           sizeBytes: stored.sizeBytes,
+          /*
+           * Only an image can have been drawn on, so a client claiming an
+           * edited spreadsheet is not believed. The flag is a note to the
+           * reader, but it is still the server's to decide.
+           */
+          edited: edited && verdict.mime.startsWith('image/'),
           storageKey: stored.key,
         })
         .returning({ id: taskAttachments.id });
@@ -116,7 +122,12 @@ taskAttachmentsRouter.post(
             taskId: task.id,
             actorId: actor.id,
             action: 'attachment.created',
-            newValue: { fileName: file.originalname, description, mimeType: verdict.mime },
+            newValue: {
+              fileName: file.originalname,
+              description,
+              mimeType: verdict.mime,
+              ...(edited && verdict.mime.startsWith('image/') ? { edited: true } : {}),
+            },
           },
         ],
         uploadedAt,
@@ -143,6 +154,7 @@ taskAttachmentsRouter.post(
       description,
       mimeType: verdict.mime,
       sizeBytes: stored.sizeBytes,
+      edited: edited && verdict.mime.startsWith('image/'),
       downloadUrl: '/api/v1/attachments/' + created,
     });
   }),
@@ -173,6 +185,7 @@ taskAttachmentsRouter.get(
         taskId: row.taskId,
         fileName: row.fileName,
         description: row.description,
+        edited: row.edited,
         mimeType: row.mimeType,
         sizeBytes: row.sizeBytes,
         uploadedBy: {

@@ -49,6 +49,14 @@ export const attachmentDescriptionSchema = z
 /** The fields sent alongside the file in the multipart upload. */
 export const uploadAttachmentBodySchema = z.object({
   description: attachmentDescriptionSchema,
+  /*
+   * Sent as a string because multipart carries no types. The client says so
+   * when the image went through the markup editor on its way here.
+   */
+  edited: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => value === true || value === 'true'),
 });
 export type UploadAttachmentBody = z.infer<typeof uploadAttachmentBodySchema>;
 
@@ -59,6 +67,8 @@ export const attachmentSchema = z.object({
   description: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number().int(),
+  /** Marked up before it was uploaded. */
+  edited: z.boolean(),
   uploadedBy: z.object({ id: uuidSchema, name: z.string(), avatarUrl: z.string().nullable() }),
   downloadUrl: z.string(),
   createdAt: z.string(),

@@ -17,6 +17,7 @@ import {
 } from '@tm/shared';
 import { useCreateTask, useTaskList } from './api';
 import { useUploadAttachment } from './attachmentsApi';
+import { AttachmentPreview } from './AttachmentPreview';
 import { attachmentDescriptionSchema } from '@tm/shared';
 import { useCreateLabel } from './labelsApi';
 import { useLabels, useProjects, useUsers } from '@/features/team/api';
@@ -168,12 +169,13 @@ function CreateTaskForm({
        * and the task is still opened.
        */
       const failed: string[] = [];
-      for (const { file, description } of files) {
+      for (const { file, description, edited } of files) {
         setUploading(file.name);
         try {
           await upload.mutateAsync({
             file,
             description: description.trim(),
+            edited,
             onProgress: () => undefined,
           });
         } catch {
@@ -641,14 +643,12 @@ function DependencyPicker({
 interface QueuedFile {
   file: File;
   description: string;
+  /** Went through the markup editor in the preview. */
+  edited: boolean;
 }
 
 function describedQueuedFile(queued: QueuedFile): boolean {
   return attachmentDescriptionSchema.safeParse(queued.description).success;
-}
-
-function queue(list: FileList | File[]): QueuedFile[] {
-  return Array.from(list).map((file) => ({ file, description: '' }));
 }
 
 /** Files chosen now, uploaded once the task exists. Each one says what it is for. */
@@ -662,6 +662,13 @@ function AttachmentQueue({
   showErrors: boolean;
 }) {
   const [over, setOver] = useState(false);
+  /*
+   * Files go through the same preview as the task page, so an image chosen
+   * here is turned the right way up, stripped of its metadata and open to
+   * markup exactly as it would be there. Two paths would mean one of them
+   * quietly keeping the GPS.
+   */
+  const [choosing, setChoosing] = useState<File[] | null>(null);
 
   return (
     <div>
@@ -724,7 +731,8 @@ function AttachmentQueue({
         onDrop={(event) => {
           event.preventDefault();
           setOver(false);
-          onChange([...files, ...queue(event.dataTransfer.files)]);
+          const dropped = Array.from(event.dataTransfer.files);
+          if (dropped.length > 0) setChoosing(dropped);
         }}
         className={cn(
           'flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-left transition-colors',
@@ -743,10 +751,25 @@ function AttachmentQueue({
         multiple
         className="sr-only"
         onChange={(event) => {
-          onChange([...files, ...queue(event.target.files ?? [])]);
+          const chosen = Array.from(event.target.files ?? []);
+          if (chosen.length > 0) setChoosing(chosen);
           event.target.value = '';
         }}
       />
+
+      {choosing ? (
+        <AttachmentPreview
+          files={choosing}
+          busy={false}
+          progress={null}
+          error={null}
+          onCancel={() => setChoosing(null)}
+          onUpload={(ready) => {
+            onChange([...files, ...ready]);
+            setChoosing(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

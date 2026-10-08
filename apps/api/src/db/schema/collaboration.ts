@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -69,6 +70,15 @@ export const taskAttachments = pgTable(
     description: text('description').notNull(),
     mimeType: text('mime_type').notNull(),
     sizeBytes: integer('size_bytes').notNull(),
+    /**
+     * Drawn on before it was uploaded.
+     *
+     * Worth recording because a marked-up screenshot is not the evidence the
+     * camera produced: somebody has pointed at part of it, and may have
+     * pixelated the rest. A reader deserves to know that without having to
+     * guess from the arrows.
+     */
+    edited: boolean('edited').notNull().default(false),
     /** Key inside the storage bucket or the local upload directory. */
     storageKey: text('storage_key').notNull(),
     createdAt: createdAt(),

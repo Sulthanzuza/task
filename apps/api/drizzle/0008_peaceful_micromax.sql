@@ -1,0 +1,1 @@
+ALTER TABLE "task_attachments" ADD COLUMN "edited" boolean DEFAULT false NOT NULL;

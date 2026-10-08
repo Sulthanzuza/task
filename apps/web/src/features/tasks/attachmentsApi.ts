@@ -1,22 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UserSummary } from '@tm/shared';
+import type { Attachment as SharedAttachment, UserSummary } from '@tm/shared';
 import { api, getAccessToken, refreshSession, toQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 
 /** Files on a task: listing them, adding one with a progress bar, removing one. */
 
-export interface Attachment {
-  id: string;
-  taskId: string;
-  fileName: string;
-  /** What the file is for. Empty only on files attached before it was required. */
-  description: string;
-  mimeType: string;
-  sizeBytes: number;
-  uploadedBy: { id: string; name: string; avatarUrl: string | null };
-  downloadUrl: string;
-  createdAt: string;
-}
+/*
+ * The shared schema's type, not a copy of its fields. The copy that used to
+ * live here drifted the moment the server grew a column: it had no `edited`,
+ * so the flag was invisible to every screen reading this type.
+ */
+export type Attachment = SharedAttachment;
 
 export function useAttachments(taskIdOrKey: string | undefined) {
   return useQuery({
@@ -38,6 +32,7 @@ async function uploadWithProgress(
   path: string,
   file: File,
   description: string,
+  edited: boolean,
   onProgress: (fraction: number) => void,
   isRetry = false,
 ): Promise<Attachment> {
@@ -65,13 +60,14 @@ async function uploadWithProgress(
     const form = new FormData();
     // The text field first, so the server has it by the time the file ends.
     form.append('description', description);
+    if (edited) form.append('edited', 'true');
     form.append('file', file);
     request.send(form);
   });
 
   // The same one-retry-after-refresh rule the rest of the client follows.
   if (attempt.status === 401 && !isRetry && (await refreshSession())) {
-    return uploadWithProgress(path, file, description, onProgress, true);
+    return uploadWithProgress(path, file, description, edited, onProgress, true);
   }
 
   if (attempt.status >= 400) {
@@ -101,13 +97,22 @@ export function useUploadAttachment(taskIdOrKey: string | undefined) {
     mutationFn: ({
       file,
       description,
+      edited = false,
       onProgress,
     }: {
       file: File;
       description: string;
+      /** The image went through the markup editor on its way here. */
+      edited?: boolean;
       onProgress: (fraction: number) => void;
     }) =>
-      uploadWithProgress('/tasks/' + taskIdOrKey + '/attachments', file, description, onProgress),
+      uploadWithProgress(
+        '/tasks/' + taskIdOrKey + '/attachments',
+        file,
+        description,
+        edited,
+        onProgress,
+      ),
 
     onSuccess: async () => {
       await Promise.all([

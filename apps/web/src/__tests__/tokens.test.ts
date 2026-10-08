@@ -30,6 +30,12 @@ const COLOUR_FILES = [
   // Label colours are chosen per label and stored in the database; the picker
   // needs literals to offer.
   join('features', 'tasks', 'labelsApi.ts'),
+  /*
+   * Markup colours are pigment, not chrome: they are flattened into an
+   * uploaded PNG, so they must be the same for everybody. A theme token would
+   * make an arrow cyan for one reader and violet for the next.
+   */
+  join('features', 'tasks', 'markup.ts'),
   join('__tests__', 'tokens.test.ts'),
 ];
 

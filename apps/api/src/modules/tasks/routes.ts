@@ -202,6 +202,36 @@ tasksRouter.delete(
   }),
 );
 
+/*
+ * Watchers a lead manages, as opposed to /watchers/me, which is anybody
+ * choosing to follow a task themselves.
+ */
+tasksRouter.post(
+  '/:id/watchers',
+  validate({ params: idParamSchema, body: z.object({ userId: uuidSchema }) }),
+  handler(async (req, res) => {
+    await service.addWatcher(
+      requireActor(req),
+      req.params.id as string,
+      (req.body as { userId: string }).userId,
+    );
+    res.status(204).send();
+  }),
+);
+
+tasksRouter.delete(
+  '/:id/watchers/:userId',
+  validate({ params: idParamSchema.extend({ userId: uuidSchema }) }),
+  handler(async (req, res) => {
+    await service.removeWatcher(
+      requireActor(req),
+      req.params.id as string,
+      req.params.userId as string,
+    );
+    res.status(204).send();
+  }),
+);
+
 tasksRouter.post(
   '/:id/dependencies',
   validate({ params: idParamSchema, body: addDependencySchema }),

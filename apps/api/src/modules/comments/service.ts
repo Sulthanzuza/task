@@ -8,6 +8,7 @@ import { EventBuffer } from '../../lib/events';
 import { authorize, can } from '../permissions/authorize';
 import { toUserSummary } from '../tasks/mappers';
 import { loadTaskOr404, toResource } from '../tasks/service';
+import { associatedUserIds } from '../tasks/associated';
 import * as taskRepo from '../tasks/repo';
 import * as repo from './repo';
 import { notifyCommented } from '../notifications/fromTaskEvents';
@@ -31,6 +32,10 @@ export async function addComment(
       userId: actor.id,
       body,
       now,
+      // The same set the autocomplete offered, decided again on the server:
+      // the text arrives as free-form markup and nothing stops a client
+      // typing an id it was never shown.
+      mentionableIds: await associatedUserIds(tx, { ...resource, id: row.id }),
     });
 
     // Anyone mentioned starts following the task, so replies reach them.
@@ -39,7 +44,14 @@ export async function addComment(
     // Commenting counts as activity: it keeps the task off the no-update list.
     await taskRepo.writeActivity(
       tx,
-      [{ taskId: row.id, actorId: actor.id, action: 'comment.created', newValue: { commentId: id } }],
+      [
+        {
+          taskId: row.id,
+          actorId: actor.id,
+          action: 'comment.created',
+          newValue: { commentId: id },
+        },
+      ],
       now,
     );
 
@@ -101,7 +113,12 @@ export async function editComment(
     authorize(
       actor,
       'comment.edit',
-      { kind: 'comment', authorId: comment.userId, createdAt: comment.createdAt, task: await toResource(tx, task) },
+      {
+        kind: 'comment',
+        authorId: comment.userId,
+        createdAt: comment.createdAt,
+        task: await toResource(tx, task),
+      },
       now,
     );
 
@@ -110,11 +127,23 @@ export async function editComment(
       .set({ body, editedAt: now })
       .where(eq(taskComments.id, commentId));
 
-    await repo.replaceMentions(tx, commentId, body);
+    await repo.replaceMentions(
+      tx,
+      commentId,
+      body,
+      await associatedUserIds(tx, { ...(await toResource(tx, task)), id: task.id }),
+    );
 
     await taskRepo.writeActivity(
       tx,
-      [{ taskId: comment.taskId, actorId: actor.id, action: 'comment.edited', newValue: { commentId } }],
+      [
+        {
+          taskId: comment.taskId,
+          actorId: actor.id,
+          action: 'comment.edited',
+          newValue: { commentId },
+        },
+      ],
       now,
     );
   });
@@ -137,7 +166,12 @@ export async function deleteComment(
     authorize(
       actor,
       'comment.delete',
-      { kind: 'comment', authorId: comment.userId, createdAt: comment.createdAt, task: await toResource(tx, task) },
+      {
+        kind: 'comment',
+        authorId: comment.userId,
+        createdAt: comment.createdAt,
+        task: await toResource(tx, task),
+      },
       now,
     );
 
@@ -146,7 +180,14 @@ export async function deleteComment(
 
     await taskRepo.writeActivity(
       tx,
-      [{ taskId: comment.taskId, actorId: actor.id, action: 'comment.deleted', newValue: { commentId } }],
+      [
+        {
+          taskId: comment.taskId,
+          actorId: actor.id,
+          action: 'comment.deleted',
+          newValue: { commentId },
+        },
+      ],
       now,
     );
   });

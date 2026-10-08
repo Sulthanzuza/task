@@ -24,10 +24,11 @@ import {
 } from '@tm/shared';
 import { sql } from 'drizzle-orm';
 import { db, withTransaction, type Db, type QueueConnection } from '../../db/client';
-import { taskActivity, taskComments, taskDependencies, tasks } from '../../db/schema';
+import { taskActivity, taskComments, taskDependencies, tasks, users } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
 import {
   ConflictError,
+  ForbiddenError,
   InvalidTransitionError,
   NotFoundError,
   TaskChangedError,
@@ -36,6 +37,7 @@ import {
 import { EventBuffer } from '../../lib/events';
 import { workingHoursBetween } from '../../lib/date-utils';
 import { aliased, buildPredicateContext, isActive, isOpen } from './predicates';
+import { associatedUserIds } from './associated';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
@@ -512,7 +514,14 @@ export async function getTaskDetail(
   const resource = await toResource(db, row);
   authorize(actor, 'task.view', resource);
 
-  const people = await repo.usersByIds(db, [row.assigneeId, row.reviewerId, row.createdById]);
+  // Watchers are in here too, or the detail would list their ids with no
+  // names to put against them.
+  const people = await repo.usersByIds(db, [
+    row.assigneeId,
+    row.reviewerId,
+    row.createdById,
+    ...resource.watcherIds,
+  ]);
   const labelMap = await repo.labelsForTasks(db, [row.id]);
   const [counts, deps] = await Promise.all([
     repo.subtaskCounts(db, row.id),
@@ -530,6 +539,11 @@ export async function getTaskDetail(
     description: row.description ?? null,
     createdBy: creator,
     watcherIds: resource.watcherIds,
+    // Filtered after mapping: a watcher whose account has since been removed
+    // leaves an id with nobody behind it.
+    watchers: resource.watcherIds
+      .map((id) => toUserSummary(people.get(id)))
+      .filter((person): person is NonNullable<typeof person> => person !== null),
     subtaskCount: counts,
     // Only a group has these; everything else gets an empty list, so the
     // detail page can decide by length rather than by another flag.
@@ -821,6 +835,7 @@ export async function transitionTask(
         userId: actor.id,
         body: input.comment.trim(),
         now,
+        mentionableIds: await associatedUserIds(tx, { ...resource, id: taskId }),
       });
     }
 
@@ -1122,6 +1137,7 @@ export async function assignTask(
         userId: actor.id,
         body: 'Handover: ' + input.handoverNote.trim(),
         now,
+        mentionableIds: await associatedUserIds(tx, { ...resource, id: taskId }),
       });
     }
 
@@ -1244,6 +1260,91 @@ export async function watchTask(actor: Actor, taskId: string, now = new Date()):
     await repo.writeActivity(
       tx,
       [{ taskId, actorId: actor.id, action: 'task.watcher_added', newValue: actor.id }],
+      now,
+    );
+  });
+}
+
+/**
+ * A lead putting somebody else on the task.
+ *
+ * The way to bring in a person a mention cannot reach: a mention is limited
+ * to the people the task is about, and this is how that set grows. It leaves
+ * an activity row naming who added whom, because somebody arriving in a
+ * thread deserves to be traceable to a decision.
+ *
+ * The person added must be able to see the task, or they would be following
+ * something they cannot open.
+ */
+export async function addWatcher(
+  actor: Actor,
+  taskId: string,
+  userId: string,
+  now = new Date(),
+): Promise<void> {
+  await withTransaction(async (tx) => {
+    const row = await repo.lockTask(tx, taskId);
+    const resource = await toResource(tx, row);
+    // Only a lead of the owning team, or an admin, may change who follows it.
+    authorize(actor, 'task.assign', resource);
+
+    const [person] = await tx
+      .select({
+        id: users.id,
+        role: users.role,
+        isActive: users.isActive,
+        teamIds: sql<
+          string[]
+        >`COALESCE(ARRAY(SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ${users.id}), '{}')`,
+        ledTeamIds: sql<
+          string[]
+        >`COALESCE(ARRAY(SELECT t.id FROM teams t WHERE t.lead_id = ${users.id}), '{}')`,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!person || !person.isActive) throw new NotFoundError('That person');
+
+    if (
+      !can(
+        {
+          id: person.id,
+          role: person.role,
+          teamIds: person.teamIds,
+          ledTeamIds: person.ledTeamIds,
+        },
+        'task.view',
+        resource,
+      )
+    ) {
+      throw new ForbiddenError('That person cannot see this task, so they cannot follow it.');
+    }
+
+    await repo.addWatchers(tx, taskId, [userId]);
+    await repo.writeActivity(
+      tx,
+      [{ taskId, actorId: actor.id, action: 'task.watcher_added', newValue: userId }],
+      now,
+    );
+  });
+}
+
+/** A lead taking somebody off the task. */
+export async function removeWatcher(
+  actor: Actor,
+  taskId: string,
+  userId: string,
+  now = new Date(),
+): Promise<void> {
+  await withTransaction(async (tx) => {
+    const row = await repo.lockTask(tx, taskId);
+    authorize(actor, 'task.assign', await toResource(tx, row));
+
+    await repo.removeWatcher(tx, taskId, userId);
+    await repo.writeActivity(
+      tx,
+      [{ taskId, actorId: actor.id, action: 'task.watcher_removed', newValue: userId }],
       now,
     );
   });

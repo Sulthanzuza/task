@@ -4,15 +4,19 @@ import { db } from '../../db/client';
 import { teamMembers, teams, users } from '../../db/schema';
 import type { Actor } from '../../middleware/authenticate';
 import { can, authorize } from '../permissions/authorize';
+import { associatedIdList, MATCHES_NOBODY } from './associated';
 import { loadTaskOr404, toResource } from './service';
 
 /**
  * Who may be mentioned on a task.
  *
- * The rule is the same one that decides who may read the task, checked here
- * rather than guessed at in the browser: offering a name the mentioner cannot
- * notify would either fail silently or, worse, tell them who exists on another
- * team. Everyone returned is somebody a mention would actually reach.
+ * Narrower than who may read it: the people the task is about, as
+ * associatedUserIds defines them. Offering the whole team meant a mention was
+ * the easiest way to pull somebody into a thread they had no context for,
+ * which is how a notification list stops being read.
+ *
+ * Everyone returned is somebody a mention would actually reach, because the
+ * same set decides what the server records. The browser never guesses.
  */
 export async function mentionableUsers(
   actor: Actor,
@@ -25,29 +29,13 @@ export async function mentionableUsers(
   // You must be able to see the task yourself before you can ask who else can.
   authorize(actor, 'task.view', resource);
 
-  /*
-   * The candidates are the task's team plus anybody already involved in it,
-   * which is a superset of who can view it. Each one is then put through the
-   * same check the notification path uses, so the two cannot drift apart.
-   */
-  const involved = [
-    resource.assigneeId,
-    resource.reviewerId,
-    resource.createdBy,
-    ...resource.watcherIds,
-  ].filter((id): id is string => id !== null);
+  const associated = await associatedIdList(db, { ...resource, id: task.id });
 
   const filters = [
     eq(users.isActive, true),
     // Mentioning yourself notifies nobody, so it is not offered.
     ne(users.id, actor.id),
-    or(
-      sql`EXISTS (SELECT 1 FROM ${teamMembers} tm
-                  WHERE tm.user_id = ${users.id} AND tm.team_id = ${resource.teamId}::uuid)`,
-      sql`EXISTS (SELECT 1 FROM ${teams} t
-                  WHERE t.id = ${resource.teamId}::uuid AND t.lead_id = ${users.id})`,
-      involved.length > 0 ? inArray(users.id, involved) : sql`false`,
-    )!,
+    associated.length > 0 ? inArray(users.id, associated) : MATCHES_NOBODY,
   ];
 
   if (query && query.trim() !== '') {

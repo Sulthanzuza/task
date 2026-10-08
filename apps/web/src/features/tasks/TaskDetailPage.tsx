@@ -13,6 +13,7 @@ import {
   useTransitionTask,
   useUpdateProgress,
   useUpdateTask,
+  useManageWatcher,
   useWatchToggle,
 } from './api';
 import { useLabels, useUsers } from '@/features/team/api';
@@ -31,6 +32,7 @@ import {
   Select,
   Skeleton,
   Spinner,
+  CardHeader,
   Textarea,
 } from '@/components/ui/primitives';
 import {
@@ -159,6 +161,7 @@ export function TaskDetailPage() {
 
         <aside className="order-3 space-y-4">
           <FieldsCard task={task.data} />
+          <WatchersCard task={task.data} />
         </aside>
       </div>
     </div>
@@ -186,6 +189,97 @@ function AttachmentsSection({ task }: { task: TaskDetail }) {
   const lead = user?.role === 'TEAM_LEAD' || isAdmin;
 
   return <Attachments taskIdOrKey={task.key} canAttach={lead || involved} canDeleteAny={lead} />;
+}
+
+/**
+ * Who is following the task, and for a lead, who else could be.
+ *
+ * This is the other half of narrowing mentions: the autocomplete offers only
+ * the people the task is about, so there has to be a way to widen that. Adding
+ * somebody here makes them mentionable and leaves an activity row saying who
+ * brought them in, which is better than a mention that silently reaches
+ * somebody with no context.
+ */
+function WatchersCard({ task }: { task: TaskDetail }) {
+  const { user, isLead } = useAuth();
+  const manage = useManageWatcher(task.key, task.id);
+  const people = useUsers();
+  const [adding, setAdding] = useState(false);
+
+  const watcherIds = new Set(task.watcherIds);
+  // Only people who could be added: the rest are already following it.
+  const candidates = (people.data?.items ?? []).filter(
+    (person) => person.isActive && !watcherIds.has(person.id),
+  );
+
+  return (
+    <Card>
+      <CardHeader title="Watchers" subtitle="They get the updates, and can be mentioned" />
+
+      {task.watchers.length === 0 ? (
+        <p className="px-4 pb-3 text-xs text-ink-faint">Nobody is following this yet.</p>
+      ) : (
+        <ul className="divide-y divide-border-subtle">
+          {task.watchers.map((person) => (
+            <li key={person.id} className="flex items-center gap-2 px-4 py-2">
+              <UserAvatar user={person} size="sm" />
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {person.name}
+                {person.id === user?.id ? <span className="text-ink-faint"> (you)</span> : null}
+              </span>
+
+              {isLead ? (
+                <button
+                  type="button"
+                  aria-label={'Remove ' + person.name + ' from the watchers'}
+                  className="shrink-0 text-ink-faint hover:text-danger focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+                  disabled={manage.isPending}
+                  onClick={() => manage.mutate({ userId: person.id, add: false })}
+                >
+                  <X size={13} aria-hidden />
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {isLead ? (
+        <div className="px-4 pt-1 pb-3">
+          {adding ? (
+            <Select
+              aria-label="Add a watcher"
+              autoFocus
+              defaultValue=""
+              disabled={manage.isPending}
+              onChange={(event) => {
+                const userId = event.currentTarget.value;
+                if (!userId) return;
+                manage.mutate({ userId, add: true }, { onSuccess: () => setAdding(false) });
+              }}
+            >
+              <option value="">Choose somebody…</option>
+              {candidates.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+              <Plus size={13} aria-hidden /> Add a watcher
+            </Button>
+          )}
+
+          {manage.isError ? (
+            <p role="alert" className="mt-1.5 text-xs text-danger">
+              {manage.error instanceof ApiError ? manage.error.message : 'That did not work.'}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
+  );
 }
 
 function TaskHeader({ task }: { task: TaskDetail }) {
@@ -935,7 +1029,7 @@ function TimelineCard({
   entries: TimelineEntry[] | undefined;
   loading: boolean;
 }) {
-  const { user } = useAuth();
+  const { user, isLead } = useAuth();
   const addComment = useAddComment(taskKey, user ? { ...user, isActive: true } : null);
   const [body, setBody] = useState('');
 
@@ -978,7 +1072,11 @@ function TimelineCard({
                     {entry.editedAt ? ' · edited' : ''}
                   </p>
                   <div className="mt-1">
-                    <CommentBody body={entry.body} meId={user?.id} />
+                    <CommentBody
+                      body={entry.body}
+                      meId={user?.id}
+                      mentionedUserIds={entry.mentionedUserIds}
+                    />
                   </div>
                 </div>
               </li>
@@ -1018,12 +1116,15 @@ function TimelineCard({
           aria-label="Add a comment"
           value={body}
           onChange={setBody}
+          canManageWatchers={isLead}
           placeholder="Add a comment… type @ to mention somebody"
           onSubmit={() => {
             if (body.trim()) addComment.mutate(body.trim(), { onSuccess: () => setBody('') });
           }}
         />
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-end gap-3">
+          {/* The shortcut, said once, where it is about to be used. */}
+          <p className="text-xs text-ink-faint">Enter adds a line. Ctrl+Enter sends.</p>
           <Button type="submit" size="sm" disabled={!body.trim() || addComment.isPending}>
             {addComment.isPending ? <Spinner /> : null}
             Comment

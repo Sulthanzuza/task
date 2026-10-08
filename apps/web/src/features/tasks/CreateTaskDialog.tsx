@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -18,6 +18,7 @@ import {
 import { useCreateTask, useTaskList } from './api';
 import { useUploadAttachment } from './attachmentsApi';
 import { AttachmentPreview } from './AttachmentPreview';
+import { useAutoGrow } from '@/lib/useAutoGrow';
 import { attachmentDescriptionSchema } from '@tm/shared';
 import { useCreateLabel } from './labelsApi';
 import { useLabels, useProjects, useUsers } from '@/features/team/api';
@@ -92,6 +93,9 @@ function CreateTaskForm({
 
   const [description, setDescription] = useState('');
   const [preview, setPreview] = useState(false);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  // Five lines up to 40% of the window, the same rule as the comment box.
+  useAutoGrow(descriptionRef, preview ? '' : description, 5);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [dependsOn, setDependsOn] = useState<TaskSummary[]>([]);
   const [files, setFiles] = useState<QueuedFile[]>([]);
@@ -275,7 +279,10 @@ function CreateTaskForm({
             ) : (
               <Textarea
                 id="description"
+                ref={descriptionRef}
                 rows={5}
+                // Grows with what is written, like the comment box.
+                className="resize-none"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder={

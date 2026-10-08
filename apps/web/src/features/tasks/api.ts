@@ -362,6 +362,33 @@ export function useWatchToggle(taskId: string | undefined) {
   });
 }
 
+/**
+ * Watchers a lead manages, as opposed to following a task yourself.
+ *
+ * This is how somebody outside the task becomes mentionable: the autocomplete
+ * only offers the people the task is about, and adding a watcher is what
+ * widens that set. The activity row says who did it.
+ */
+export function useManageWatcher(taskIdOrKey: string | undefined, taskId: string | undefined) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, add }: { userId: string; add: boolean }) =>
+      add
+        ? api.post<void>('/tasks/' + taskId + '/watchers', { userId })
+        : api.delete<void>('/tasks/' + taskId + '/watchers/' + userId),
+
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskIdOrKey ?? '') }),
+        // The set of people who may be mentioned has just changed.
+        client.invalidateQueries({ queryKey: queryKeys.tasks.mentionable(taskIdOrKey ?? '') }),
+        client.invalidateQueries({ queryKey: queryKeys.tasks.timeline(taskIdOrKey ?? '') }),
+      ]);
+    },
+  });
+}
+
 /** Column counts, counted on the server so they match the dashboard. */
 export function useBoardSummary(filters: { projectId?: string | undefined }) {
   return useQuery({

@@ -5,6 +5,7 @@ import { useMentionableUsers } from './attachmentsApi';
 import { Textarea } from '@/components/ui/primitives';
 import { UserAvatar } from '@/components/common/badges';
 import { cn } from '@/lib/utils';
+import { useAutoGrow } from '@/lib/useAutoGrow';
 
 /**
  * A comment box that knows who is on the task.
@@ -27,6 +28,8 @@ export interface MentionBoxProps {
   rows?: number;
   disabled?: boolean;
   id?: string;
+  /** Leads get the line explaining how to widen the list. */
+  canManageWatchers?: boolean;
   'aria-label'?: string;
 }
 
@@ -56,9 +59,12 @@ export function MentionBox({
   rows = 3,
   disabled,
   id,
+  canManageWatchers = false,
   'aria-label': ariaLabel,
 }: MentionBoxProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Grows with the comment, and shrinks back when it has been sent.
+  useAutoGrow(textareaRef, value, rows);
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   /*
@@ -150,6 +156,8 @@ export function MentionBox({
         id={id}
         aria-label={ariaLabel}
         rows={rows}
+        // The height is set by useAutoGrow, so the resize handle would fight it.
+        className="resize-none"
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -209,6 +217,18 @@ export function MentionBox({
               </button>
             </li>
           ))}
+
+          {/*
+            Only the people the task is about are offered, and somebody who
+            cannot find a colleague needs to know that is deliberate rather
+            than a broken search. Shown to leads because they are the ones
+            who can do something about it.
+          */}
+          {canManageWatchers ? (
+            <li className="border-t border-border-subtle px-3 py-2 text-xs text-ink-faint">
+              Not on this task? Add them as a watcher first.
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </div>
@@ -222,7 +242,21 @@ export function MentionBox({
  * reader who was mentioned: the one thing they most want to spot in a long
  * thread.
  */
-export function CommentBody({ body, meId }: { body: string; meId?: string | null }) {
+export function CommentBody({
+  body,
+  meId,
+  mentionedUserIds,
+}: {
+  body: string;
+  meId?: string | null;
+  /**
+   * Who the server actually recorded. A mention of somebody outside the task
+   * is kept in the text and notifies nobody, so drawing it as a chip would
+   * promise a notification that was never sent. Undefined means "chip them
+   * all", for the places that have no mention list to hand.
+   */
+  mentionedUserIds?: string[];
+}) {
   const parts: Array<string | { name: string; userId: string }> = [];
   let lastIndex = 0;
 
@@ -239,6 +273,9 @@ export function CommentBody({ body, meId }: { body: string; meId?: string | null
       {parts.map((part, index) =>
         typeof part === 'string' ? (
           <span key={index}>{part}</span>
+        ) : mentionedUserIds && !mentionedUserIds.includes(part.userId) ? (
+          // Nobody was notified, so it reads as what it is: plain words.
+          <span key={index}>@{part.name}</span>
         ) : (
           <span
             key={index}

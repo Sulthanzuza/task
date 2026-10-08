@@ -8,6 +8,13 @@ export interface InsertCommentInput {
   userId: string;
   body: string;
   now: Date;
+  /**
+   * Who may be mentioned on this task. A mention of anybody else stays in the
+   * text exactly as typed and is recorded as nothing: no mention row, so no
+   * notification. The alternative is to refuse the comment, which loses what
+   * somebody wrote over a detail they can fix in a follow-up.
+   */
+  mentionableIds: Set<string>;
 }
 
 /**
@@ -30,7 +37,7 @@ export async function insertComment(
 
   if (!created) throw new Error('Comment insert returned no row');
 
-  const mentioned = await resolveMentions(tx, input.body);
+  const mentioned = await resolveMentions(tx, input.body, input.mentionableIds);
   if (mentioned.length > 0) {
     await tx
       .insert(commentMentions)
@@ -41,22 +48,43 @@ export async function insertComment(
   return { id: created.id, mentionedUserIds: mentioned };
 }
 
-/** Only mentions of real, active users are recorded; a stale id is dropped silently. */
-export async function resolveMentions(handle: Db, body: string): Promise<string[]> {
+/**
+ * The mentions worth recording.
+ *
+ * Two filters, both needed. A stale id is dropped because the person may have
+ * left; an id outside the task's own set is dropped because a mention is not
+ * a way to summon somebody into a conversation they are not part of. In both
+ * cases the text is left alone and simply reads as plain words.
+ */
+export async function resolveMentions(
+  handle: Db,
+  body: string,
+  mentionableIds: Set<string>,
+): Promise<string[]> {
   const parsed = parseMentions(body);
   if (parsed.length === 0) return [];
+
+  const candidates = parsed
+    .map((mention) => mention.userId)
+    .filter((userId) => mentionableIds.has(userId));
+  if (candidates.length === 0) return [];
 
   const rows = await handle
     .select({ id: users.id })
     .from(users)
-    .where(and(inArray(users.id, parsed.map((m) => m.userId)), eq(users.isActive, true)));
+    .where(and(inArray(users.id, candidates), eq(users.isActive, true)));
 
   return rows.map((r) => r.id);
 }
 
-export async function replaceMentions(tx: Db, commentId: string, body: string): Promise<string[]> {
+export async function replaceMentions(
+  tx: Db,
+  commentId: string,
+  body: string,
+  mentionableIds: Set<string>,
+): Promise<string[]> {
   await tx.delete(commentMentions).where(eq(commentMentions.commentId, commentId));
-  const mentioned = await resolveMentions(tx, body);
+  const mentioned = await resolveMentions(tx, body, mentionableIds);
   if (mentioned.length > 0) {
     await tx
       .insert(commentMentions)

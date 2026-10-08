@@ -105,6 +105,12 @@ export const taskDetailSchema = taskSummarySchema.extend({
   description: z.string().nullable(),
   createdBy: userSummarySchema,
   watcherIds: z.array(uuidSchema),
+  /**
+   * The same people with their names, so the task page can list them without
+   * a second request per id. watcherIds stays because several screens only
+   * need to ask "am I following this?".
+   */
+  watchers: z.array(userSummarySchema),
   subtaskCount: z.object({ total: z.number().int(), done: z.number().int() }),
   /**
    * The children of a group task, one per person, newest state first-hand.

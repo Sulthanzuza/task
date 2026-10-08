@@ -57,6 +57,13 @@ export function toTaskSummary(
   people: Map<string, UserRow>,
   taskLabels: LabelRow[],
   ctx?: LatenessContext,
+  /*
+   * Checklist counts, passed in rather than queried here: a card shows "3/7"
+   * and the caller already has every task on screen, so one grouped query
+   * answers it for all of them instead of one per row. Absent means the task
+   * has no checklists, which is the common case.
+   */
+  checklistTotals?: { doneCount: number; totalCount: number },
 ): TaskSummary {
   return {
     id: row.id,
@@ -68,6 +75,8 @@ export function toTaskSummary(
     status: row.status,
     priority: row.priority,
     progress: row.progress,
+    checklistDone: checklistTotals?.doneCount ?? 0,
+    checklistTotal: checklistTotals?.totalCount ?? 0,
     assignee: toUserSummary(row.assigneeId ? people.get(row.assigneeId) : null),
     reviewer: toUserSummary(row.reviewerId ? people.get(row.reviewerId) : null),
     startDate: row.startDate,

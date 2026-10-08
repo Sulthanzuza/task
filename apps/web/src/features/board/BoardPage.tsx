@@ -40,6 +40,7 @@ import { ApiError, api } from '@/lib/api';
 import { Button, Card, EmptyState, Select, Skeleton } from '@/components/ui/primitives';
 import { DueBadge, PriorityIcon, ProgressBar, UserAvatar } from '@/components/common/badges';
 import { ConfirmTransitionDialog } from '@/features/tasks/ConfirmTransitionDialog';
+import { ChecklistBadge } from '@/features/tasks/Checklists';
 import { cn } from '@/lib/utils';
 
 /**
@@ -582,6 +583,7 @@ function TaskCard({
 
       <div className="mt-2 flex items-center gap-2">
         <UserAvatar user={task.assignee} size="sm" />
+        <ChecklistBadge done={task.checklistDone} total={task.checklistTotal} />
         <span className="ml-auto">
           {/* No date, nothing there: a dash on a card is noise. */}
           <DueBadge

@@ -20,6 +20,7 @@ import { useLabels, useUsers } from '@/features/team/api';
 import { Markdown } from '@/components/common/Markdown';
 import { RingGauge } from '@/components/charts';
 import { Attachments } from './Attachments';
+import { ChecklistsCard } from './Checklists';
 import { CommentBody, MentionBox } from './MentionBox';
 import { useAuth } from '@/features/auth/AuthContext';
 import { ApiError } from '@/lib/api';
@@ -146,6 +147,9 @@ export function TaskDetailPage() {
 
           <div className="order-4 lg:mb-5">
             <DescriptionCard task={task.data} />
+          </div>
+          <div className="order-5 lg:mb-5">
+            <ChecklistsCard task={task.data} />
           </div>
           <div className="order-5 lg:mb-5">
             <AttachmentsSection task={task.data} />

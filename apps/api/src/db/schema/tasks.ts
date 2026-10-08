@@ -65,6 +65,15 @@ export const tasks = pgTable(
     isGroup: boolean('is_group').notNull().default(false),
 
     progress: smallint('progress').notNull().default(0),
+    /**
+     * Progress is counted from the checklists instead of being set by hand.
+     *
+     * Off by default, because a slider is the right tool for work that is not
+     * a list of steps. On, it makes progress a fact rather than an opinion:
+     * ticked items over all items, recalculated in the same transaction as
+     * the tick.
+     */
+    progressFollowsChecklist: boolean('progress_follows_checklist').notNull().default(false),
     startDate: date('start_date'),
     dueDate: date('due_date'),
     estimatedMinutes: integer('estimated_minutes'),
@@ -176,10 +185,46 @@ export const taskDependencies = pgTable(
   ],
 );
 
+/**
+ * A named list of steps on a task.
+ *
+ * Several per task, because one flat list of twenty items is not how work is
+ * actually grouped: "Build", "Test", "Deploy" each have their own steps and
+ * their own sense of being finished. A task with a single list is the common
+ * case and is just a task with one checklist.
+ */
+export const checklists = pgTable(
+  'checklists',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    position: integer('position').notNull().default(0),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('checklists_task_idx').on(t.taskId, t.position)],
+);
+
 export const checklistItems = pgTable(
   'checklist_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /*
+     * Both the checklist and the task.
+     *
+     * The checklist is where the item belongs; the task is kept alongside it
+     * so "how many items are done on this task" is one indexed read. The
+     * board asks that for every card on screen, and going through checklists
+     * to answer it would be a join per card.
+     */
+    checklistId: uuid('checklist_id')
+      .notNull()
+      .references(() => checklists.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
@@ -190,7 +235,10 @@ export const checklistItems = pgTable(
     doneAt: tz('done_at'),
     createdAt: createdAt(),
   },
-  (t) => [index('checklist_items_task_idx').on(t.taskId, t.position)],
+  (t) => [
+    index('checklist_items_task_idx').on(t.taskId, t.position),
+    index('checklist_items_list_idx').on(t.checklistId, t.position),
+  ],
 );
 
 /** Commits and pull requests linked to a task by key. Filled by the Git webhooks. */

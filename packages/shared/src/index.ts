@@ -11,6 +11,7 @@ export * from './schemas/team';
 export * from './schemas/project';
 export * from './schemas/task';
 export * from './schemas/comment';
+export * from './schemas/checklist';
 export * from './schemas/dashboard';
 export * from './schemas/org';
 export * from './schemas/report';

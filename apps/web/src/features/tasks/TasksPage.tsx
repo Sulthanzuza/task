@@ -5,6 +5,7 @@ import type { ListTasksQuery, TaskPriority, TaskStatus } from '@tm/shared';
 import { PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES } from '@tm/shared';
 import { useTaskList } from './api';
 import { CreateTaskDialog } from './CreateTaskDialog';
+import { ChecklistBadge } from './Checklists';
 import { useProjects, useUsers } from '@/features/team/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { Button, Card, EmptyState, Input, Select, Skeleton } from '@/components/ui/primitives';
@@ -290,6 +291,8 @@ export function TasksPage() {
                   </td>
                   <td className="px-3 py-2.5">
                     <ProgressBar value={task.progress} showLabel />
+                    {/* The steps behind the bar, when there are any. */}
+                    <ChecklistBadge done={task.checklistDone} total={task.checklistTotal} />
                   </td>
                   <td className="px-3 py-2.5">
                     <DueBadge

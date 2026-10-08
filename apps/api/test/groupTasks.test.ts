@@ -359,6 +359,16 @@ describe('permissions on a child', () => {
     const body = await detail(group.id, fx.member);
     expect(body.isGroup).toBe(true);
     expect((body.groupChildren as unknown[]).length, 'the People table').toBe(2);
+
+    /*
+     * And each row names its person. Checking only the count let a null
+     * assignee through for every child, so the People table showed two rows
+     * with nobody in them.
+     */
+    const names = (body.groupChildren as Array<{ assignee: { name: string } | null }>).map(
+      (child) => child.assignee?.name ?? null,
+    );
+    expect(names, 'every row of the People table names somebody').not.toContain(null);
   });
 });
 

@@ -35,6 +35,7 @@ const summaryColumns = {
   status: tasks.status,
   priority: tasks.priority,
   progress: tasks.progress,
+  progressFollowsChecklist: tasks.progressFollowsChecklist,
   startDate: tasks.startDate,
   dueDate: tasks.dueDate,
   estimatedMinutes: tasks.estimatedMinutes,
@@ -82,6 +83,7 @@ export interface TaskRow {
   status: TaskStatus;
   priority: TaskPriority;
   progress: number;
+  progressFollowsChecklist: boolean;
   startDate: string | null;
   dueDate: string | null;
   estimatedMinutes: number | null;

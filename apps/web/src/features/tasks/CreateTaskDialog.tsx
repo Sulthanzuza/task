@@ -2,9 +2,9 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { UserSummary } from '@tm/shared';
+import type { ChecklistDraft, UserSummary } from '@tm/shared';
 import type { z } from 'zod';
-import { Paperclip, Plus, Search, Upload, Users, X } from 'lucide-react';
+import { ChevronUp, Paperclip, Plus, Search, Upload, Users, X } from 'lucide-react';
 import {
   createTaskSchema,
   PRIORITY_LABELS,
@@ -93,6 +93,7 @@ function CreateTaskForm({
 
   const [description, setDescription] = useState('');
   const [preview, setPreview] = useState(false);
+  const [checklistDrafts, setChecklistDrafts] = useState<ChecklistDraft[]>([]);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   // Five lines up to 40% of the window, the same rule as the comment box.
   useAutoGrow(descriptionRef, preview ? '' : description, 5);
@@ -162,6 +163,9 @@ function CreateTaskForm({
         description: description.trim() || undefined,
         labelIds,
         dependsOnTaskIds: dependsOn.map((task) => task.id),
+        // Empty lists are dropped: a checklist with a title and no steps is
+        // half a thought, and the task page is the place to finish it.
+        checklists: checklistDrafts.filter((draft) => draft.title.trim() !== ''),
       });
 
       setCreatedKey(task.key);
@@ -296,6 +300,8 @@ function CreateTaskForm({
           <LabelPicker projectId={projectId} chosen={labelIds} onChange={setLabelIds} />
 
           <DependencyPicker chosen={dependsOn} onChange={setDependsOn} />
+
+          <ChecklistBuilder drafts={checklistDrafts} onChange={setChecklistDrafts} />
 
           <AttachmentQueue files={files} onChange={setFiles} showErrors={queueChecked} />
 
@@ -642,6 +648,126 @@ function DependencyPicker({
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Building checklists while the task is being written.
+ *
+ * Enter adds the next step, which is the whole point: a list of eight steps
+ * is typed in one go, not through eight round trips to a button. On a group
+ * task these go on the parent and are copied to every person.
+ */
+function ChecklistBuilder({
+  drafts,
+  onChange,
+}: {
+  drafts: ChecklistDraft[];
+  onChange(next: ChecklistDraft[]): void;
+}) {
+  const [pendingItem, setPendingItem] = useState<Record<number, string>>({});
+
+  const update = (index: number, change: Partial<ChecklistDraft>) =>
+    onChange(drafts.map((draft, at) => (at === index ? { ...draft, ...change } : draft)));
+
+  return (
+    <div>
+      <Label htmlFor="new-task-checklists">Checklists</Label>
+
+      {drafts.length > 0 ? (
+        <ul className="mb-2 space-y-2">
+          {drafts.map((draft, index) => (
+            <li key={index} className="rounded-lg border border-border-subtle p-2.5">
+              <div className="flex items-center gap-2">
+                <Input
+                  className="h-8"
+                  aria-label={'Checklist ' + String(index + 1) + ' name'}
+                  placeholder="Testing"
+                  value={draft.title}
+                  onChange={(event) => update(index, { title: event.target.value })}
+                />
+                <button
+                  type="button"
+                  aria-label={'Remove checklist ' + (draft.title || String(index + 1))}
+                  className="shrink-0 text-ink-faint hover:text-danger"
+                  onClick={() => onChange(drafts.filter((_, at) => at !== index))}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {draft.items.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {draft.items.map((item, itemIndex) => (
+                    <li key={itemIndex} className="flex items-center gap-2 text-sm">
+                      <span className="text-ink-faint" aria-hidden>
+                        ☐
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{item}</span>
+                      <button
+                        type="button"
+                        aria-label={'Move ' + item + ' up'}
+                        disabled={itemIndex === 0}
+                        className="text-ink-faint hover:text-ink disabled:opacity-30"
+                        onClick={() => {
+                          const moved = [...draft.items];
+                          const [taken] = moved.splice(itemIndex, 1);
+                          moved.splice(itemIndex - 1, 0, taken as string);
+                          update(index, { items: moved });
+                        }}
+                      >
+                        <ChevronUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={'Remove ' + item}
+                        className="text-ink-faint hover:text-danger"
+                        onClick={() =>
+                          update(index, {
+                            items: draft.items.filter((_, at) => at !== itemIndex),
+                          })
+                        }
+                      >
+                        <X size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              <Input
+                className="mt-2 h-8 text-sm"
+                aria-label={'Add a step to ' + (draft.title || 'this checklist')}
+                placeholder="Add a step, then Enter"
+                value={pendingItem[index] ?? ''}
+                onChange={(event) =>
+                  setPendingItem((all) => ({ ...all, [index]: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  // Inside a form: Enter here must add a step, not submit.
+                  event.preventDefault();
+                  const text = (pendingItem[index] ?? '').trim();
+                  if (!text) return;
+                  update(index, { items: [...draft.items, text] });
+                  setPendingItem((all) => ({ ...all, [index]: '' }));
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Button
+        id="new-task-checklists"
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...drafts, { title: '', items: [] }])}
+      >
+        <Plus size={13} aria-hidden /> Add checklist
+      </Button>
     </div>
   );
 }

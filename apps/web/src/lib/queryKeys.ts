@@ -19,6 +19,7 @@ export const queryKeys = {
     timeline: (idOrKey: string) => ['tasks', 'timeline', idOrKey] as const,
     attachments: (idOrKey: string) => ['tasks', 'attachments', idOrKey] as const,
     mentionable: (idOrKey: string) => ['tasks', 'mentionable', idOrKey] as const,
+    checklists: (idOrKey: string) => ['tasks', 'checklists', idOrKey] as const,
   },
 
   projects: {

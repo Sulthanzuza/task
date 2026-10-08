@@ -12,6 +12,7 @@ import {
   dateOnlySchema,
   uuidSchema,
 } from './common';
+import { checklistDraftSchema } from './checklist';
 import { labelSchema } from './project';
 import { userSummarySchema } from './user';
 
@@ -30,6 +31,12 @@ export const taskSummarySchema = z.object({
   status: taskStatusSchema,
   priority: taskPrioritySchema,
   progress: z.number().int(),
+  /**
+   * Checklist totals across the task, for the small badge on a card and a
+   * list row. Zero total means there is nothing to show.
+   */
+  checklistDone: z.number().int(),
+  checklistTotal: z.number().int(),
   assignee: userSummarySchema.nullable(),
   reviewer: userSummarySchema.nullable(),
   startDate: dateOnlySchema.nullable(),
@@ -151,6 +158,13 @@ export const createTaskSchema = z
     labelIds: z.array(uuidSchema).default([]),
     parentTaskId: uuidSchema.nullable().optional(),
     dependsOnTaskIds: z.array(uuidSchema).default([]),
+    /**
+     * Checklists to create with the task.
+     *
+     * On a group task these go on the parent and are copied to every child,
+     * since the steps are the same for everybody and the doing of them is not.
+     */
+    checklists: z.array(checklistDraftSchema).max(20).default([]),
   })
   .refine((v) => !v.startDate || !v.dueDate || v.startDate <= v.dueDate, {
     message: 'Start date must be on or before the due date',
@@ -295,6 +309,11 @@ export const ACTIVITY_ACTIONS = [
   'task.dependency_removed',
   'task.watcher_added',
   'task.watcher_removed',
+  'checklist.added',
+  'checklist.renamed',
+  'checklist.deleted',
+  'checklist.item_ticked',
+  'checklist.item_unticked',
   'comment.created',
   'comment.edited',
   'comment.deleted',

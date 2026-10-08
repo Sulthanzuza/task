@@ -30,6 +30,24 @@ function descriptionOf(value: unknown): string | null {
   return typeof text === 'string' && text.trim().length > 0 ? text.trim() : null;
 }
 
+/** Trimmed text, or null when there is nothing worth printing. */
+function asText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/** A value in single quotes, or a plain stand-in when there is nothing to quote. */
+function quoted(value: unknown, fallback: string): string {
+  const text = asText(value);
+  return text ? '‘' + text + '’' : fallback;
+}
+
+/** " in Testing", when the activity row recorded which list it was. */
+function inList(entry: Activity): string {
+  const meta = entry.meta as { checklistTitle?: unknown } | null | undefined;
+  const title = asText(meta?.checklistTitle);
+  return title ? ' in ' + title : '';
+}
+
 function statusLabel(value: unknown): string {
   return typeof value === 'string' && value in STATUS_LABELS
     ? STATUS_LABELS[value as TaskStatus]
@@ -80,6 +98,24 @@ export function describeActivity(entry: Activity): string {
       return who + ' started watching';
     case 'task.watcher_removed':
       return who + ' stopped watching';
+    case 'checklist.added':
+      return who + ' added the checklist ' + quoted(entry.newValue, 'a checklist');
+    case 'checklist.renamed':
+      return (
+        who +
+        ' renamed ' +
+        quoted(entry.oldValue, 'a checklist') +
+        ' to ' +
+        quoted(entry.newValue, 'something else')
+      );
+    case 'checklist.deleted':
+      return who + ' deleted the checklist ' + quoted(entry.oldValue, 'a checklist');
+    case 'checklist.item_ticked':
+      // "Rahul ticked 'API tests' in Testing" — the step and the list it is in,
+      // because the step's wording alone often means nothing out of context.
+      return who + ' ticked ' + quoted(entry.newValue, 'a step') + inList(entry);
+    case 'checklist.item_unticked':
+      return who + ' unticked ' + quoted(entry.newValue, 'a step') + inList(entry);
     case 'comment.created':
       // The comment itself is rendered; a line saying one exists would double it.
       return '';

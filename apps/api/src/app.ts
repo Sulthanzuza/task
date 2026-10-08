@@ -21,6 +21,11 @@ import { usersRouter } from './modules/users/routes';
 import { teamsRouter } from './modules/teams/routes';
 import { labelsRouter, projectsRouter } from './modules/projects/routes';
 import { projectTasksRouter, tasksRouter } from './modules/tasks/routes';
+import {
+  checklistItemsRouter,
+  checklistsRouter,
+  taskChecklistsRouter,
+} from './modules/checklists/routes';
 import { commentsRouter } from './modules/comments/routes';
 import { dashboardRouter, membersRouter } from './modules/dashboard/routes';
 import { reportsRouter } from './modules/reports/routes';
@@ -143,6 +148,9 @@ export function createApp(): Express {
   v1.use('/projects/:projectId/tasks', projectTasksRouter);
   v1.use('/labels', labelsRouter);
   v1.use('/tasks', tasksRouter);
+  v1.use('/tasks/:idOrKey/checklists', taskChecklistsRouter);
+  v1.use('/checklists', checklistsRouter);
+  v1.use('/checklist-items', checklistItemsRouter);
   v1.use('/comments', commentsRouter);
   v1.use('/tasks', taskAttachmentsRouter);
   v1.use('/attachments', attachmentsRouter);

@@ -38,6 +38,7 @@ import { EventBuffer } from '../../lib/events';
 import { workingHoursBetween } from '../../lib/date-utils';
 import { aliased, buildPredicateContext, isActive, isOpen } from './predicates';
 import { associatedUserIds } from './associated';
+import * as checklistRepo from '../checklists/repo';
 import { getOrgContext } from '../org/service';
 import { authorize, can, type TaskResource } from '../permissions/authorize';
 import { hoursToMinutes, taskKeyOf, toTaskSummary, toUserSummary } from './mappers';
@@ -206,6 +207,16 @@ export async function createTask(
 
     if (input.labelIds.length > 0) await repo.setLabels(tx, created.id, input.labelIds);
 
+    for (const draft of input.checklists) {
+      await checklistRepo.insertChecklist(tx, {
+        taskId: created.id,
+        title: draft.title,
+        createdBy: actor.id,
+        items: draft.items,
+        now,
+      });
+    }
+
     for (const dependsOnTaskId of input.dependsOnTaskIds) {
       if (await repo.wouldCreateCycle(tx, created.id, dependsOnTaskId)) {
         throw new ConflictError('That dependency would create a loop.');
@@ -347,6 +358,21 @@ async function createGroupTask(
       now,
     );
 
+    /*
+     * The parent holds the checklists as the template, and each child gets
+     * its own unticked copy. The parent's copy is what a lead edits and what
+     * somebody joining later is given.
+     */
+    for (const draft of input.checklists) {
+      await checklistRepo.insertChecklist(tx, {
+        taskId: parent.id,
+        title: draft.title,
+        createdBy: actor.id,
+        items: draft.items,
+        now,
+      });
+    }
+
     const made: string[] = [];
     for (const assigneeId of input.assigneeIds) {
       const childId = await insertGroupChild(tx, {
@@ -354,10 +380,12 @@ async function createGroupTask(
         projectId,
         actorId: actor.id,
         assigneeId,
-        input,
+        input: { ...input, checklists: [] },
         now,
       });
       made.push(childId);
+
+      await checklistRepo.copyChecklists(tx, parent.id, childId, actor.id, now);
 
       /*
        * Each person is told about their own task, not about the group. The
@@ -496,10 +524,22 @@ export async function listTasksForActor(
     db,
     rows.map((r) => r.id),
   );
+  // One grouped query for the whole page, so a card can show "3/7" without a
+  // query per row.
+  const checklistTotals = await checklistRepo.totalsForTasks(
+    db,
+    rows.map((r) => r.id),
+  );
 
   return {
     items: rows.map((row) =>
-      toTaskSummary(row, people, labelMap.get(row.id) ?? [], { today: ctx.today, calendar }),
+      toTaskSummary(
+        row,
+        people,
+        labelMap.get(row.id) ?? [],
+        { today: ctx.today, calendar },
+        checklistTotals.get(row.id),
+      ),
     ),
     nextCursor,
   };
@@ -535,7 +575,13 @@ export async function getTaskDetail(
   const ctx = buildPredicateContext(settings, calendar, now);
 
   return {
-    ...toTaskSummary(row, people, labelMap.get(row.id) ?? [], { today: ctx.today, calendar }),
+    ...toTaskSummary(
+      row,
+      people,
+      labelMap.get(row.id) ?? [],
+      { today: ctx.today, calendar },
+      await checklistRepo.totalsForTask(db, row.id),
+    ),
     description: row.description ?? null,
     createdBy: creator,
     watcherIds: resource.watcherIds,
@@ -959,9 +1005,19 @@ export async function addGroupMember(
         labelIds: (labels.get(parentId) ?? []).map((label) => label.id),
         dependsOnTaskIds: [],
         reviewerId: parent.reviewerId ?? undefined,
+        // The child's checklists are copied from the parent below, not built
+        // from drafts: the parent is the template once the group exists.
+        checklists: [],
       } as CreateTaskInput,
       now,
     });
+
+    /*
+     * Somebody joining a group gets their own copy of every checklist,
+     * unticked. The steps are the same for everybody; the doing of them is
+     * not, which is the whole point of a group task.
+     */
+    await checklistRepo.copyChecklists(tx, parentId, childId, actor.id, now);
 
     const child = await repo.findTaskById(tx, childId);
     if (child) {

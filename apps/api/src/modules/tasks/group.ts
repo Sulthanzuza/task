@@ -3,7 +3,7 @@ import type { GroupChild, GroupTally, TaskStatus } from '@tm/shared';
 import { tasks } from '../../db/schema';
 import type { Db } from '../../db/client';
 import { toUserSummary } from './mappers';
-import type { UserRow } from './repo';
+import { usersByIds, type UserRow } from './repo';
 
 /**
  * Group tasks: one piece of work given to several people.
@@ -126,6 +126,14 @@ export async function recomputeParent(
 export async function loadGroupChildren(
   handle: Db,
   parentTaskId: string,
+  /**
+   * People already to hand. Anybody missing is looked up here.
+   *
+   * The caller's map is built from the *parent's* assignee, reviewer and
+   * creator, and a group parent has no assignee — its children do. Relying on
+   * that map alone meant every row of the People table came back with a null
+   * assignee, which is why it showed no names.
+   */
   people: Map<string, UserRow>,
 ): Promise<GroupChild[]> {
   const rows = await handle
@@ -143,10 +151,18 @@ export async function loadGroupChildren(
     .where(and(eq(tasks.parentTaskId, parentTaskId), isNull(tasks.deletedAt)))
     .orderBy(tasks.number);
 
+  const missing = rows
+    .map((row) => row.assigneeId)
+    .filter((id): id is string => Boolean(id) && !people.has(id as string));
+
+  const resolved = missing.length > 0 ? await usersByIds(handle, missing) : null;
+  const personFor = (id: string | null): UserRow | null | undefined =>
+    id ? (people.get(id) ?? resolved?.get(id)) : null;
+
   return rows.map((row) => ({
     id: row.id,
     key: row.projectKey + '-' + row.number,
-    assignee: toUserSummary(row.assigneeId ? people.get(row.assigneeId) : null),
+    assignee: toUserSummary(personFor(row.assigneeId)),
     status: row.status,
     progress: row.progress,
     dueDate: row.dueDate,

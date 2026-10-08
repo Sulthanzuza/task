@@ -2,14 +2,14 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
-## Unreleased — 2026-10-08
+## v1.3.0-rc1 — 2026-10-08
 
 Three features. Migrations `0008` and `0009` both run on startup.
 
-The tag asked for was `v1.2.0-rc1`, which already points at the Reports
-commit of 2026-10-07 (the entry further down). Moving a tag that has been
-pushed changes what it means for anybody who has already fetched it, so this
-release is left untagged until that is decided.
+Numbered 1.3.0 rather than the 1.2.0-rc1 originally asked for: that tag was
+already pushed, pointing at Reports (the entry further down). Moving it would
+have changed what the name means for anybody who had fetched it, and would
+have left Reports with no tag at all.
 
 ### Added
 

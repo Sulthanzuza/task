@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-08. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`. The newest tag is **v1.1.1**, which is newer than `v1.2.0-rc1` and contains it. The three commits of 2026-10-08 are untagged: the name asked for was `v1.2.0-rc1`, which is already taken, and moving a pushed tag changes what it means for anybody who has fetched it.
+Last updated: 2026-10-08. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.3.0-rc1**. Tag order is not release order further back: `v1.1.1` is newer than `v1.2.0-rc1` and contains it, because that name was asked for after `v1.2.0-rc1` had already shipped.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 

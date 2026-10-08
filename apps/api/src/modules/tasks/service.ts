@@ -14,6 +14,7 @@ import type {
 } from '@tm/shared';
 import {
   COLLAPSED_BOARD_COLUMNS,
+  STATUS_LABELS,
   TASK_STATUSES,
   availableTransitions,
   canTransition,
@@ -29,6 +30,7 @@ import {
   ConflictError,
   InvalidTransitionError,
   NotFoundError,
+  TaskChangedError,
   ValidationError,
 } from '../../lib/errors';
 import { EventBuffer } from '../../lib/events';
@@ -731,6 +733,23 @@ export async function transitionTask(
   await withTransaction(async (tx, queue) => {
     const row = await repo.lockTask(tx, taskId);
     const resource = await toResource(tx, row);
+
+    /*
+     * The client confirmed one specific move, and says which one. If the task
+     * has moved since, applying the same destination from a different starting
+     * point is not the change anybody agreed to: somebody who clicked Approve
+     * on a Ready-for-review task should not silently approve it out of
+     * Changes requested. Checked under the row lock, so there is no window.
+     */
+    if (input.expectedStatus && input.expectedStatus !== row.status) {
+      const byName = await repo.lastStatusActorName(tx, taskId);
+      throw new TaskChangedError(
+        (byName ? 'This task was just updated by ' + byName + ', now ' : 'This task is now ') +
+          STATUS_LABELS[row.status] +
+          '.',
+        { currentStatus: row.status, byName },
+      );
+    }
 
     const verdict = canTransition(row.status, input.to, transitionContext(actor, resource));
     if (!verdict.ok) {

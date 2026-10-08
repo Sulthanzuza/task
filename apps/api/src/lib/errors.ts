@@ -59,6 +59,21 @@ export class InvalidTransitionError extends AppError {
   }
 }
 
+/**
+ * The task moved while somebody was reading a confirmation dialog.
+ *
+ * Distinct from InvalidTransitionError because the two need different
+ * answers: an invalid transition is a mistake to explain, while this one is
+ * nobody's mistake and the client should refresh and show what happened.
+ * 409, and the details carry enough to say who and what.
+ */
+export class TaskChangedError extends AppError {
+  constructor(message: string, details: { currentStatus: string; byName: string | null }) {
+    super(409, ERROR_CODES.TASK_CHANGED, message, details);
+    this.name = 'TaskChangedError';
+  }
+}
+
 export class PayloadTooLargeError extends AppError {
   constructor(message = 'That file is too large.') {
     super(413, ERROR_CODES.PAYLOAD_TOO_LARGE, message);

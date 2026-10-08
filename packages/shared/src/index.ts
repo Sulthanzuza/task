@@ -1,5 +1,6 @@
 export * from './enums';
 export * from './workflow';
+export * from './transitions';
 export * from './metrics';
 export * from './taskKey';
 export * from './realtime';

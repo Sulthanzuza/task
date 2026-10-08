@@ -216,6 +216,23 @@ export async function writeActivity(tx: Db, rows: ActivityRow[], now: Date): Pro
     .where(inArray(tasks.id, taskIds));
 }
 
+/**
+ * Who last changed this task's status, for telling somebody their
+ * confirmation is out of date. Returns null when the only history is the
+ * creation, which is the ordinary case for a task nobody has touched.
+ */
+export async function lastStatusActorName(handle: Db, taskId: string): Promise<string | null> {
+  const [row] = await handle
+    .select({ name: users.name })
+    .from(taskActivity)
+    .innerJoin(users, eq(users.id, taskActivity.actorId))
+    .where(and(eq(taskActivity.taskId, taskId), eq(taskActivity.action, 'task.transitioned')))
+    .orderBy(desc(taskActivity.createdAt))
+    .limit(1);
+
+  return row?.name ?? null;
+}
+
 export async function setLabels(tx: Db, taskId: string, labelIds: string[]): Promise<void> {
   await tx.delete(taskLabels).where(eq(taskLabels.taskId, taskId));
   if (labelIds.length === 0) return;

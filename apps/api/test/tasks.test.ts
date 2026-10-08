@@ -68,9 +68,18 @@ describe('creating a task', () => {
 
     const keys = responses.map((r) => r.body.key as string);
     expect(new Set(keys).size).toBe(10);
-    expect([...keys].sort()).toEqual(
-      ['ERP-1', 'ERP-10', 'ERP-2', 'ERP-3', 'ERP-4', 'ERP-5', 'ERP-6', 'ERP-7', 'ERP-8', 'ERP-9'],
-    );
+    expect([...keys].sort()).toEqual([
+      'ERP-1',
+      'ERP-10',
+      'ERP-2',
+      'ERP-3',
+      'ERP-4',
+      'ERP-5',
+      'ERP-6',
+      'ERP-7',
+      'ERP-8',
+      'ERP-9',
+    ]);
   });
 
   it('refuses a title that is too short', async () => {
@@ -108,18 +117,129 @@ describe('the task lifecycle', () => {
   it('runs the whole way from assigned to completed', async () => {
     const task = await assignedTask();
     const move = (user: typeof fx.member, body: Record<string, unknown>) =>
-      as(harness.app, user).post('/api/v1/tasks/' + task.id + '/transition').send(body);
+      as(harness.app, user)
+        .post('/api/v1/tasks/' + task.id + '/transition')
+        .send(body);
 
-    expect((await move(fx.member, { to: 'IN_PROGRESS' }).expect(200)).body.status).toBe('IN_PROGRESS');
-    expect(
-      (await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200)).body.status,
-    ).toBe('READY_FOR_REVIEW');
-    expect((await move(fx.reviewer, { to: 'IN_REVIEW' }).expect(200)).body.status).toBe('IN_REVIEW');
+    expect((await move(fx.member, { to: 'IN_PROGRESS' }).expect(200)).body.status).toBe(
+      'IN_PROGRESS',
+    );
+    expect((await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200)).body.status).toBe(
+      'READY_FOR_REVIEW',
+    );
+    expect((await move(fx.reviewer, { to: 'IN_REVIEW' }).expect(200)).body.status).toBe(
+      'IN_REVIEW',
+    );
 
     const completed = await move(fx.reviewer, { to: 'COMPLETED' }).expect(200);
     expect(completed.body.status).toBe('COMPLETED');
     expect(completed.body.progress).toBe(100);
     expect(completed.body.completedAt).not.toBeNull();
+  });
+
+  /*
+   * The confirmation dialog describes one specific move. expectedStatus is how
+   * it says which one, so that a dialog somebody left open for a minute cannot
+   * apply its action to a task that has moved on since.
+   */
+  it('refuses a confirmation that was made against an older status', async () => {
+    const task = await assignedTask();
+
+    // The member starts it, which is what the lead's open dialog does not know.
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({ to: 'IN_PROGRESS', expectedStatus: 'ASSIGNED' })
+      .expect(200);
+
+    const stale = await as(harness.app, fx.lead)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({ to: 'BACKLOG', expectedStatus: 'ASSIGNED' })
+      .expect(409);
+
+    expect(stale.body.error.code).toBe('TASK_CHANGED');
+    // Enough to say what happened without a second request to find out.
+    expect(stale.body.error.message).toContain(fx.member.name);
+    expect(stale.body.error.message).toContain('In progress');
+    expect(stale.body.error.details.currentStatus).toBe('IN_PROGRESS');
+
+    // And nothing was applied.
+    const after = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
+    expect(after.body.status).toBe('IN_PROGRESS');
+  });
+
+  it('refuses a stale confirmation even when the move would otherwise be legal', async () => {
+    /*
+     * The case a plain workflow check cannot catch: two reviewers look at a
+     * Ready-for-review task, one starts the review, and the other's open
+     * dialog says "From Ready for review to Completed". Approving from
+     * In review is allowed by the table, so without expectedStatus the second
+     * click would quietly succeed against a state nobody confirmed.
+     */
+    const task = await assignedTask();
+    const move = (user: typeof fx.member, body: Record<string, unknown>) =>
+      as(harness.app, user)
+        .post('/api/v1/tasks/' + task.id + '/transition')
+        .send(body);
+
+    await move(fx.member, { to: 'IN_PROGRESS' }).expect(200);
+    await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200);
+    await move(fx.reviewer, { to: 'IN_REVIEW' }).expect(200);
+
+    const stale = await move(fx.lead, { to: 'COMPLETED', expectedStatus: 'READY_FOR_REVIEW' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('TASK_CHANGED');
+
+    // Still In review: the approval was not applied behind the reviewer's back.
+    const after = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
+    expect(after.body.status).toBe('IN_REVIEW');
+  });
+
+  it('accepts a transition with a matching expected status, and one without it at all', async () => {
+    const task = await assignedTask();
+
+    const confirmed = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({ to: 'IN_PROGRESS', expectedStatus: 'ASSIGNED' })
+      .expect(200);
+    expect(confirmed.body.status).toBe('IN_PROGRESS');
+
+    // Omitting it stays valid, so a script or an older client is not broken.
+    const unchecked = await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({ to: 'READY_FOR_REVIEW' })
+      .expect(200);
+    expect(unchecked.body.status).toBe('READY_FOR_REVIEW');
+  });
+
+  it('posts the optional comment that came with a confirmation', async () => {
+    const task = await assignedTask();
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({ to: 'IN_PROGRESS', expectedStatus: 'ASSIGNED' })
+      .expect(200);
+
+    await as(harness.app, fx.member)
+      .post('/api/v1/tasks/' + task.id + '/transition')
+      .send({
+        to: 'READY_FOR_REVIEW',
+        expectedStatus: 'IN_PROGRESS',
+        comment: 'The migration is in a separate commit.',
+      })
+      .expect(200);
+
+    // Comments are read through the timeline, which is where they are shown.
+    const timeline = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id + '/timeline')
+      .expect(200);
+
+    const bodies = timeline.body.items
+      .filter((entry: { kind: string }) => entry.kind === 'comment')
+      .map((entry: { body: string }) => entry.body);
+    expect(bodies).toContain('The migration is in a separate commit.');
   });
 
   it('never lets review be skipped, whoever is asking', async () => {
@@ -179,7 +299,11 @@ describe('the task lifecycle', () => {
 
     const blocked = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/transition')
-      .send({ to: 'BLOCKED', blockedReason: 'Waiting on the client', blockerType: 'WAITING_ON_CLIENT' })
+      .send({
+        to: 'BLOCKED',
+        blockedReason: 'Waiting on the client',
+        blockerType: 'WAITING_ON_CLIENT',
+      })
       .expect(200);
 
     expect(blocked.body.status).toBe('BLOCKED');
@@ -199,7 +323,9 @@ describe('the task lifecycle', () => {
   it('requires a comment when changes are requested, and keeps it on the timeline', async () => {
     const task = await assignedTask();
     const move = (user: typeof fx.member, body: Record<string, unknown>) =>
-      as(harness.app, user).post('/api/v1/tasks/' + task.id + '/transition').send(body);
+      as(harness.app, user)
+        .post('/api/v1/tasks/' + task.id + '/transition')
+        .send(body);
 
     await move(fx.member, { to: 'IN_PROGRESS' }).expect(200);
     await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200);
@@ -222,7 +348,9 @@ describe('the task lifecycle', () => {
   it('lets only a lead reopen a completed task, and drops the completion stamp', async () => {
     const task = await assignedTask();
     const move = (user: typeof fx.member, body: Record<string, unknown>) =>
-      as(harness.app, user).post('/api/v1/tasks/' + task.id + '/transition').send(body);
+      as(harness.app, user)
+        .post('/api/v1/tasks/' + task.id + '/transition')
+        .send(body);
 
     await move(fx.member, { to: 'IN_PROGRESS' }).expect(200);
     await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200);
@@ -230,7 +358,10 @@ describe('the task lifecycle', () => {
 
     await move(fx.member, { to: 'IN_PROGRESS', comment: 'Let me try' }).expect(409);
 
-    const reopened = await move(fx.lead, { to: 'IN_PROGRESS', comment: 'The bug came back.' }).expect(200);
+    const reopened = await move(fx.lead, {
+      to: 'IN_PROGRESS',
+      comment: 'The bug came back.',
+    }).expect(200);
     expect(reopened.body.status).toBe('IN_PROGRESS');
     expect(reopened.body.completedAt).toBeNull();
     expect(reopened.body.progress).toBe(90);
@@ -239,17 +370,25 @@ describe('the task lifecycle', () => {
   it('only offers the buttons the server will accept', async () => {
     const task = await assignedTask();
 
-    const forMember = await as(harness.app, fx.member).get('/api/v1/tasks/' + task.id).expect(200);
+    const forMember = await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
     expect(forMember.body.availableTransitions.map((t: { to: string }) => t.to).sort()).toEqual([
       'BLOCKED',
       'IN_PROGRESS',
     ]);
 
-    const forReviewer = await as(harness.app, fx.reviewer).get('/api/v1/tasks/' + task.id).expect(200);
+    const forReviewer = await as(harness.app, fx.reviewer)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
     expect(forReviewer.body.availableTransitions).toEqual([]);
 
-    const forLead = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
-    expect(forLead.body.availableTransitions.map((t: { to: string }) => t.to)).toContain('CANCELLED');
+    const forLead = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
+    expect(forLead.body.availableTransitions.map((t: { to: string }) => t.to)).toContain(
+      'CANCELLED',
+    );
   });
 });
 
@@ -267,7 +406,8 @@ describe('the activity log', () => {
       .expect(200);
 
     const updates = timeline.body.items.filter(
-      (e: { kind: string; action?: string }) => e.kind === 'activity' && e.action === 'task.updated',
+      (e: { kind: string; action?: string }) =>
+        e.kind === 'activity' && e.action === 'task.updated',
     );
     const fields = updates.map((u: { field: string }) => u.field).sort();
     expect(fields).toEqual(['dueDate', 'priority']);
@@ -279,7 +419,9 @@ describe('the activity log', () => {
 
   it('moves last activity forward on every change', async () => {
     const task = await createTask(harness.app, fx.lead, fx.project.id);
-    const before = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
+    const before = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     await as(harness.app, fx.lead)
@@ -287,7 +429,9 @@ describe('the activity log', () => {
       .send({ title: 'A different title' })
       .expect(200);
 
-    const after = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
+    const after = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
     expect(new Date(after.body.lastActivityAt).getTime()).toBeGreaterThan(
       new Date(before.body.lastActivityAt).getTime(),
     );
@@ -312,7 +456,9 @@ describe('the activity log', () => {
   });
 
   it('orders the timeline oldest first', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/transition')
       .send({ to: 'IN_PROGRESS' })
@@ -330,7 +476,9 @@ describe('the activity log', () => {
 
 describe('assignment and handover', () => {
   it('requires a handover note when work changes hands', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
 
     await as(harness.app, fx.lead)
       .post('/api/v1/tasks/' + task.id + '/assign')
@@ -339,7 +487,10 @@ describe('assignment and handover', () => {
 
     const reassigned = await as(harness.app, fx.lead)
       .post('/api/v1/tasks/' + task.id + '/assign')
-      .send({ assigneeId: fx.reviewer.id, handoverNote: 'Arun is picking this up while Rahul is away.' })
+      .send({
+        assigneeId: fx.reviewer.id,
+        handoverNote: 'Arun is picking this up while Rahul is away.',
+      })
       .expect(200);
 
     expect(reassigned.body.assignee.name).toBe('Arun');
@@ -358,7 +509,9 @@ describe('assignment and handover', () => {
   });
 
   it('does not let a member assign work', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/assign')
       .send({ assigneeId: fx.reviewer.id, handoverNote: 'Taking myself off this' })
@@ -369,7 +522,9 @@ describe('assignment and handover', () => {
 describe('lookup by key', () => {
   it('accepts the task key as well as the id', async () => {
     const task = await createTask(harness.app, fx.lead, fx.project.id);
-    const byKey = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.key).expect(200);
+    const byKey = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key)
+      .expect(200);
     expect(byKey.body.id).toBe(task.id);
   });
 
@@ -391,23 +546,35 @@ describe('soft delete', () => {
   it('hides a deleted task from the list and from lookup', async () => {
     const task = await createTask(harness.app, fx.lead, fx.project.id);
 
-    await as(harness.app, fx.lead).delete('/api/v1/tasks/' + task.id).expect(204);
-    await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(404);
+    await as(harness.app, fx.lead)
+      .delete('/api/v1/tasks/' + task.id)
+      .expect(204);
+    await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(404);
 
     const list = await as(harness.app, fx.lead).get('/api/v1/tasks').expect(200);
     expect(list.body.items.map((t: { id: string }) => t.id)).not.toContain(task.id);
   });
 
   it('does not let a member delete a task', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
-    await as(harness.app, fx.member).delete('/api/v1/tasks/' + task.id).expect(403);
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
+    await as(harness.app, fx.member)
+      .delete('/api/v1/tasks/' + task.id)
+      .expect(403);
   });
 });
 
 describe('dependencies', () => {
   it('refuses a dependency that would create a loop', async () => {
-    const a = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task A needs doing' });
-    const b = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task B needs doing' });
+    const a = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task A needs doing',
+    });
+    const b = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task B needs doing',
+    });
 
     await as(harness.app, fx.lead)
       .post('/api/v1/tasks/' + a.id + '/dependencies')
@@ -423,9 +590,15 @@ describe('dependencies', () => {
   });
 
   it('refuses a longer loop', async () => {
-    const a = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task A needs doing' });
-    const b = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task B needs doing' });
-    const c = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task C needs doing' });
+    const a = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task A needs doing',
+    });
+    const b = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task B needs doing',
+    });
+    const c = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task C needs doing',
+    });
 
     const link = (from: string, to: string) =>
       as(harness.app, fx.lead)
@@ -446,18 +619,26 @@ describe('dependencies', () => {
   });
 
   it('shows both directions on the task', async () => {
-    const a = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task A needs doing' });
-    const b = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Task B needs doing' });
+    const a = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task A needs doing',
+    });
+    const b = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Task B needs doing',
+    });
 
     await as(harness.app, fx.lead)
       .post('/api/v1/tasks/' + a.id + '/dependencies')
       .send({ dependsOnTaskId: b.id })
       .expect(204);
 
-    const detailA = await as(harness.app, fx.lead).get('/api/v1/tasks/' + a.id).expect(200);
+    const detailA = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + a.id)
+      .expect(200);
     expect(detailA.body.dependsOn[0].key).toBe(b.key);
 
-    const detailB = await as(harness.app, fx.lead).get('/api/v1/tasks/' + b.id).expect(200);
+    const detailB = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + b.id)
+      .expect(200);
     expect(detailB.body.blocks[0].key).toBe(a.key);
   });
 });
@@ -468,7 +649,9 @@ describe('the filters behind the dashboard cards', () => {
    * mean the same thing as the metric, the card lies about what it will show.
    */
   async function seedStatuses() {
-    const backlog = await createTask(harness.app, fx.lead, fx.project.id, { title: 'Still in the backlog' });
+    const backlog = await createTask(harness.app, fx.lead, fx.project.id, {
+      title: 'Still in the backlog',
+    });
     const assigned = await createTask(harness.app, fx.lead, fx.project.id, {
       title: 'Assigned and waiting',
       assigneeId: fx.member.id,
@@ -546,7 +729,9 @@ describe('the filters behind the dashboard cards', () => {
       reviewerId: fx.reviewer.id,
     });
     const move = (user: typeof fx.member, body: Record<string, unknown>) =>
-      as(harness.app, user).post('/api/v1/tasks/' + task.id + '/transition').send(body);
+      as(harness.app, user)
+        .post('/api/v1/tasks/' + task.id + '/transition')
+        .send(body);
 
     await move(fx.member, { to: 'IN_PROGRESS' }).expect(200);
     await move(fx.member, { to: 'READY_FOR_REVIEW' }).expect(200);

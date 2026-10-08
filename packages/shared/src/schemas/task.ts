@@ -174,6 +174,13 @@ export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export const transitionTaskSchema = z
   .object({
     to: taskStatusSchema,
+    /*
+     * The status the person was looking at when they confirmed. Optional,
+     * because a script or a test may not care, but the UI always sends it:
+     * a confirmation dialog describes one specific move, and if the task has
+     * moved since, that move is not the one that would be applied.
+     */
+    expectedStatus: taskStatusSchema.optional(),
     comment: z.string().trim().min(1).max(10_000).optional(),
     blockedReason: z.string().trim().min(3, 'Say what the task is waiting on').max(2000).optional(),
     blockerType: blockerTypeSchema.optional(),

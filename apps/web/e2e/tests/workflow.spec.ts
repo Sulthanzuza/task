@@ -70,10 +70,19 @@ test('blocking demands a reason and a type, then shows up without a reload', asy
 
   await page.getByRole('button', { name: 'Block', exact: true }).click();
 
-  const dialog = page.getByRole('dialog', { name: /Move to Blocked/i });
+  /*
+   * Blocking asks for a reason, and that ask IS its confirmation: there is no
+   * second "are you sure" on top of it. The dialog is named after the question
+   * it puts, so the title carries the task key.
+   */
+  const dialog = page.getByRole('dialog', { name: new RegExp('Block ' + task.key) });
   await expect(dialog).toBeVisible();
+  await expect(
+    page.getByRole('dialog'),
+    'only one dialog: the reason box is the confirmation',
+  ).toHaveCount(1);
 
-  const confirm = dialog.getByRole('button', { name: 'Confirm' });
+  const confirm = dialog.getByRole('button', { name: 'Block', exact: true });
   await expect(confirm, 'Confirm must start disabled').toBeDisabled();
 
   // A blocker type alone is not enough.

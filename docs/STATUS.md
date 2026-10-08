@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-07. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.2.0-rc1**.
+Last updated: 2026-10-08. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.1.1** (which is newer than `v1.2.0-rc1` and contains it; the tag was asked for by name, and the number reads as older than the code it ships).
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -61,7 +61,8 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `be4c62a` | render-rc4: one-time bootstrap of the first administrator from `BOOTSTRAP_ADMIN_EMAIL` on an empty database, with a single-use set-password link in the log |
 | `d10211c` | Group tasks (v1.1.0-rc1): one piece of work given to several people, each with their own copy. See the section below |
 | `f132915` | `CHANGELOG.md` entry for v1.1.0-rc1 |
-| _this one_ | Reports (v1.2.0-rc1): `/reports` for leads and admins, nightly `daily_snapshots`, CSV and XLSX export, and the four task-list date filters the drill-downs needed. See the section below |
+| `8a55a18` | Reports (v1.2.0-rc1): `/reports` for leads and admins, nightly `daily_snapshots`, CSV and XLSX export, and the four task-list date filters the drill-downs needed. See the section below |
+| _this one_ | Confirming status changes (v1.1.1): every transition asks first, from every entry point, and a confirmation can no longer be applied to a task that moved on. See the section below |
 
 ### The design system, applied (three design prompts)
 
@@ -380,6 +381,74 @@ Prompt 18's other half — search, saved views and bulk actions — is not
 started, and TanStack Table is not yet a dependency. The reporting part is
 done (API, UI and tests); the prompt as a whole is PARTIAL.
 
+## Confirming status changes (v1.1.1)
+
+Every transition is confirmed before it is sent, from all three entry points:
+the detail page buttons (including the mobile sticky bar), a board
+drag-and-drop, and a My Tasks quick action. One component,
+`ConfirmTransitionDialog`, so a drag onto Blocked and a click on Block collect
+exactly the same things.
+
+### The words come from the workflow table
+
+A confirmation earns its click only if it says something the button did not.
+`packages/shared/src/transitions.ts` derives the sentences from `TRANSITIONS`
+and from `transitionEffects` — the function that actually changes the row —
+rather than writing them per button in the UI, where they would drift the
+first time a rule changed. It is a pure function, so the whole set reads as a
+table in `transitions.test.ts`.
+
+What that buys, concretely:
+
+- Nobody is told they will be notified of their own action, because the API
+  excludes the actor (`recipients.ts` skips `candidate.userId === actorId`).
+  The dialog had to know that or it would lie to half the people using it.
+- Submitting with no reviewer named says the team lead will get it, which is
+  the fallback `notifyTransitioned` really applies.
+- Reopening says progress drops from 100% to 90%, because `transitionEffects`
+  does that and the dialog is the only place anybody could learn it first.
+
+### No stacked dialogs
+
+Blocked already asks for a reason and a type; Changes requested and Cancelled
+already ask for a comment. Those keep their one dialog — the reason box *is*
+the confirmation — and gain the from/to line and the consequence sentences.
+Submitting and approving get an optional comment, which the service already
+posts as a real comment alongside the change.
+
+Focus goes to Cancel, so a stray Return reaches the safe answer; where a field
+must be filled in, the field takes it instead, because focusing Cancel on a
+dialog that cannot be confirmed without typing only means tabbing back.
+
+### A confirmation applies to the move it described
+
+This was a real defect, not a hypothetical. Two reviewers open a
+Ready-for-review task; one starts the review; the other's dialog still says
+"From Ready for review to Completed". Approving from In review is allowed by
+the table, so the second click used to succeed against a state nobody had
+confirmed: the dialog described one move and the server performed another.
+
+The UI sends `expectedStatus` — the status that was on screen — and
+`transitionTask` refuses the change under the row lock if the task has moved
+since: 409 `TASK_CHANGED`, with the last transitioning actor's name and the
+current status in the message and the details. The old action is not applied,
+the client refetches, and the next click is made against the real status.
+The field is optional, so scripts and older clients are unaffected.
+
+### The board shows what it is asking about
+
+A dropped card sits in the target column, drawn as unfinished, while the
+dialog is open — nothing has been sent, and `byStatus` places it there from
+`pending` alone. Cancelling clears `pending` and the card snaps back, with no
+request made. That last part is what the e2e tests assert by counting
+requests: a dialog that cancels in the UI while the request is already on its
+way is worse than no dialog.
+
+### Not affected
+
+Group parents, whose status is derived and which have no transition buttons,
+and the progress slider.
+
 ## Accepted deviations
 
 These are decided, not oversights. Do not "fix" them without asking.
@@ -500,15 +569,15 @@ is dropped and rebuilt every run.
 Other commands: `pnpm build`, `pnpm smoke` (against a deployed site, with a dedicated
 smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset`.
 
-## Test counts as of 2026-10-07
+## Test counts as of 2026-10-08
 
 | Suite | Files | Tests |
 |-------|-------|-------|
-| `packages/shared` unit | 1 | 23 |
+| `packages/shared` unit (workflow, transition copy) | 2 | 50 |
 | `apps/web` unit (tokens, contrast, wording) | 2 | 51 |
-| `apps/api` integration | 29 | 481 |
-| `apps/web` end-to-end (`pnpm e2e`, email on) | 16 | 66 |
-| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 16 | 64, and 2 mailbox tests skipped |
+| `apps/api` integration | 29 | 485 |
+| `apps/web` end-to-end (`pnpm e2e`, email on) | 17 | 73 |
+| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 17 | 71, and 2 mailbox tests skipped |
 
 The axe sweep covers eleven screens in four themes, Reports included, which
 is forty-four runs of a slow check in one test. Its budget is for the whole

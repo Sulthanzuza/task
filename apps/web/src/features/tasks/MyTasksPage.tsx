@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import type { TaskStatus, TaskSummary } from '@tm/shared';
-import { canTransition } from '@tm/shared';
+import { canTransition, transitionRequest } from '@tm/shared';
 import { Users } from 'lucide-react';
+import { ApiError } from '@/lib/api';
+import { ConfirmTransitionDialog } from './ConfirmTransitionDialog';
 import { useTaskList, useTransitionTask } from './api';
 import { useAuth } from '@/features/auth/AuthContext';
 import {
@@ -251,6 +255,9 @@ function quickActionFor(task: TaskSummary): { label: string; to: TaskStatus } | 
 function TaskRow({ task }: { task: TaskSummary }) {
   const transition = useTransitionTask(task.id);
   const { user } = useAuth();
+  // A quick action is still a status change, so it asks first like every other.
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const candidate = quickActionFor(task);
 
@@ -358,13 +365,48 @@ function TaskRow({ task }: { task: TaskSummary }) {
               size="sm"
               variant="outline"
               disabled={transition.isPending}
-              onClick={() => transition.mutate({ to: quickAction.to })}
+              onClick={() => setConfirming(true)}
             >
               {quickAction.label}
             </Button>
           ) : null}
         </span>
       </div>
+
+      {confirming && quickAction && user ? (
+        <ConfirmTransitionDialog
+          task={task}
+          to={quickAction.to}
+          actorId={user.id}
+          busy={transition.isPending}
+          error={error}
+          onCancel={() => {
+            setConfirming(false);
+            setError(null);
+          }}
+          onConfirm={(values) =>
+            transition.mutate(
+              transitionRequest({
+                to: quickAction.to,
+                expectedStatus: task.status,
+                ...values,
+              }) as Parameters<typeof transition.mutate>[0],
+              {
+                onSuccess: () => setConfirming(false),
+                onError: (err) => {
+                  // Somebody else moved it: close, say what happened, apply nothing.
+                  if (err instanceof ApiError && err.code === 'TASK_CHANGED') {
+                    setConfirming(false);
+                    toast.error(err.message);
+                    return;
+                  }
+                  setError(err instanceof ApiError ? err.message : 'That change failed.');
+                },
+              },
+            )
+          }
+        />
+      ) : null}
     </li>
   );
 }

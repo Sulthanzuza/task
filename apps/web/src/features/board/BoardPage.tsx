@@ -22,7 +22,7 @@ import {
 } from '@dnd-kit/core';
 import { Ban, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import type { TaskDetail, TaskStatus, TaskSummary, TransitionRequirement } from '@tm/shared';
+import type { TaskDetail, TaskStatus, TaskSummary } from '@tm/shared';
 import {
   BLOCKER_TYPE_LABELS,
   BOARD_COLUMNS,
@@ -31,6 +31,7 @@ import {
   canTransition,
   priorityColor,
   statusColor,
+  transitionRequest,
 } from '@tm/shared';
 import { useBoardSummary, useTaskList, useTransitionTask } from '@/features/tasks/api';
 import { useProjects } from '@/features/team/api';
@@ -38,7 +39,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { ApiError, api } from '@/lib/api';
 import { Button, Card, EmptyState, Select, Skeleton } from '@/components/ui/primitives';
 import { DueBadge, PriorityIcon, ProgressBar, UserAvatar } from '@/components/common/badges';
-import { TransitionDialog } from '@/features/tasks/TransitionDialog';
+import { ConfirmTransitionDialog } from '@/features/tasks/ConfirmTransitionDialog';
 import { cn } from '@/lib/utils';
 
 /**
@@ -71,11 +72,8 @@ export function BoardPage() {
   const tasks = useMemo(() => pages?.flatMap((page) => page.items) ?? [], [pages]);
 
   const [dragging, setDragging] = useState<TaskSummary | null>(null);
-  const [pending, setPending] = useState<{
-    task: TaskSummary;
-    to: TaskStatus;
-    requires: TransitionRequirement[];
-  } | null>(null);
+  const [pending, setPending] = useState<{ task: TaskSummary; to: TaskStatus } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const transition = useTransitionTask(pending?.task.id);
 
@@ -92,9 +90,19 @@ export function BoardPage() {
   const byStatus = useMemo(() => {
     const grouped = new Map<TaskStatus, TaskSummary[]>();
     for (const status of BOARD_COLUMNS) grouped.set(status, []);
-    for (const task of tasks) grouped.get(task.status)?.push(task);
+
+    for (const task of tasks) {
+      /*
+       * A drop waiting to be confirmed shows in the column it was dropped on,
+       * so the dialog is asking about something the board already shows.
+       * Nothing has been sent: cancelling puts the card back by clearing this.
+       */
+      const status = pending && task.id === pending.task.id ? pending.to : task.status;
+      grouped.get(status)?.push(task);
+    }
+
     return grouped;
-  }, [tasks]);
+  }, [tasks, pending]);
 
   /** The workflow's verdict for this actor moving this card here. */
   function verdictFor(task: TaskSummary, to: TaskStatus) {
@@ -108,13 +116,26 @@ export function BoardPage() {
   }
 
   async function runTransition(task: TaskSummary, to: TaskStatus, extra: Record<string, unknown>) {
+    setError(null);
     try {
-      await api.post<TaskDetail>('/tasks/' + task.id + '/transition', { to, ...extra });
+      await api.post<TaskDetail>(
+        '/tasks/' + task.id + '/transition',
+        transitionRequest({ to, expectedStatus: task.status, ...extra }),
+      );
       await query.refetch();
       setPending(null);
-    } catch (error) {
-      // The card snaps back because the cache never changed.
-      toast.error(error instanceof ApiError ? error.message : 'That move failed.');
+    } catch (failure) {
+      /*
+       * Either way the card snaps back, because the cache never changed and
+       * clearing pending puts it in the column the server says it is in. A
+       * stale drop is nobody's mistake, so it refetches and says what
+       * happened rather than leaving the old status on screen.
+       */
+      const message = failure instanceof ApiError ? failure.message : 'That move failed.';
+      if (failure instanceof ApiError && failure.code === 'TASK_CHANGED') {
+        await query.refetch();
+      }
+      toast.error(message);
       setPending(null);
     }
   }
@@ -133,13 +154,8 @@ export function BoardPage() {
       return;
     }
 
-    if (verdict.requires && verdict.requires.length > 0) {
-      // Ask first: the card stays where it was until the dialog is confirmed.
-      setPending({ task, to, requires: verdict.requires });
-      return;
-    }
-
-    void runTransition(task, to, {});
+    // Every drop is confirmed, whether or not the workflow needs anything typed.
+    setPending({ task, to });
   }
 
   return (
@@ -231,6 +247,7 @@ export function BoardPage() {
                 tasks={byStatus.get(status) ?? []}
                 total={board.data?.counts[status]}
                 dragging={dragging}
+                pendingId={pending?.task.id ?? null}
                 verdictFor={verdictFor}
               />
             ))}
@@ -240,13 +257,17 @@ export function BoardPage() {
         </DndContext>
       )}
 
-      {pending ? (
-        <TransitionDialog
+      {pending && user ? (
+        <ConfirmTransitionDialog
+          task={pending.task}
           to={pending.to}
-          requires={pending.requires}
+          actorId={user.id}
           busy={transition.isPending}
-          error={null}
-          onCancel={() => setPending(null)}
+          error={error}
+          onCancel={() => {
+            setPending(null);
+            setError(null);
+          }}
           onConfirm={(values) => void runTransition(pending.task, pending.to, values)}
         />
       ) : null}
@@ -259,6 +280,7 @@ function Column({
   tasks,
   total,
   dragging,
+  pendingId,
   verdictFor,
 }: {
   status: TaskStatus;
@@ -266,6 +288,8 @@ function Column({
   /** The server's count; falls back to the cards on screen while it loads. */
   total: number | undefined;
   dragging: TaskSummary | null;
+  /** The card sitting in a column it has not been moved to yet. */
+  pendingId: string | null;
   verdictFor(task: TaskSummary, to: TaskStatus): { ok: boolean; reason?: string };
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: status });
@@ -310,7 +334,7 @@ function Column({
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain px-2 pb-2">
         {tasks.map((task) => (
-          <DraggableCard key={task.id} task={task} />
+          <DraggableCard key={task.id} task={task} pending={task.id === pendingId} />
         ))}
       </div>
     </section>
@@ -441,7 +465,7 @@ function StripButton({
   );
 }
 
-function DraggableCard({ task }: { task: TaskSummary }) {
+function DraggableCard({ task, pending }: { task: TaskSummary; pending?: boolean }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
 
   // dnd-kit types its listeners as a bag of Function, since it does not know
@@ -455,7 +479,16 @@ function DraggableCard({ task }: { task: TaskSummary }) {
     <div
       ref={setNodeRef}
       onPointerDown={startByPointer}
-      className={cn('touch-none', isDragging && 'opacity-40')}
+      /*
+       * A dropped card waiting on its dialog is drawn as unfinished rather
+       * than as arrived: nothing has been sent, and it may yet snap back.
+       */
+      className={cn(
+        'touch-none',
+        isDragging && 'opacity-40',
+        pending && 'opacity-60 outline-2 outline-offset-2 outline-dashed outline-accent',
+      )}
+      aria-busy={pending ? true : undefined}
     >
       <TaskCard
         task={task}

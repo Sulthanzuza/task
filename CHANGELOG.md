@@ -2,6 +2,66 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## v1.1.1 — 2026-10-08
+
+Tagged v1.1.1 as asked, though it is newer than v1.2.0-rc1 and contains it:
+the number reads as older than the code it ships. Nothing depends on tag
+order today, but `git describe` and a sorted tag list will both put this
+behind Reports.
+
+### Added
+
+- **Every status change is confirmed first, from every entry point.** The
+  task detail buttons, the mobile sticky bar, a board drag-and-drop and a My
+  Tasks quick action all open the same dialog, so a drag onto Blocked and a
+  click on Block ask for exactly the same things.
+
+  A confirmation is only worth clicking through if it says something the
+  button did not, so the dialog says what the change will actually do:
+  "Sulthan (reviewer) will be notified", "It leaves Rahul's My Tasks and stops
+  counting as active", "Marks it Completed and sets progress to 100%". The
+  sentences are derived in `packages/shared` from the same workflow table the
+  server validates against, and from `transitionEffects`, which is what
+  really changes the row — so a rule change cannot leave the dialog
+  describing the old behaviour. Submitting below 100% warns and says the
+  figure; it is a caution, never a refusal.
+
+  Nobody is told they will be notified of their own action, because the API
+  does not notify the actor. Submitting with no reviewer named says the team
+  lead will get it, which is what the API actually does.
+
+  Transitions that already asked for something — Blocked wants a reason and a
+  type, Changes requested and Cancelled want a comment — keep that one
+  dialog. The reason box *is* the confirmation, and stacking a second would
+  mean clicking through the same decision twice. Submitting and approving
+  gain an optional comment, posted as a comment with the change.
+
+  Cancel takes the focus, so a stray Return reaches the safe answer. Escape
+  and a click outside both cancel, and the confirming button is disabled
+  while the request is in flight so a double click cannot send it twice.
+
+- **A board drop waits in the column it was dropped on.** The card shows
+  there in a pending state while the dialog is open, so the question is about
+  something the board already shows; cancelling snaps it back and sends
+  nothing at all.
+
+### Fixed
+
+- **A confirmation could be applied to a task that had moved on.** Two
+  reviewers open a Ready-for-review task, one starts the review, and the
+  other's dialog still says "From Ready for review to Completed". Approving
+  from In review is allowed by the workflow table, so the second click
+  succeeded against a state nobody had confirmed — the dialog described one
+  move and the server performed another.
+
+  The UI now sends `expectedStatus`, the status that was on screen, and the
+  server refuses the change under the row lock if the task has moved since:
+  409 `TASK_CHANGED`, with a message naming who moved it and where it is now
+  ("This task was just updated by Arun, now In review."). The old action is
+  not applied, the page refreshes, and the next click is made against the
+  real status. `expectedStatus` is optional, so a script or an older client
+  still works.
+
 ## v1.2.0-rc1 — 2026-10-07
 
 The reporting half of prompt 18. Migration `0007` runs on startup.

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Eye, EyeOff, Plus, X } from 'lucide-react';
-import type { TaskDetail, TaskStatus, TimelineEntry, TransitionRequirement } from '@tm/shared';
-import { STATUS_LABELS, statusColor } from '@tm/shared';
+import type { TaskDetail, TaskStatus, TimelineEntry } from '@tm/shared';
+import { STATUS_LABELS, statusColor, transitionRequest } from '@tm/shared';
 import {
   isPendingComment,
   useAddComment,
@@ -43,7 +43,7 @@ import {
   RelativeTime,
 } from '@/components/common/badges';
 import { formatDate, formatDateTime, formatHours } from '@/lib/utils';
-import { TransitionDialog } from './TransitionDialog';
+import { ConfirmTransitionDialog } from './ConfirmTransitionDialog';
 import { PersonPicker } from './PersonPicker';
 import { GroupLink, GroupPeople } from './GroupPeople';
 import { describeActivity } from './activityText';
@@ -266,10 +266,8 @@ function emphasis(to: TaskStatus): 'primary' | 'danger' | 'secondary' {
  */
 function TransitionBar({ task }: { task: TaskDetail }) {
   const transition = useTransitionTask(task.id);
-  const [pending, setPending] = useState<{
-    to: TaskStatus;
-    requires: TransitionRequirement[];
-  } | null>(null);
+  const { user } = useAuth();
+  const [pending, setPending] = useState<TaskStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (task.availableTransitions.length === 0) {
@@ -282,9 +280,24 @@ function TransitionBar({ task }: { task: TaskDetail }) {
 
   const run = (to: TaskStatus, extra: Record<string, unknown> = {}) => {
     setError(null);
-    transition.mutate({ to, ...extra } as Parameters<typeof transition.mutate>[0], {
+    const body = transitionRequest({ to, expectedStatus: task.status, ...extra });
+
+    transition.mutate(body as Parameters<typeof transition.mutate>[0], {
       onSuccess: () => setPending(null),
-      onError: (err) => setError(err instanceof ApiError ? err.message : 'That change failed.'),
+      onError: (err) => {
+        /*
+         * Somebody else moved the task while this dialog was open. The old
+         * action is not applied: the dialog closes, the page refetches, and
+         * the message says what actually happened, so the next click is made
+         * against the real status.
+         */
+        if (err instanceof ApiError && err.code === 'TASK_CHANGED') {
+          setPending(null);
+          setError(err.message);
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : 'That change failed.');
+      },
     });
   };
 
@@ -313,11 +326,7 @@ function TransitionBar({ task }: { task: TaskDetail }) {
                 size="sm"
                 variant={weight === 'secondary' ? 'outline' : weight}
                 disabled={transition.isPending}
-                onClick={() =>
-                  option.requires.length > 0
-                    ? setPending({ to: option.to, requires: option.requires })
-                    : run(option.to)
-                }
+                onClick={() => setPending(option.to)}
               >
                 {option.label}
               </Button>
@@ -331,17 +340,18 @@ function TransitionBar({ task }: { task: TaskDetail }) {
         </p>
       ) : null}
 
-      {pending ? (
-        <TransitionDialog
-          to={pending.to}
-          requires={pending.requires}
+      {pending && user ? (
+        <ConfirmTransitionDialog
+          task={task}
+          to={pending}
+          actorId={user.id}
           busy={transition.isPending}
           error={error}
           onCancel={() => {
             setPending(null);
             setError(null);
           }}
-          onConfirm={(values) => run(pending.to, values)}
+          onConfirm={(values) => run(pending, values)}
         />
       ) : null}
     </div>

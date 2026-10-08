@@ -202,6 +202,23 @@ test('open dialogs and menus pass axe', async ({ browser, api }) => {
       await page.getByRole('button', { name: 'Cancel' }).first().click();
     }
 
+    /*
+     * The plain confirmation, which draws differently: status pills, a list of
+     * consequences, an optional comment box, and the amber caution panel when
+     * work is submitted unfinished. The caution is the part worth scanning —
+     * amber text on an amber tint is the pairing most likely to fall short of
+     * 4.5:1, and it is a solid colour, so axe can actually measure it.
+     */
+    await setTheme(page, theme);
+    await page.goto('/tasks/' + taskKey);
+    const submit = page.getByRole('button', { name: 'Submit for review', exact: true }).first();
+    if (await submit.isVisible().catch(() => false)) {
+      await submit.click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      found.push(...(await scan(page, 'confirm transition dialog in ' + theme)));
+      await page.keyboard.press('Escape');
+    }
+
     await context.close();
   }
 

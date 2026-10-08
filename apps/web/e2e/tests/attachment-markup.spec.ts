@@ -10,10 +10,17 @@ import { apiAs, expect, signIn, test, USERS } from '../fixtures';
  * only after it was already on the task.
  */
 
-/** A real 4x4 PNG, built here so the test owns its own fixture. */
+/**
+ * A real 8x8 PNG: a red and white check, so a drawn arrow shows against it.
+ *
+ * Generated with zlib and checked by the browser rather than typed out. The
+ * first version of this fixture was not a decodable PNG at all, which showed
+ * up as "could not be previewed" and looked at first like a bug in the
+ * pipeline.
+ */
 const PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFUlEQVR42mP8z8Dwn4GRkZGBgYEBAA' +
-  'ZBAwFcBQ8JAAAAAElFTkSuQmCC';
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAHElEQVR42m' +
+  'P4z8AAQhCAxGbALYEhBGHjkaC9HQDxh3+B7FEdogAAAABJRU5ErkJggg==';
 
 async function anyTask(api: Parameters<typeof apiAs>[0]): Promise<TaskSummary> {
   const client = await apiAs(api, USERS.lead);
@@ -82,7 +89,10 @@ test('dropping an image previews it, an arrow is drawn, and the upload is marked
   await editor.getByRole('button', { name: 'Arrow' }).click();
 
   // Draw it across the canvas.
-  const canvas = page.getByTestId('markup-canvas');
+  // The canvas itself, not the scrolling box around it: the image is centred
+  // inside that box, so a drag measured from the box can miss it entirely.
+  const canvas = page.getByTestId('markup-canvas').locator('canvas').first();
+  await expect(canvas).toBeVisible();
   const box = await canvas.boundingBox();
   if (!box) throw new Error('Could not measure the canvas');
 
@@ -107,10 +117,17 @@ test('dropping an image previews it, an arrow is drawn, and the upload is marked
 
   await expect(preview).toBeHidden();
 
-  // On the task, with the badge saying it was drawn on.
-  const row = page.getByRole('listitem').filter({ hasText: 'The failing screen' });
+  /*
+   * On the task, with the badge saying it was drawn on. Scoped to the
+   * attachments panel: the timeline names the file and its description too,
+   * so an unscoped match finds both and cannot say which it meant.
+   */
+  const row = page
+    .getByRole('region', { name: /Attachments/ })
+    .getByRole('listitem')
+    .filter({ hasText: 'The failing screen' });
   await expect(row).toBeVisible();
-  await expect(row.getByText('Edited')).toBeVisible();
+  await expect(row.getByText('Edited', { exact: true })).toBeVisible();
 
   expect(await attachmentCount(api, task.key)).toBe(before + 1);
   expect(problems.all()).toEqual([]);
@@ -160,5 +177,61 @@ test('a file with no description cannot be uploaded', async ({ page, api, proble
     preview.getByText(/still needs a description|Say what this file is for/i).first(),
   ).toBeVisible();
 
+  expect(problems.all()).toEqual([]);
+});
+
+test('every markup tool is named and reachable from the keyboard', async ({
+  page,
+  api,
+  problems,
+}) => {
+  const task = await anyTask(api);
+
+  await signIn(page, USERS.lead);
+  await page.goto('/tasks/' + task.key);
+  await dropImage(page, 'keyboard.png');
+
+  const preview = page.getByRole('dialog', { name: /Attach this file/i });
+  await preview.getByRole('button', { name: 'Edit' }).click();
+
+  const editor = page.getByRole('dialog', { name: 'Mark up the image' });
+  const toolbar = editor.getByRole('toolbar', { name: 'Markup tools' });
+  await expect(toolbar).toBeVisible();
+
+  /*
+   * A canvas says nothing to a screen reader, so the controls around it carry
+   * the whole meaning. Every one needs a name and a focus stop.
+   */
+  for (const name of [
+    'Pen',
+    'Arrow',
+    'Rectangle',
+    'Ellipse',
+    'Text',
+    'Blur an area',
+    'Crop',
+    'Thin stroke',
+    'Medium stroke',
+    'Thick stroke',
+    'Undo',
+    'Redo',
+    'Reset',
+  ]) {
+    const control = editor.getByRole('button', { name, exact: true });
+    await expect(control, name + ' should be on the toolbar').toBeVisible();
+  }
+
+  // The five colours are named too, and say which is chosen.
+  const colours = toolbar.getByRole('button', { name: /^Colour / });
+  await expect(colours).toHaveCount(5);
+  await expect(colours.first()).toHaveAttribute('aria-pressed', 'true');
+
+  // Choosing a tool with the keyboard really chooses it.
+  const arrow = editor.getByRole('button', { name: 'Arrow', exact: true });
+  await arrow.focus();
+  await page.keyboard.press('Enter');
+  await expect(arrow).toHaveAttribute('aria-pressed', 'true');
+
+  await page.keyboard.press('Escape');
   expect(problems.all()).toEqual([]);
 });

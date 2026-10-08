@@ -27,8 +27,15 @@ beforeEach(async () => {
 });
 
 describe('who can be mentioned', () => {
-  it('offers the task’s own team', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id);
+  /*
+   * Since the mention scope narrowed, being on the team is not enough: the
+   * list is the people the task is about. mentionScope.test.ts covers the
+   * rule itself; these tests cover the endpoint around it.
+   */
+  it('offers the people the task is about', async () => {
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
 
     const response = await as(harness.app, fx.lead)
       .get('/api/v1/tasks/' + task.key + '/mentionable')
@@ -36,6 +43,19 @@ describe('who can be mentioned', () => {
 
     const emails = response.body.items.map((person: { email: string }) => person.email);
     expect(emails).toContain(fx.member.email);
+  });
+
+  it('does not offer a team-mate with no part in the task', async () => {
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
+
+    const response = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.key + '/mentionable')
+      .expect(200);
+
+    const emails = response.body.items.map((person: { email: string }) => person.email);
+    expect(emails, 'Arun is on the team but not on this task').not.toContain(fx.reviewer.email);
   });
 
   it('never offers somebody from another team', async () => {
@@ -77,7 +97,10 @@ describe('who can be mentioned', () => {
   });
 
   it('narrows to a search term', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id);
+    // Assigned to Rahul, so he is in the set to be searched within.
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
 
     const response = await as(harness.app, fx.lead)
       .get('/api/v1/tasks/' + task.key + '/mentionable?q=rahul')
@@ -88,7 +111,9 @@ describe('who can be mentioned', () => {
   });
 
   it('leaves out deactivated people, who would never be told', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id);
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     await as(harness.app, fx.admin)
       .post('/api/v1/users/' + fx.member.id + '/deactivate')
       .expect(204);

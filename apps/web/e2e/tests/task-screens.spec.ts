@@ -59,7 +59,7 @@ test('a PDF uploads, shows on the task, in the timeline and in another tab', asy
     await signIn(page, USERS.lead);
     await page.goto('/tasks/' + task.key);
 
-    await page.getByLabel('Choose a file to attach').setInputFiles({
+    await page.getByLabel('Choose files to attach').setInputFiles({
       name: 'specification.pdf',
       mimeType: 'application/pdf',
       buffer: tinyPdf(),
@@ -72,14 +72,22 @@ test('a PDF uploads, shows on the task, in the timeline and in another tab', asy
      */
     const panel = page.getByRole('region', { name: /Attachments/ });
 
-    // Nothing goes up until it says what it is for: an empty box is pointed
-    // at, and the file is not yet in the list.
-    await panel.getByRole('button', { name: 'Attach', exact: true }).click();
-    await expect(panel.getByText('Say what this file is for.')).toBeVisible();
+    /*
+     * The file waits in the preview rather than going straight up, so nothing
+     * is on the task yet and nothing goes up until it says what it is for.
+     */
+    const preview = page.getByRole('dialog', { name: /Attach this file/i });
+    await expect(preview).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Delete' })).toHaveCount(0);
 
-    await panel.getByLabel('What is this file for?').fill('The spec the work follows');
-    await panel.getByRole('button', { name: 'Attach', exact: true }).click();
+    await preview.getByRole('button', { name: /^Upload$/ }).click();
+    await expect(
+      preview.getByText(/Say what this file is for|needs a description/i).first(),
+    ).toBeVisible();
+
+    await preview.getByLabel('What is this file for?').fill('The spec the work follows');
+    await preview.getByRole('button', { name: /^Upload$/ }).click();
+    await expect(preview).toBeHidden();
 
     await expect(panel.getByText('specification.pdf')).toBeVisible();
     await expect(panel.getByText('The spec the work follows')).toBeVisible();
@@ -119,14 +127,16 @@ test('a file of the wrong kind is refused, and says why', async ({ page, api, pr
   await signIn(page, USERS.lead);
   await page.goto('/tasks/' + task.key);
 
-  await page.getByLabel('Choose a file to attach').setInputFiles({
+  await page.getByLabel('Choose files to attach').setInputFiles({
     name: 'definitely-not-a-picture.png',
     mimeType: 'image/png',
     // A Windows executable wearing a .png name: the sniffer reads the bytes.
     buffer: Buffer.from('MZ\x90\x00\x03\x00\x00\x00', 'latin1'),
   });
-  await page.getByLabel('What is this file for?').fill('A picture, supposedly');
-  await page.getByRole('button', { name: 'Attach', exact: true }).click();
+  // It waits in the preview now, and is refused only once it is sent.
+  const preview = page.getByRole('dialog', { name: /Attach this file/i });
+  await preview.getByLabel('What is this file for?').fill('A picture, supposedly');
+  await preview.getByRole('button', { name: /^Upload$/ }).click();
 
   // The server's own words, which name what the file actually is rather than
   // repeating what it was called.
@@ -134,7 +144,17 @@ test('a file of the wrong kind is refused, and says why', async ({ page, api, pr
   await expect(alert).toBeVisible();
   await expect(alert).toContainText(/executable/i);
 
-  await expect(page.getByText('definitely-not-a-picture.png')).toHaveCount(0);
+  /*
+   * Not on the task. The preview stays open holding the file, which is the
+   * point: the error says why, and the file is still there to retry with a
+   * better description or to cancel. The dialog renders inside the
+   * attachments section, so the honest check is that the list is still
+   * empty rather than that the name appears nowhere.
+   */
+  await expect(page.getByRole('region', { name: /Attachments/ }).getByRole('listitem')).toHaveCount(
+    0,
+  );
+  await expect(page.getByText('Nothing is attached to this task.')).toBeVisible();
 });
 
 test('mentioning a teammate from the list rings their bell', async ({ browser, page, api }) => {

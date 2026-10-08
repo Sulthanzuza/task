@@ -2,6 +2,89 @@
 
 Notable changes, newest first. Dates are the day the work landed on `master`.
 
+## Unreleased — 2026-10-08
+
+Three features. Migrations `0008` and `0009` both run on startup.
+
+The tag asked for was `v1.2.0-rc1`, which already points at the Reports
+commit of 2026-10-07 (the entry further down). Moving a tag that has been
+pushed changes what it means for anybody who has already fetched it, so this
+release is left untagged until that is decided.
+
+### Added
+
+- **Nothing is uploaded until it has been looked at.** Picking or dropping a
+  file opens a preview: the image fitted to the dialog, a PDF's first page
+  rendered with its page count, an icon and the size for anything else.
+  Several files get a strip of thumbnails with an X on each. Every file still
+  needs its description. A wrong file used to be found only once it was on the
+  task, so fixing it meant an upload and a delete — and the delete left an
+  activity row saying it had been there. Now a mistake is a Cancel that sends
+  nothing.
+
+- **Images can be marked up before they go.** Pen in five colours and three
+  widths, arrow, rectangle, ellipse, text, blur and crop, with undo, redo and
+  reset. Pointer events throughout, so a finger, a stylus and a mouse are one
+  code path, and Ctrl with the wheel or two fingers zooms. On save everything
+  is flattened onto one canvas at full resolution and that is what is
+  uploaded; the original never is. Existing images get "Mark up and save as
+  new", which creates a new attachment and leaves the old one untouched —
+  drawing on last week's screenshot must not rewrite the evidence the
+  discussion above it refers to.
+
+  The blur is applied to the pixels, not drawn over them. A translucent
+  rectangle over a password still has the password underneath, and the file is
+  what gets uploaded. It is a mosaic rather than a Gaussian blur because a
+  blur of readable text can often be reversed well enough to read again.
+
+- **Every image is cleaned on the way out.** The EXIF orientation is baked
+  into the pixels, all metadata is dropped, and the longest side comes down to
+  2560px. A photograph from a phone carries the phone, the lens, the date and
+  often the GPS coordinates of where it was taken, and none of that belongs on
+  a task.
+
+- **Several checklists per task.** Each has a title, because "Build", "Test"
+  and "Deploy" have their own steps and their own sense of being finished.
+  Add, rename, delete, reorder; tick items. A lead decides what the steps
+  *are*; the person doing the task says which are *done*. A small ticked-box
+  count appears on board cards and task-list rows.
+
+  With "count progress from these steps" on, progress is ticked over total
+  across the task's checklists, recalculated in the same transaction as the
+  tick. Deleting a list moves progress with it. An empty checklist is 0% and
+  not 100%: work not yet broken down is not work finished. Off by default,
+  since a slider suits work that is not a list of steps.
+
+  Group tasks copy every checklist to each person, unticked, on creation and
+  when somebody joins later. Migration `0009`.
+
+### Changed
+
+- **The comment box grows with the comment**, from three lines to 40% of the
+  window, then scrolls, and shrinks back after sending. Enter adds a line;
+  Ctrl or Cmd with Enter sends, and the hint says so. The description editor
+  behaves the same way.
+
+- **Mentions reach only the people a task is about**: its creator, assignee,
+  reviewer and watchers, the lead of the owning team, and for a group child
+  the parent's creator. Offering the whole team made a mention the easiest way
+  to pull somebody into a thread they had no context for, which is how a
+  notification list stops being read. The server decides this, not the
+  autocomplete: a mention of anybody else stays in the text as typed, records
+  nothing and notifies nobody. Leads can add watchers from the task page,
+  which is how the set grows, and each change writes an activity row.
+
+- **`task_attachments.edited`** records that an image was drawn on, so a
+  reader knows the picture is not what the camera produced. Migration `0008`.
+
+### Fixed
+
+- **A group's People table showed rows with no names.** Every child came back
+  with a null assignee: the map of users was built from the parent's assignee,
+  reviewer and creator, and a group parent has no assignee — its children do.
+  The existing test counted the rows without reading them, which is how it
+  went unnoticed.
+
 ## v1.1.1 — 2026-10-08
 
 Tagged v1.1.1 as asked, though it is newer than v1.2.0-rc1 and contains it:

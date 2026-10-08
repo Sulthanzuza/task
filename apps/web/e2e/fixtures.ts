@@ -50,7 +50,11 @@ export const test = base.extend<Fixtures>({
         return;
       }
 
-      found.push({ kind: 'console', detail: text });
+      /*
+       * With the URL, because "Failed to load resource" on its own says
+       * nothing about which resource, and that is the whole question.
+       */
+      found.push({ kind: 'console', detail: url ? text + ' [' + url + ']' : text });
     });
 
     page.on('pageerror', (error) => {

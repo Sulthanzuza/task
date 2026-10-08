@@ -38,6 +38,9 @@ import { MARKUP_CHROME, MARKUP_COLORS, MARKUP_SIZES, type MarkupColor } from './
 
 type Tool = 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text' | 'blur' | 'crop';
 
+/** How far a small image may be blown up to fit the editor. */
+const MAX_FIT_SCALE = 4;
+
 interface Stroke {
   kind: 'pen';
   points: number[];
@@ -182,9 +185,21 @@ export function ImageMarkup({
   useEffect(() => {
     const url = URL.createObjectURL(file);
     const element = new Image();
-    element.onload = () => setImage(element);
+
+    /*
+     * Revoked the moment it has decoded, rather than on unmount.
+     *
+     * The decoded bitmap outlives the URL, so the picture keeps drawing.
+     * Revoking on unmount instead left the canvas and the preview's img
+     * pointing at a URL that had just been taken away, which Chromium reports
+     * as ERR_FILE_NOT_FOUND once it next tries to read it.
+     */
+    element.onload = () => {
+      setImage(element);
+      URL.revokeObjectURL(url);
+    };
+    element.onerror = () => URL.revokeObjectURL(url);
     element.src = url;
-    return () => URL.revokeObjectURL(url);
   }, [file]);
 
   /** The picture is shown fitted to the box; drawing happens in image pixels. */
@@ -193,7 +208,14 @@ export function ImageMarkup({
     if (!box || !image) return;
 
     const frame = cropped ?? { width: image.width, height: image.height };
-    const scale = Math.min(box.clientWidth / frame.width, 1);
+    /*
+     * Fitted to the width, and allowed to scale up to 4x for a small image.
+     * Capping at 1 kept a 200px crop at 200px in a 700px dialog, which is
+     * almost impossible to draw an arrow on accurately — and this is an
+     * editor, so being able to work on the pixels matters more than never
+     * showing an image larger than life.
+     */
+    const scale = Math.min(box.clientWidth / frame.width, MAX_FIT_SCALE);
     setView({ scale, width: frame.width * scale, height: frame.height * scale });
   }, [image, cropped]);
 
@@ -202,6 +224,17 @@ export function ImageMarkup({
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [measure]);
+
+  // Escape leaves the editor, the same as Cancel.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || saving) return;
+      event.preventDefault();
+      onCancel();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onCancel, saving]);
 
   // Ctrl/Cmd+Z and Shift+Z, which is what anybody will try first.
   useEffect(() => {

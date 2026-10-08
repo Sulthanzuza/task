@@ -136,6 +136,30 @@ test('the login screen passes axe in all four themes', async ({ page }) => {
   expect(found).toEqual([]);
 });
 
+/** A 4x4 PNG, dropped onto the task page's attachment zone. */
+const SAMPLE_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAHElEQVR42m' +
+  'P4z8AAQhCAxGbALYEhBGHjkaC9HQDxh3+B7FEdogAAAABJRU5ErkJggg==';
+
+async function dropSampleImage(page: Page): Promise<boolean> {
+  const zone = page.getByTestId('attachment-dropzone');
+  if (!(await zone.isVisible().catch(() => false))) return false;
+
+  await zone.scrollIntoViewIfNeeded();
+  await page.evaluate(async (base64) => {
+    const response = await fetch('data:image/png;base64,' + base64);
+    const file = new File([await response.blob()], 'sample.png', { type: 'image/png' });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+
+    document
+      .querySelector('[data-testid="attachment-dropzone"]')
+      ?.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }));
+  }, SAMPLE_PNG);
+
+  return true;
+}
+
 test('open dialogs and menus pass axe', async ({ browser, api }) => {
   const client = await apiAs(api, USERS.lead);
   const tasks = await client.get<{ items: Array<{ key: string }> }>('/tasks?limit=1');
@@ -217,6 +241,31 @@ test('open dialogs and menus pass axe', async ({ browser, api }) => {
       await expect(page.getByRole('dialog')).toBeVisible();
       found.push(...(await scan(page, 'confirm transition dialog in ' + theme)));
       await page.keyboard.press('Escape');
+    }
+
+    /*
+     * The attachment preview and the markup editor.
+     *
+     * The editor is the densest keyboard surface in the app: a toolbar of
+     * seven tools, five colours and three widths, every one of which has to
+     * be reachable and named. A canvas cannot be described to a screen
+     * reader, so the controls around it carry the whole meaning.
+     */
+    await setTheme(page, theme);
+    await page.goto('/tasks/' + taskKey);
+    const dropped = await dropSampleImage(page);
+    if (dropped) {
+      await expect(page.getByRole('dialog', { name: /Attach this file/i })).toBeVisible();
+      found.push(...(await scan(page, 'attachment preview in ' + theme)));
+
+      const edit = page.getByRole('button', { name: 'Edit' });
+      if (await edit.isVisible().catch(() => false)) {
+        await edit.click();
+        await expect(page.getByRole('dialog', { name: 'Mark up the image' })).toBeVisible();
+        found.push(...(await scan(page, 'markup editor in ' + theme)));
+        await page.getByRole('button', { name: 'Cancel' }).first().click();
+      }
+      await page.getByRole('button', { name: 'Cancel' }).first().click();
     }
 
     await context.close();

@@ -86,10 +86,16 @@ async function describe(file: File): Promise<PendingFile> {
       const preview = await renderPdfFirstPage(file);
       return { ...base, previewUrl: preview.previewUrl, pageCount: preview.pageCount };
     }
-  } catch {
+  } catch (cause) {
+    /*
+     * The reason is kept rather than swallowed. "It could not be previewed"
+     * leaves both the person looking at it and whoever has to fix it with
+     * nothing to go on.
+     */
+    const reason = cause instanceof Error ? cause.message : String(cause);
     return {
       ...base,
-      warning: 'This one could not be previewed. It can still be attached.',
+      warning: 'This one could not be previewed (' + reason + '). It can still be attached.',
     };
   }
 
@@ -145,13 +151,35 @@ export function AttachmentPreview({
     };
   }, [files]);
 
-  useEffect(
-    () => () => {
-      urls.current.forEach((url) => URL.revokeObjectURL(url));
+  useEffect(() => {
+    const live = urls.current;
+    return () => {
+      /*
+       * After the frame, not during it. React has removed the img elements by
+       * then; revoking while they were still in the document left them
+       * pointing at a URL that had gone, which Chromium logs as
+       * ERR_FILE_NOT_FOUND.
+       */
+      const going = [...live];
+      setTimeout(() => going.forEach((url) => URL.revokeObjectURL(url)), 0);
       urls.current = [];
-    },
-    [],
-  );
+    };
+  }, []);
+
+  /*
+   * Escape cancels, as on every other dialog. Not while uploading: by then
+   * some of the files may already be on the task, and closing would hide
+   * which ones.
+   */
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || busy || editing) return;
+      event.preventDefault();
+      onCancel();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [busy, editing, onCancel]);
 
   const items = pending ?? [];
   const current = items[selected];

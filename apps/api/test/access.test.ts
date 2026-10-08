@@ -32,13 +32,19 @@ describe('tasks belonging to another team', () => {
 
   it('cannot be read', async () => {
     const task = await taskInOtherTeam();
-    await as(harness.app, fx.member).get('/api/v1/tasks/' + task.id).expect(403);
-    await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(403);
+    await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(403);
+    await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(403);
   });
 
   it('cannot be read by its key either', async () => {
     const task = await taskInOtherTeam();
-    await as(harness.app, fx.member).get('/api/v1/tasks/' + task.key).expect(403);
+    await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.key)
+      .expect(403);
   });
 
   it('cannot be changed', async () => {
@@ -67,7 +73,9 @@ describe('tasks belonging to another team', () => {
 
   it('cannot be deleted', async () => {
     const task = await taskInOtherTeam();
-    await as(harness.app, fx.lead).delete('/api/v1/tasks/' + task.id).expect(403);
+    await as(harness.app, fx.lead)
+      .delete('/api/v1/tasks/' + task.id)
+      .expect(403);
   });
 
   it('cannot be commented on', async () => {
@@ -80,7 +88,9 @@ describe('tasks belonging to another team', () => {
 
   it('does not show its timeline', async () => {
     const task = await taskInOtherTeam();
-    await as(harness.app, fx.member).get('/api/v1/tasks/' + task.id + '/timeline').expect(403);
+    await as(harness.app, fx.member)
+      .get('/api/v1/tasks/' + task.id + '/timeline')
+      .expect(403);
   });
 
   it('never appears in the task list', async () => {
@@ -105,13 +115,17 @@ describe('tasks belonging to another team', () => {
 
   it('is reachable by a super admin', async () => {
     const task = await taskInOtherTeam();
-    await as(harness.app, fx.admin).get('/api/v1/tasks/' + task.id).expect(200);
+    await as(harness.app, fx.admin)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
   });
 });
 
 describe('projects belonging to another team', () => {
   it('cannot be read', async () => {
-    await as(harness.app, fx.member).get('/api/v1/projects/' + fx.otherProject.id).expect(403);
+    await as(harness.app, fx.member)
+      .get('/api/v1/projects/' + fx.otherProject.id)
+      .expect(403);
   });
 
   it('cannot be changed', async () => {
@@ -184,7 +198,9 @@ describe('member pages', () => {
   });
 
   it('let the lead see their own team members', async () => {
-    await as(harness.app, fx.lead).get('/api/v1/members/' + fx.member.id + '/stats').expect(200);
+    await as(harness.app, fx.lead)
+      .get('/api/v1/members/' + fx.member.id + '/stats')
+      .expect(200);
   });
 
   it('do not let another team’s lead see them', async () => {
@@ -240,7 +256,9 @@ describe('teams', () => {
 
 describe('comments', () => {
   it('can be deleted by their author only inside the fifteen minute window', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
 
     const comment = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/comments')
@@ -248,31 +266,46 @@ describe('comments', () => {
       .expect(201);
 
     expect(comment.body.canDelete).toBe(true);
-    await as(harness.app, fx.member).delete('/api/v1/comments/' + comment.body.id).expect(204);
+    await as(harness.app, fx.member)
+      .delete('/api/v1/comments/' + comment.body.id)
+      .expect(204);
   });
 
   it('cannot be deleted by a colleague', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     const comment = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/comments')
       .send({ body: 'My comment' })
       .expect(201);
 
-    await as(harness.app, fx.reviewer).delete('/api/v1/comments/' + comment.body.id).expect(403);
+    await as(harness.app, fx.reviewer)
+      .delete('/api/v1/comments/' + comment.body.id)
+      .expect(403);
   });
 
   it('can be deleted by the team lead at any time', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     const comment = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/comments')
       .send({ body: 'Something the lead will remove' })
       .expect(201);
 
-    await as(harness.app, fx.lead).delete('/api/v1/comments/' + comment.body.id).expect(204);
+    await as(harness.app, fx.lead)
+      .delete('/api/v1/comments/' + comment.body.id)
+      .expect(204);
   });
 
   it('records mentions and makes the mentioned person a watcher', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    // Arun is named as reviewer, so he is somebody this task is about and a
+    // mention of him is one the server will record.
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+      reviewerId: fx.reviewer.id,
+    });
 
     const comment = await as(harness.app, fx.member)
       .post('/api/v1/tasks/' + task.id + '/comments')
@@ -281,12 +314,16 @@ describe('comments', () => {
 
     expect(comment.body.mentionedUserIds).toEqual([fx.reviewer.id]);
 
-    const detail = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
+    const detail = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
     expect(detail.body.watcherIds).toContain(fx.reviewer.id);
   });
 
   it('ignores a mention of somebody who does not exist', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
     const ghost = '00000000-0000-4000-8000-000000000000';
 
     const comment = await as(harness.app, fx.member)
@@ -298,8 +335,12 @@ describe('comments', () => {
   });
 
   it('counts as activity on the task', async () => {
-    const task = await createTask(harness.app, fx.lead, fx.project.id, { assigneeId: fx.member.id });
-    const before = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
+    const task = await createTask(harness.app, fx.lead, fx.project.id, {
+      assigneeId: fx.member.id,
+    });
+    const before = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     await as(harness.app, fx.member)
@@ -307,7 +348,9 @@ describe('comments', () => {
       .send({ body: 'Still working on this' })
       .expect(201);
 
-    const after = await as(harness.app, fx.lead).get('/api/v1/tasks/' + task.id).expect(200);
+    const after = await as(harness.app, fx.lead)
+      .get('/api/v1/tasks/' + task.id)
+      .expect(200);
     expect(new Date(after.body.lastActivityAt).getTime()).toBeGreaterThan(
       new Date(before.body.lastActivityAt).getTime(),
     );

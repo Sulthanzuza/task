@@ -2,7 +2,7 @@
 
 Where the build has got to. Read this first; update it when you finish a prompt.
 
-Last updated: 2026-10-08. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`, tagged **v1.1.1** (which is newer than `v1.2.0-rc1` and contains it; the tag was asked for by name, and the number reads as older than the code it ships).
+Last updated: 2026-10-08. Branch `main`, pushed to the private `github.com/Sulthanzuza/task`. The newest tag is **v1.1.1**, which is newer than `v1.2.0-rc1` and contains it. The three commits of 2026-10-08 are untagged: the name asked for was `v1.2.0-rc1`, which is already taken, and moving a pushed tag changes what it means for anybody who has fetched it.
 
 Release notes are in `CHANGELOG.md`; the server runbook is `docs/deploy.md`.
 
@@ -62,7 +62,10 @@ Prompts come from `Team Task Management System — Build Plan & Prompts.docx` in
 | `d10211c` | Group tasks (v1.1.0-rc1): one piece of work given to several people, each with their own copy. See the section below |
 | `f132915` | `CHANGELOG.md` entry for v1.1.0-rc1 |
 | `8a55a18` | Reports (v1.2.0-rc1): `/reports` for leads and admins, nightly `daily_snapshots`, CSV and XLSX export, and the four task-list date filters the drill-downs needed. See the section below |
-| _this one_ | Confirming status changes (v1.1.1): every transition asks first, from every entry point, and a confirmation can no longer be applied to a task that moved on. See the section below |
+| `e5e36ed` | Confirming status changes (v1.1.1): every transition asks first, from every entry point, and a confirmation can no longer be applied to a task that moved on. See the section below |
+| `1d9a71e` | Attachment preview and image markup: nothing uploads until it has been looked at, images are stripped of metadata and can be drawn on. See below |
+| `54e9869` | A comment box that grows, and mentions limited to the people a task is about. See below |
+| `9800e86` | Several checklists per task, with progress that can follow the ticks. See below |
 
 ### The design system, applied (three design prompts)
 
@@ -449,6 +452,120 @@ way is worse than no dialog.
 Group parents, whose status is derived and which have no transition buttons,
 and the progress slider.
 
+## Attachments, comments and checklists (2026-10-08)
+
+Three features in one session, one commit each: `1d9a71e`, `54e9869`,
+`9800e86`.
+
+### Nothing is uploaded until it has been looked at
+
+A chosen file opens a preview rather than going straight up. The order of
+events is the point: a wrong file used to be discovered once it was already
+on the task, so fixing it meant an upload and a delete, and the delete left
+an activity row saying it had been there. Now a mistake is a Cancel that
+sends nothing, and the e2e test proves that by counting POSTs rather than
+reading the list afterwards.
+
+PDFs get their first page drawn with pdf.js, because a reviewer can tell one
+signed contract from another by looking at it and cannot by reading
+`contract-final-v3.pdf`.
+
+### What happens to an image before it leaves the browser
+
+Three things, decided in one place (`lib/imagePrep.ts`) because "the
+screenshot in the create drawer kept its GPS" is exactly the bug two code
+paths cause:
+
+1. The EXIF orientation is baked into the pixels.
+2. All metadata is dropped.
+3. The longest side comes down to 2560px.
+
+The parts worth testing are pure byte functions in `lib/imageBytes.ts`: the
+EXIF reader, the metadata strip, the dimension arithmetic, the eight-case
+orientation table and the pixelation. 24 unit tests build real JPEG headers
+rather than loading a fixture, so what is being asserted is visible in the
+test — here is an APP1 segment with an orientation tag and a GPS pointer in
+it, and here is the same file with both gone. Big-endian files are covered,
+since that is where an endianness bug hides.
+
+Re-encoding through a canvas drops metadata as a side effect, and that is
+what the upload path relies on for the pixels. The byte-level strip runs
+afterwards anyway, so the guarantee is a thing that can be stated and tested
+rather than a hope about what the browser's encoder happens to do.
+
+### The markup editor
+
+`ImageMarkup.tsx`. A list of shapes and an index into it, which is what makes
+undo and redo a move of the index rather than a repaint. Nothing is
+destructive until Save, when everything is flattened onto one canvas at full
+image resolution.
+
+The blur is applied to the pixels on save, not drawn as a shape: a
+translucent rectangle over a password still has the password underneath it,
+and the flattened file is what gets uploaded. It is a mosaic rather than a
+Gaussian blur because a blur of readable text can often be reversed well
+enough to read it again. On screen it is drawn as a hatched block, which says
+what will happen without pixelating on every pointer move.
+
+`markup.ts` is the one file in the feature allowed colour literals, and is
+listed in the token test as such, next to `labelsApi.ts`. These are pigment
+flattened into an uploaded PNG, not chrome: an arrow drawn in
+`--color-accent` would be cyan for one reader and violet for the next, and
+whichever the author saw is the one that mattered.
+
+### Mentions, narrowed
+
+`modules/tasks/associated.ts` defines who a task is about: creator, assignee,
+reviewer, watchers, the lead of the owning team, and for a group child the
+parent's creator. That set, and not team membership, decides who may be
+mentioned.
+
+The server decides it twice. The autocomplete asks, and the comment endpoint
+asks again on the way in, because a comment arrives as free-form markup and
+nothing stops a client typing an id it was never shown. A mention outside the
+set stays in the text exactly as typed, records no `comment_mentions` row,
+sends no notification, and does not quietly make the person a watcher either.
+Refusing the comment would lose what somebody wrote over a detail they can
+fix in a follow-up. The client draws an unrecorded mention as plain words,
+because a chip would promise a notification that was never sent.
+
+Leads add and remove watchers from the task page, which is how the set grows,
+and each change writes an activity row: somebody arriving in a thread should
+be traceable to a decision.
+
+### Checklists
+
+`checklist_items` had existed since migration `0000` with no code that ever
+wrote to it. This is the feature.
+
+Two permissions, which is the part worth knowing. A lead decides what the
+steps **are**; the person doing the task says which are **done**. A member
+who could delete steps could quietly redefine the job, and a lead who had to
+tick the boxes would be doing somebody else's reporting. A colleague who is
+neither cannot tick at all.
+
+| Rule | Why |
+| --- | --- |
+| Progress = ticked ÷ all items, across every checklist on the task | Two lists averaged would give a different and wrong answer |
+| Recalculated in the same transaction as the tick | Afterwards leaves a window where a task says 40% with the fifth of five ticked, and that window is when somebody refreshes |
+| An empty checklist is 0%, not 100% | Work not yet broken down is not work finished |
+| Off by default | A slider is the right tool for work that is not a list of steps |
+| Group children get their own unticked copy | The steps are shared; the doing of them is not |
+
+`checklist_items` keeps `task_id` alongside `checklist_id`, which is
+denormalised on purpose: the board asks "how many steps are done on this
+task" for every card on screen, and going through checklists to answer it
+would be a join per card. One grouped query answers the whole page.
+
+### A bug this uncovered
+
+Every row of a group's People table came back with `assignee: null`. The map
+of users was built from the parent's assignee, reviewer and creator — and a
+group parent has no assignee, its children do. The table has been showing
+rows with nobody in them since groups shipped. `loadGroupChildren` now
+resolves whoever it is missing, and the existing test, which counted the rows
+without reading them, now checks the names.
+
 ## Accepted deviations
 
 These are decided, not oversights. Do not "fix" them without asking.
@@ -569,20 +686,23 @@ is dropped and rebuilt every run.
 Other commands: `pnpm build`, `pnpm smoke` (against a deployed site, with a dedicated
 smoke-test account), `pnpm admin:create-user --role SUPER_ADMIN`, `pnpm db:reset`.
 
-## Test counts as of 2026-10-08
+## Test counts as of 2026-10-08 (end of day)
 
 | Suite | Files | Tests |
 |-------|-------|-------|
 | `packages/shared` unit (workflow, transition copy) | 2 | 50 |
-| `apps/web` unit (tokens, contrast, wording) | 2 | 51 |
-| `apps/api` integration | 29 | 485 |
-| `apps/web` end-to-end (`pnpm e2e`, email on) | 17 | 73 |
-| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 17 | 71, and 2 mailbox tests skipped |
+| `apps/web` unit (tokens, contrast, wording, image bytes) | 3 | 75 |
+| `apps/api` integration | 31 | 522 |
+| `apps/web` end-to-end (`pnpm e2e`, email on) | 19 | 81 |
+| `apps/web` end-to-end, launch configuration (`pnpm e2e:all`: `RUN_MODE=all`, `MAIL_TRANSPORT=none`) | 19 | 79, and 2 mailbox tests skipped |
 
-The axe sweep covers eleven screens in four themes, Reports included, which
-is forty-four runs of a slow check in one test. Its budget is for the whole
-sweep rather than per screen, so run it with the machine to itself: a
-timeout there is reported as an accessibility failure and is not one.
+The axe sweep covers eleven screens in four themes, Reports included, plus
+the open dialogs: the notification dropdown, the create drawer, a confirm
+dialog, the transition dialogs, the attachment preview and the markup editor.
+That is a slow check run many times over in one test, and its budget covers
+the whole sweep rather than each screen, so run it with the machine to
+itself: a timeout there is reported as an accessibility failure and is not
+one.
 
 `review-shots.spec.ts` is not in that count: it runs only under `pnpm shots`, against a
 different database.
